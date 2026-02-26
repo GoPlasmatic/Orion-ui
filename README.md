@@ -1,73 +1,145 @@
-# React + TypeScript + Vite
+<div align="center">
+  <img src="https://avatars.githubusercontent.com/u/207296579?s=200&v=4" alt="Orion Logo" width="120" height="120">
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+  # Orion UI
 
-Currently, two official plugins are available:
+  **The admin dashboard for the [Orion](https://github.com/GoPlasmatic/Orion) rules engine.**
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+  Manage rules, connectors, channels, and invocations from a single interface.
+  Visualize rule workflows, inspect audit trails, and monitor engine health — no CLI required.
 
-## React Compiler
+  [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+  [![React](https://img.shields.io/badge/react-19-blue.svg)](https://react.dev)
+  [![TypeScript](https://img.shields.io/badge/typescript-5.9-blue.svg)](https://www.typescriptlang.org)
+  [![Vite](https://img.shields.io/badge/vite-7-purple.svg)](https://vite.dev)
+</div>
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## Quick Start
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+**1. Start the Orion backend** (if not already running):
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+brew install GoPlasmatic/tap/orion   # or: curl installer, cargo install
+orion-server
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+**2. Install and run the UI:**
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
+
+**3. Open the dashboard:**
+
+Visit `http://localhost:5173` — the dev server proxies all API requests to the Orion backend automatically.
+
+By default the backend is expected at `http://localhost:8080`. Override with:
+
+```bash
+ORION_URL=http://your-backend:8080 npm run dev
+```
+
+---
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **Dashboard** | Engine status, health checks, active rule counts, and uptime at a glance |
+| **Rule Workflows** | Visual DAG of task pipelines with condition nodes, powered by React Flow |
+| **Invocations** | Paginated, sortable job list with status badges and computed durations |
+| **Audit Trails** | Drill into any invocation to see a step-by-step timeline of changes |
+| **Connectors** | Browse and inspect connector configurations |
+| **Channels** | Channel overview with associated rules |
+| **Data Processing** | Send test payloads directly from the UI |
+
+## How It Works
+
+```
+┌──────────────────────────────────────────────────────┐
+│                     Orion UI                         │
+│                                                      │
+│   ┌───────────┐  ┌────────────┐  ┌──────────────┐   │
+│   │ Dashboard │  │   Rules    │  │ Invocations  │   │
+│   │  Health   │  │  Workflow  │  │ Audit Trails │   │
+│   └─────┬─────┘  └─────┬──────┘  └──────┬───────┘   │
+│         │              │                │            │
+│         └──────────┬───┘────────────────┘            │
+│                    │                                 │
+│              TanStack Query                          │
+│              (cache + fetch)                         │
+│                    │                                 │
+└────────────────────┼─────────────────────────────────┘
+                     │  /api/v1/*
+                     ▼
+            ┌────────────────┐
+            │  Orion Server  │
+            │  (Rust, :8080) │
+            └────────────────┘
+```
+
+## Scripts
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start dev server with HMR |
+| `npm run build` | Type-check with `tsc` then bundle |
+| `npm run lint` | Run ESLint |
+| `npm run preview` | Serve the production build locally |
+
+## Project Structure
+
+```
+src/
+├── api/            # Typed fetch client and per-domain endpoint modules
+├── hooks/          # TanStack Query wrappers (one file per domain)
+├── pages/          # Route-level page components
+├── components/
+│   ├── ui/         # Reusable primitives (Button, Card, Badge, Table, …)
+│   ├── layout/     # App shell (sidebar, header)
+│   └── rules/      # Rule-specific components (workflow graph, nodes)
+└── lib/            # Utilities (cn, formatDate, truncate)
+```
+
+## Pages
+
+| Route | Description |
+|-------|-------------|
+| `/` | Dashboard — engine status, health, rule counts |
+| `/invocations` | Job list with sortable columns and pagination |
+| `/invocations/:id` | Job detail with audit trail timeline |
+| `/channels` | Channel overview |
+| `/connectors` | Connector list |
+| `/connectors/:id` | Connector detail and configuration |
+| `/data` | Data processing interface |
+
+## Built With
+
+| Library | Purpose |
+|---------|---------|
+| [React 19](https://react.dev) | UI framework |
+| [React Router 7](https://reactrouter.com) | Client-side routing |
+| [TanStack Query](https://tanstack.com/query) | Server state, caching, and mutations |
+| [TanStack Table](https://tanstack.com/table) | Headless data tables with sorting and pagination |
+| [Tailwind CSS v4](https://tailwindcss.com) | Utility-first styling with CSS variable theming |
+| [React Flow](https://reactflow.dev) | Rule workflow DAG visualization |
+| [Lucide React](https://lucide.dev) | Icons |
+| [CVA](https://cva.style) | Type-safe component variants |
+
+## Contributing
+
+Contributions are welcome! Please open an issue or submit a pull request on [GitHub](https://github.com/GoPlasmatic/Orion-ui).
+
+```bash
+npm install              # Install dependencies
+npm run dev              # Development server
+npm run build            # Type-check and build
+npm run lint             # Lint
+```
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE) for details.
