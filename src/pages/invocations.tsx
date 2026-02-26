@@ -1,0 +1,215 @@
+import { useState } from "react"
+import { useNavigate } from "react-router"
+import { useJobs } from "@/hooks/use-jobs"
+import {
+  useReactTable,
+  getCoreRowModel,
+  flexRender,
+  createColumnHelper,
+} from "@tanstack/react-table"
+import type { Job, JobSortBy, SortOrder } from "@/api/types"
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
+import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@/components/ui/button"
+import { formatDate } from "@/lib/utils"
+import { ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+
+const PAGE_SIZE = 20
+
+const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  completed: "default",
+  running: "outline",
+  pending: "secondary",
+  failed: "destructive",
+}
+
+const statusColor: Record<string, string> = {
+  completed: "bg-emerald-500",
+  running: "",
+  pending: "",
+  failed: "",
+}
+
+function formatDuration(startedAt: string | null, completedAt: string | null): string {
+  if (!startedAt || !completedAt) return "—"
+  const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime()
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
+}
+
+const columnHelper = createColumnHelper<Job>()
+
+const columns = [
+  columnHelper.accessor("status", {
+    header: "Status",
+    cell: (info) => {
+      const val = info.getValue()
+      return (
+        <Badge
+          variant={statusVariant[val] ?? "outline"}
+          className={statusColor[val] ?? ""}
+        >
+          {val}
+        </Badge>
+      )
+    },
+  }),
+  columnHelper.accessor("channel", {
+    header: "Channel",
+    cell: (info) => <span className="font-medium">{info.getValue()}</span>,
+  }),
+  columnHelper.accessor("connector_id", {
+    header: "Connector",
+    cell: (info) => (
+      <span className="text-muted-foreground font-mono text-xs">{info.getValue()}</span>
+    ),
+  }),
+  columnHelper.accessor("records_processed", {
+    header: "Records",
+    cell: (info) => info.getValue(),
+  }),
+  columnHelper.accessor("created_at", {
+    header: "Created",
+    cell: (info) => (
+      <span className="text-muted-foreground">{formatDate(info.getValue())}</span>
+    ),
+  }),
+  columnHelper.display({
+    id: "duration",
+    header: "Duration",
+    cell: (info) => (
+      <span className="text-muted-foreground">
+        {formatDuration(info.row.original.started_at, info.row.original.completed_at)}
+      </span>
+    ),
+  }),
+]
+
+const sortableColumns: Record<string, JobSortBy> = {
+  status: "status",
+  channel: "channel",
+  created_at: "created_at",
+  updated_at: "updated_at",
+}
+
+export function InvocationsPage() {
+  const navigate = useNavigate()
+  const [offset, setOffset] = useState(0)
+  const [sortBy, setSortBy] = useState<JobSortBy>("created_at")
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc")
+
+  const { data, isLoading } = useJobs({
+    limit: PAGE_SIZE,
+    offset,
+    sort_by: sortBy,
+    sort_order: sortOrder,
+  })
+
+  const table = useReactTable({
+    data: data?.data ?? [],
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  })
+
+  const total = data?.total ?? 0
+  const hasNext = offset + PAGE_SIZE < total
+  const hasPrev = offset > 0
+
+  function handleSort(columnId: string) {
+    const field = sortableColumns[columnId]
+    if (!field) return
+    if (sortBy === field) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc")
+    } else {
+      setSortBy(field)
+      setSortOrder("desc")
+    }
+    setOffset(0)
+  }
+
+  function SortIcon({ columnId }: { columnId: string }) {
+    const field = sortableColumns[columnId]
+    if (!field) return null
+    if (sortBy !== field) return <ArrowUpDown className="ml-1 h-3 w-3 inline opacity-40" />
+    return sortOrder === "asc"
+      ? <ArrowUp className="ml-1 h-3 w-3 inline" />
+      : <ArrowDown className="ml-1 h-3 w-3 inline" />
+  }
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold">Invocations</h1>
+
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => {
+                  const isSortable = !!sortableColumns[header.column.id]
+                  return (
+                    <TableHead
+                      key={header.id}
+                      className={isSortable ? "cursor-pointer select-none" : ""}
+                      onClick={isSortable ? () => handleSort(header.column.id) : undefined}
+                    >
+                      {flexRender(header.column.columnDef.header, header.getContext())}
+                      <SortIcon columnId={header.column.id} />
+                    </TableHead>
+                  )
+                })}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <TableRow key={i}>
+                  {columns.map((_, j) => (
+                    <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
+                  ))}
+                </TableRow>
+              ))
+            ) : table.getRowModel().rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={columns.length} className="text-center text-muted-foreground py-8">
+                  No invocations found
+                </TableCell>
+              </TableRow>
+            ) : (
+              table.getRowModel().rows.map((row) => (
+                <TableRow
+                  key={row.id}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => navigate(`/invocations/${row.original.id}`)}
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          {total > 0 ? `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} of ${total}` : "No results"}
+        </p>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" disabled={!hasPrev} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" disabled={!hasNext} onClick={() => setOffset(offset + PAGE_SIZE)}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
