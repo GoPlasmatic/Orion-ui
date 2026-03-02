@@ -1,30 +1,19 @@
 // Rule types
 export type RuleStatus = "active" | "paused" | "archived"
 
-export interface TaskFunction {
-  name: string
-  input: Record<string, unknown>
-}
-
-export interface Task {
-  id: string
-  name: string
-  function: TaskFunction
-  condition?: Record<string, unknown> | boolean
-}
-
 export interface Rule {
-  id: string
+  rule_id: string
   name: string
   description: string | null
   channel: string
   priority: number
   status: RuleStatus
   version: number
-  tags: string[]
-  condition: Record<string, unknown> | boolean | null
+  tags: string
+  condition_json: string | null
   continue_on_error: boolean
-  tasks: Task[]
+  tasks_json: string
+  rollout_percentage: number
   created_at: string
   updated_at: string
 }
@@ -47,6 +36,7 @@ export interface PaginatedResponse<T> {
 export interface StatusChangeRequest {
   status: RuleStatus
   version?: number
+  rollout_percentage?: number
 }
 
 export interface TestRuleRequest {
@@ -106,8 +96,23 @@ export interface HealthResponse {
   version: string
 }
 
-// Job types
-export type JobStatus = "pending" | "running" | "completed" | "failed"
+// Trace types
+export type TraceStatus = "pending" | "running" | "completed" | "failed"
+
+export interface Trace {
+  id: string
+  channel: string
+  status: string
+  mode: string
+  error_message: string | null
+  result_json: string | null
+  input_json: string | null
+  duration_ms: number | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  updated_at: string
+}
 
 export interface AuditChange {
   path: string
@@ -123,7 +128,7 @@ export interface AuditTrailEntry {
   changes: AuditChange[]
 }
 
-export interface JobResult {
+export interface TraceMessage {
   id: string
   payload: Record<string, unknown>
   context: Record<string, unknown>
@@ -131,29 +136,27 @@ export interface JobResult {
   errors: unknown[]
 }
 
-export interface Job {
+export interface TraceDetail {
   id: string
-  channel: string
-  connector_id: string
   status: string
-  records_processed: number
-  error_message: string | null
-  result_json: string | null
+  mode: string
+  duration_ms: number | null
+  message: TraceMessage | null
   created_at: string
   started_at: string | null
   completed_at: string | null
-  updated_at: string
 }
 
-export type JobSortBy = "created_at" | "updated_at" | "status" | "channel"
+export type TraceSortBy = "created_at" | "updated_at" | "status" | "channel" | "mode"
 export type SortOrder = "asc" | "desc"
 
-export interface ListJobsParams {
+export interface ListTracesParams {
   limit?: number
   offset?: number
   status?: string
   channel?: string
-  sort_by?: JobSortBy
+  mode?: string
+  sort_by?: TraceSortBy
   sort_order?: SortOrder
 }
 

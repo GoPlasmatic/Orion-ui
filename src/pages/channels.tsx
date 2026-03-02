@@ -79,7 +79,7 @@ export function ChannelsPage() {
           <div className="space-y-8">
             <h1 className="text-2xl font-bold">{activeChannel}</h1>
             {rules.map((rule, index) => (
-              <div key={rule.id}>
+              <div key={rule.rule_id}>
                 {index > 0 && <div className="border-t my-6" />}
                 <div className="space-y-3">
                   <div className="flex items-center gap-3">

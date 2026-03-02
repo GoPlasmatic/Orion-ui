@@ -1,5 +1,15 @@
 import type { Node, Edge } from "@xyflow/react"
-import type { Rule, Task } from "@/api/types"
+import type { Rule } from "@/api/types"
+
+interface Task {
+  id: string
+  name: string
+  function: {
+    name: string
+    input: Record<string, unknown>
+  }
+  condition?: Record<string, unknown> | boolean
+}
 
 export type TaskNodeData = {
   taskId: string
@@ -70,13 +80,25 @@ function getConnectorName(task: Task): string | undefined {
   return undefined
 }
 
+function parseJson<T>(json: string | null): T | null {
+  if (!json) return null
+  try {
+    return JSON.parse(json) as T
+  } catch {
+    return null
+  }
+}
+
 export function ruleToFlowElements(rule: Rule): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = []
   const edges: Edge[] = []
   let y = START_Y
 
+  const condition = parseJson<Record<string, unknown> | boolean>(rule.condition_json)
+  const tasks = parseJson<Task[]>(rule.tasks_json) ?? []
+
   // Entry condition node
-  const conditionSummary = summarizeCondition(rule.condition)
+  const conditionSummary = summarizeCondition(condition)
   nodes.push({
     id: "condition-entry",
     type: "conditionNode",
@@ -88,7 +110,7 @@ export function ruleToFlowElements(rule: Rule): { nodes: Node[]; edges: Edge[] }
 
   // Task nodes
   let prevId = "condition-entry"
-  for (const task of rule.tasks) {
+  for (const task of tasks) {
     const nodeId = `task-${task.id}`
     const hasCondition = task.condition !== undefined
       && task.condition !== null

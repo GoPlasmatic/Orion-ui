@@ -1,13 +1,13 @@
 import { useState } from "react"
 import { useNavigate } from "react-router"
-import { useJobs } from "@/hooks/use-jobs"
+import { useTraces } from "@/hooks/use-traces"
 import {
   useReactTable,
   getCoreRowModel,
   flexRender,
   createColumnHelper,
 } from "@tanstack/react-table"
-import type { Job, JobSortBy, SortOrder } from "@/api/types"
+import type { Trace, TraceSortBy, SortOrder } from "@/api/types"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -31,15 +31,14 @@ const statusColor: Record<string, string> = {
   failed: "",
 }
 
-function formatDuration(startedAt: string | null, completedAt: string | null): string {
-  if (!startedAt || !completedAt) return "—"
-  const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime()
+function formatDuration(ms: number | null): string {
+  if (ms === null) return "—"
   if (ms < 1000) return `${ms}ms`
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
   return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
 }
 
-const columnHelper = createColumnHelper<Job>()
+const columnHelper = createColumnHelper<Trace>()
 
 const columns = [
   columnHelper.accessor("status", {
@@ -60,15 +59,11 @@ const columns = [
     header: "Channel",
     cell: (info) => <span className="font-medium">{info.getValue()}</span>,
   }),
-  columnHelper.accessor("connector_id", {
-    header: "Connector",
+  columnHelper.accessor("mode", {
+    header: "Mode",
     cell: (info) => (
-      <span className="text-muted-foreground font-mono text-xs">{info.getValue()}</span>
+      <Badge variant="outline">{info.getValue()}</Badge>
     ),
-  }),
-  columnHelper.accessor("records_processed", {
-    header: "Records",
-    cell: (info) => info.getValue(),
   }),
   columnHelper.accessor("created_at", {
     header: "Created",
@@ -76,20 +71,21 @@ const columns = [
       <span className="text-muted-foreground">{formatDate(info.getValue())}</span>
     ),
   }),
-  columnHelper.display({
+  columnHelper.accessor("duration_ms", {
     id: "duration",
     header: "Duration",
     cell: (info) => (
       <span className="text-muted-foreground">
-        {formatDuration(info.row.original.started_at, info.row.original.completed_at)}
+        {formatDuration(info.getValue())}
       </span>
     ),
   }),
 ]
 
-const sortableColumns: Record<string, JobSortBy> = {
+const sortableColumns: Record<string, TraceSortBy> = {
   status: "status",
   channel: "channel",
+  mode: "mode",
   created_at: "created_at",
   updated_at: "updated_at",
 }
@@ -97,10 +93,10 @@ const sortableColumns: Record<string, JobSortBy> = {
 export function InvocationsPage() {
   const navigate = useNavigate()
   const [offset, setOffset] = useState(0)
-  const [sortBy, setSortBy] = useState<JobSortBy>("created_at")
+  const [sortBy, setSortBy] = useState<TraceSortBy>("created_at")
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc")
 
-  const { data, isLoading } = useJobs({
+  const { data, isLoading } = useTraces({
     limit: PAGE_SIZE,
     offset,
     sort_by: sortBy,
