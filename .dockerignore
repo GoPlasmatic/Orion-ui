@@ -1,0 +1,16 @@
+node_modules/
+dist/
+dist-ssr/
+build/
+.git/
+.github/
+.claude/
+*.md
+LICENSE
+.DS_Store
+.env
+.env.*
+*.log
+.vscode/
+.idea/
+docker-compose.yml

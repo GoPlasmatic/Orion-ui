@@ -2,28 +2,38 @@ import { NavLink } from "react-router"
 import { cn } from "@/lib/utils"
 import {
   LayoutDashboard,
-  History,
   Radio,
+  GitBranch,
   Plug,
-  Send,
+  Activity,
+  FileText,
+  Terminal,
+  Settings,
 } from "lucide-react"
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/invocations", icon: History, label: "Invocations" },
   { to: "/channels", icon: Radio, label: "Channels" },
+  { to: "/workflows", icon: GitBranch, label: "Workflows" },
   { to: "/connectors", icon: Plug, label: "Connectors" },
-  { to: "/data", icon: Send, label: "Data Test" },
+  { to: "/traces", icon: Activity, label: "Traces" },
+  { to: "/audit", icon: FileText, label: "Audit Log" },
+  { to: "/console", icon: Terminal, label: "Data Console" },
+  { to: "/settings", icon: Settings, label: "Settings" },
 ]
 
 export function Sidebar() {
   return (
-    <aside className="flex h-full w-60 flex-col border-r bg-sidebar">
-      <div className="flex h-14 items-center gap-2 border-b px-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground text-sm font-bold">
-          O
-        </div>
-        <span className="text-lg font-semibold tracking-tight">Orion</span>
+    <aside className="flex h-full w-60 flex-col border-r border-sidebar-border bg-sidebar">
+      <div className="flex h-14 items-center gap-2.5 border-b border-sidebar-border px-4">
+        <img
+          src="/plasmatic-logo.png"
+          alt="Plasmatic"
+          className="h-7 w-7"
+        />
+        <span className="text-lg font-semibold tracking-tight text-sidebar-foreground">
+          Orion
+        </span>
       </div>
       <nav className="flex-1 space-y-1 p-3">
         {navItems.map((item) => (

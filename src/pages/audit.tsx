@@ -1,13 +1,12 @@
 import { useState } from "react"
-import { useNavigate } from "react-router"
-import { useConnectors, useReloadConnectors } from "@/hooks/use-connectors"
+import { useAuditLogs } from "@/hooks/use-audit"
 import {
   useReactTable,
   getCoreRowModel,
   flexRender,
   createColumnHelper,
 } from "@tanstack/react-table"
-import type { Connector, ConnectorType } from "@/api/types"
+import type { AuditLog } from "@/api/types"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -15,38 +14,54 @@ import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
 import { PageHeader } from "@/components/shared/page-header"
 import { formatDate } from "@/lib/utils"
-import { ChevronLeft, ChevronRight, Plus, RefreshCw } from "lucide-react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 
 const PAGE_SIZE = 20
-const columnHelper = createColumnHelper<Connector>()
+const columnHelper = createColumnHelper<AuditLog>()
 
 const columns = [
-  columnHelper.accessor("name", {
-    header: "Name",
-    cell: (info) => <span className="font-medium">{info.getValue()}</span>,
-  }),
-  columnHelper.accessor("connector_type", {
-    header: "Type",
+  columnHelper.accessor("timestamp", {
+    header: "Time",
     cell: (info) => (
-      <Badge variant="outline" className="uppercase">{info.getValue()}</Badge>
+      <span className="text-sm">{formatDate(info.getValue())}</span>
     ),
   }),
-  columnHelper.accessor("updated_at", {
-    header: "Updated",
-    cell: (info) => <span className="text-muted-foreground">{formatDate(info.getValue())}</span>,
+  columnHelper.accessor("action", {
+    header: "Action",
+    cell: (info) => (
+      <Badge variant="outline">{info.getValue()}</Badge>
+    ),
+  }),
+  columnHelper.accessor("resource_type", {
+    header: "Resource Type",
+    cell: (info) => (
+      <Badge variant="secondary" className="text-xs">{info.getValue()}</Badge>
+    ),
+  }),
+  columnHelper.accessor("resource_id", {
+    header: "Resource ID",
+    cell: (info) => (
+      <span className="font-mono text-xs">{info.getValue()}</span>
+    ),
+  }),
+  columnHelper.accessor("user", {
+    header: "User",
+    cell: (info) => (
+      <span className="text-muted-foreground">{info.getValue() ?? "--"}</span>
+    ),
   }),
 ]
 
-export function ConnectorsPage() {
-  const navigate = useNavigate()
+export function AuditPage() {
   const [offset, setOffset] = useState(0)
-  const [typeFilter, setTypeFilter] = useState<ConnectorType | "">("")
-  const reloadConnectors = useReloadConnectors()
+  const [actionFilter, setActionFilter] = useState("")
+  const [resourceTypeFilter, setResourceTypeFilter] = useState("")
 
-  const { data, isLoading } = useConnectors({
+  const { data, isLoading } = useAuditLogs({
     limit: PAGE_SIZE,
     offset,
-    connector_type: typeFilter || undefined,
+    action: actionFilter || undefined,
+    resource_type: resourceTypeFilter || undefined,
   })
 
   const table = useReactTable({
@@ -61,36 +76,33 @@ export function ConnectorsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Connectors" description="Manage external system connections">
-        <Button
-          variant="outline"
-          onClick={() => reloadConnectors.mutate()}
-          disabled={reloadConnectors.isPending}
-        >
-          <RefreshCw className={`h-4 w-4 ${reloadConnectors.isPending ? "animate-spin" : ""}`} />
-          Reload All
-        </Button>
-        <Button onClick={() => navigate("/connectors/new")}>
-          <Plus className="h-4 w-4" />
-          Create Connector
-        </Button>
-      </PageHeader>
+      <PageHeader title="Audit Log" description="Track administrative actions" />
 
       <div className="flex items-center gap-3">
         <Select
-          value={typeFilter}
+          value={actionFilter}
           onChange={(e) => {
-            setTypeFilter(e.target.value as ConnectorType | "")
+            setActionFilter(e.target.value)
             setOffset(0)
           }}
         >
-          <option value="">All types</option>
-          <option value="http">HTTP</option>
-          <option value="kafka">Kafka</option>
-          <option value="db">Database</option>
-          <option value="cache">Cache</option>
-          <option value="mongo">MongoDB</option>
-          <option value="storage">Storage</option>
+          <option value="">All actions</option>
+          <option value="create">Create</option>
+          <option value="update">Update</option>
+          <option value="delete">Delete</option>
+          <option value="status_change">Status Change</option>
+        </Select>
+        <Select
+          value={resourceTypeFilter}
+          onChange={(e) => {
+            setResourceTypeFilter(e.target.value)
+            setOffset(0)
+          }}
+        >
+          <option value="">All resources</option>
+          <option value="channel">Channel</option>
+          <option value="workflow">Workflow</option>
+          <option value="connector">Connector</option>
         </Select>
       </div>
 
@@ -119,16 +131,12 @@ export function ConnectorsPage() {
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={columns.length} className="text-center text-muted-foreground py-8">
-                  No connectors found
+                  No audit logs found
                 </TableCell>
               </TableRow>
             ) : (
               table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => navigate(`/connectors/${row.original.name}`)}
-                >
+                <TableRow key={row.id}>
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}

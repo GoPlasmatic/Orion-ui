@@ -33,6 +33,14 @@ export default defineConfig({
         target: orionTarget,
         changeOrigin: true,
       },
+      "/healthz": {
+        target: orionTarget,
+        changeOrigin: true,
+      },
+      "/readyz": {
+        target: orionTarget,
+        changeOrigin: true,
+      },
       "/metrics": {
         target: orionTarget,
         changeOrigin: true,

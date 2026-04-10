@@ -12,6 +12,9 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
+import { Select } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
+import { PageHeader } from "@/components/shared/page-header"
 import { formatDate } from "@/lib/utils"
 import { ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 
@@ -32,7 +35,7 @@ const statusColor: Record<string, string> = {
 }
 
 function formatDuration(ms: number | null): string {
-  if (ms === null) return "—"
+  if (ms === null) return "--"
   if (ms < 1000) return `${ms}ms`
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
   return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
@@ -61,9 +64,7 @@ const columns = [
   }),
   columnHelper.accessor("mode", {
     header: "Mode",
-    cell: (info) => (
-      <Badge variant="outline">{info.getValue()}</Badge>
-    ),
+    cell: (info) => <Badge variant="outline">{info.getValue()}</Badge>,
   }),
   columnHelper.accessor("created_at", {
     header: "Created",
@@ -75,9 +76,7 @@ const columns = [
     id: "duration",
     header: "Duration",
     cell: (info) => (
-      <span className="text-muted-foreground">
-        {formatDuration(info.getValue())}
-      </span>
+      <span className="text-muted-foreground">{formatDuration(info.getValue())}</span>
     ),
   }),
 ]
@@ -87,20 +86,25 @@ const sortableColumns: Record<string, TraceSortBy> = {
   channel: "channel",
   mode: "mode",
   created_at: "created_at",
-  updated_at: "updated_at",
 }
 
-export function InvocationsPage() {
+export function TracesPage() {
   const navigate = useNavigate()
   const [offset, setOffset] = useState(0)
   const [sortBy, setSortBy] = useState<TraceSortBy>("created_at")
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc")
+  const [statusFilter, setStatusFilter] = useState("")
+  const [channelFilter, setChannelFilter] = useState("")
+  const [modeFilter, setModeFilter] = useState("")
 
   const { data, isLoading } = useTraces({
     limit: PAGE_SIZE,
     offset,
     sort_by: sortBy,
     sort_order: sortOrder,
+    status: statusFilter || undefined,
+    channel: channelFilter || undefined,
+    mode: modeFilter || undefined,
   })
 
   const table = useReactTable({
@@ -136,7 +140,43 @@ export function InvocationsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Invocations</h1>
+      <PageHeader title="Traces" description="Execution history and monitoring" />
+
+      <div className="flex items-center gap-3">
+        <Select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value)
+            setOffset(0)
+          }}
+        >
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="running">Running</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+        </Select>
+        <Input
+          placeholder="Filter by channel..."
+          value={channelFilter}
+          onChange={(e) => {
+            setChannelFilter(e.target.value)
+            setOffset(0)
+          }}
+          className="w-48"
+        />
+        <Select
+          value={modeFilter}
+          onChange={(e) => {
+            setModeFilter(e.target.value)
+            setOffset(0)
+          }}
+        >
+          <option value="">All modes</option>
+          <option value="sync">Sync</option>
+          <option value="async">Async</option>
+        </Select>
+      </div>
 
       <div className="rounded-md border">
         <Table>
@@ -171,7 +211,7 @@ export function InvocationsPage() {
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={columns.length} className="text-center text-muted-foreground py-8">
-                  No invocations found
+                  No traces found
                 </TableCell>
               </TableRow>
             ) : (
@@ -179,7 +219,7 @@ export function InvocationsPage() {
                 <TableRow
                   key={row.id}
                   className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => navigate(`/invocations/${row.original.id}`)}
+                  onClick={() => navigate(`/traces/${row.original.id}`)}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
@@ -195,7 +235,7 @@ export function InvocationsPage() {
 
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          {total > 0 ? `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} of ${total}` : "No results"}
+          {total > 0 ? `${offset + 1}--${Math.min(offset + PAGE_SIZE, total)} of ${total}` : "No results"}
         </p>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" disabled={!hasPrev} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>

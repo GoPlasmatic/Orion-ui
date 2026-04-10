@@ -1,100 +1,183 @@
 import { useState } from "react"
-import { useEngineStatus } from "@/hooks/use-engine"
-import { useRules } from "@/hooks/use-rules"
-import { RuleWorkflow } from "@/components/rules/rule-workflow"
-import { RuleStatusBadge } from "@/components/rules/rule-status-badge"
+import { useNavigate } from "react-router"
+import { useChannels } from "@/hooks/use-channels"
+import {
+  useReactTable,
+  getCoreRowModel,
+  flexRender,
+  createColumnHelper,
+} from "@tanstack/react-table"
+import type { Channel, EntityStatus, ChannelProtocol } from "@/api/types"
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
+import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { cn } from "@/lib/utils"
-import { Radio } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Select } from "@/components/ui/select"
+import { PageHeader } from "@/components/shared/page-header"
+import { StatusBadge } from "@/components/shared/status-badge"
+import { formatDate } from "@/lib/utils"
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react"
+
+const PAGE_SIZE = 20
+const columnHelper = createColumnHelper<Channel>()
+
+const columns = [
+  columnHelper.accessor("name", {
+    header: "Name",
+    cell: (info) => <span className="font-medium">{info.getValue()}</span>,
+  }),
+  columnHelper.accessor("channel_type", {
+    header: "Type",
+    cell: (info) => <Badge variant="outline">{info.getValue()}</Badge>,
+  }),
+  columnHelper.accessor("protocol", {
+    header: "Protocol",
+    cell: (info) => (
+      <Badge variant="outline" className="uppercase">{info.getValue()}</Badge>
+    ),
+  }),
+  columnHelper.accessor("route_pattern", {
+    header: "Route",
+    cell: (info) => (
+      <span className="font-mono text-xs text-muted-foreground">
+        {info.getValue() ?? "--"}
+      </span>
+    ),
+  }),
+  columnHelper.accessor("status", {
+    header: "Status",
+    cell: (info) => <StatusBadge status={info.getValue()} />,
+  }),
+  columnHelper.accessor("version", {
+    header: "Version",
+    cell: (info) => <span className="text-muted-foreground">v{info.getValue()}</span>,
+  }),
+  columnHelper.accessor("updated_at", {
+    header: "Updated",
+    cell: (info) => (
+      <span className="text-muted-foreground">{formatDate(info.getValue())}</span>
+    ),
+  }),
+]
 
 export function ChannelsPage() {
-  const { data: engine, isLoading: engineLoading } = useEngineStatus()
-  const [selectedChannel, setSelectedChannel] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const [offset, setOffset] = useState(0)
+  const [statusFilter, setStatusFilter] = useState<EntityStatus | "">("")
+  const [protocolFilter, setProtocolFilter] = useState<ChannelProtocol | "">("")
 
-  const channels = engine?.channels ?? []
+  const { data, isLoading } = useChannels({
+    limit: PAGE_SIZE,
+    offset,
+    status: statusFilter || undefined,
+    protocol: protocolFilter || undefined,
+  })
 
-  // Auto-select first channel when data loads
-  const activeChannel = selectedChannel ?? channels[0] ?? null
+  const table = useReactTable({
+    data: data?.data ?? [],
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  })
 
-  const { data: rulesData, isLoading: rulesLoading } = useRules(
-    activeChannel ? { channel: activeChannel, limit: 100 } : {}
-  )
-
-  const rules = rulesData?.data ?? []
+  const total = data?.total ?? 0
+  const hasNext = offset + PAGE_SIZE < total
+  const hasPrev = offset > 0
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] gap-0">
-      {/* Left panel — channel list */}
-      <div className="w-60 shrink-0 border-r overflow-y-auto">
-        <div className="p-4 border-b">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-            Channels
-          </h2>
-        </div>
-        {engineLoading ? (
-          <div className="p-4 space-y-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-9 w-full" />
-            ))}
-          </div>
-        ) : channels.length === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground">No channels found</div>
-        ) : (
-          <nav className="p-2 space-y-1">
-            {channels.map((ch) => (
-              <button
-                key={ch}
-                onClick={() => setSelectedChannel(ch)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors text-left",
-                  activeChannel === ch
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <Radio className="h-3.5 w-3.5 shrink-0" />
-                {ch}
-              </button>
-            ))}
-          </nav>
-        )}
+    <div className="space-y-6">
+      <PageHeader title="Channels" description="Manage service endpoints and routing">
+        <Button onClick={() => navigate("/channels/new")}>
+          <Plus className="h-4 w-4" />
+          Create Channel
+        </Button>
+      </PageHeader>
+
+      <div className="flex items-center gap-3">
+        <Select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value as EntityStatus | "")
+            setOffset(0)
+          }}
+        >
+          <option value="">All statuses</option>
+          <option value="draft">Draft</option>
+          <option value="active">Active</option>
+          <option value="archived">Archived</option>
+        </Select>
+        <Select
+          value={protocolFilter}
+          onChange={(e) => {
+            setProtocolFilter(e.target.value as ChannelProtocol | "")
+            setOffset(0)
+          }}
+        >
+          <option value="">All protocols</option>
+          <option value="http">HTTP</option>
+          <option value="rest">REST</option>
+          <option value="kafka">Kafka</option>
+        </Select>
       </div>
 
-      {/* Right panel — rules workflows */}
-      <div className="flex-1 overflow-y-auto p-6">
-        {!activeChannel ? (
-          <div className="flex h-full items-center justify-center text-muted-foreground">
-            Select a channel to view its rules
-          </div>
-        ) : rulesLoading ? (
-          <div className="space-y-4">
-            <Skeleton className="h-8 w-48" />
-            <Skeleton className="h-[500px] w-full" />
-          </div>
-        ) : rules.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-muted-foreground">
-            No rules in channel "{activeChannel}"
-          </div>
-        ) : (
-          <div className="space-y-8">
-            <h1 className="text-2xl font-bold">{activeChannel}</h1>
-            {rules.map((rule, index) => (
-              <div key={rule.rule_id}>
-                {index > 0 && <div className="border-t my-6" />}
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <h2 className="text-lg font-semibold">{rule.name}</h2>
-                    <RuleStatusBadge status={rule.status} />
-                  </div>
-                  {rule.description && (
-                    <p className="text-sm text-muted-foreground">{rule.description}</p>
-                  )}
-                  <RuleWorkflow rule={rule} />
-                </div>
-              </div>
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <TableHead key={header.id}>
+                    {flexRender(header.column.columnDef.header, header.getContext())}
+                  </TableHead>
+                ))}
+              </TableRow>
             ))}
-          </div>
-        )}
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <TableRow key={i}>
+                  {columns.map((_, j) => (
+                    <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
+                  ))}
+                </TableRow>
+              ))
+            ) : table.getRowModel().rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={columns.length} className="text-center text-muted-foreground py-8">
+                  No channels found
+                </TableCell>
+              </TableRow>
+            ) : (
+              table.getRowModel().rows.map((row) => (
+                <TableRow
+                  key={row.id}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => navigate(`/channels/${row.original.channel_id}`)}
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          {total > 0 ? `${offset + 1}--${Math.min(offset + PAGE_SIZE, total)} of ${total}` : "No results"}
+        </p>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" disabled={!hasPrev} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" disabled={!hasNext} onClick={() => setOffset(offset + PAGE_SIZE)}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
     </div>
   )

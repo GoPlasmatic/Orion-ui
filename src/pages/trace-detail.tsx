@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { JsonViewer } from "@/components/shared/json-viewer"
 import { formatDate } from "@/lib/utils"
 import { ArrowLeft, ChevronDown, ChevronRight, AlertCircle } from "lucide-react"
 
@@ -24,7 +25,7 @@ const statusColor: Record<string, string> = {
 }
 
 function formatDuration(ms: number | null): string {
-  if (ms === null) return "—"
+  if (ms === null) return "--"
   if (ms < 1000) return `${ms}ms`
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
   return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
@@ -36,9 +37,7 @@ function AuditStep({ entry, index }: { entry: AuditTrailEntry; index: number }) 
 
   return (
     <div className="relative pl-8 pb-6 last:pb-0">
-      {/* Timeline line */}
       <div className="absolute left-3 top-0 bottom-0 w-px bg-border" />
-      {/* Timeline dot */}
       <div className="absolute left-1.5 top-1.5 h-3 w-3 rounded-full border-2 border-primary bg-background" />
 
       <div className="space-y-1">
@@ -52,7 +51,12 @@ function AuditStep({ entry, index }: { entry: AuditTrailEntry; index: number }) 
         </div>
 
         {entry.workflow_id && (
-          <p className="text-xs text-muted-foreground">workflow: {entry.workflow_id}</p>
+          <p className="text-xs text-muted-foreground">
+            workflow:{" "}
+            <Link to={`/workflows/${entry.workflow_id}`} className="text-primary hover:underline">
+              {entry.workflow_id}
+            </Link>
+          </p>
         )}
 
         {hasChanges && (
@@ -83,17 +87,15 @@ function AuditStep({ entry, index }: { entry: AuditTrailEntry; index: number }) 
   )
 }
 
-export function InvocationDetailPage() {
+export function TraceDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: trace, isLoading, error } = useTrace(id ?? "")
-  const [payloadOpen, setPayloadOpen] = useState(false)
-  const [contextOpen, setContextOpen] = useState(false)
 
   if (isLoading) {
     return (
       <div className="space-y-6">
         <Button variant="ghost" asChild>
-          <Link to="/invocations"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Invocations</Link>
+          <Link to="/traces"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Traces</Link>
         </Button>
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-40 w-full" />
@@ -106,11 +108,11 @@ export function InvocationDetailPage() {
     return (
       <div className="space-y-6">
         <Button variant="ghost" asChild>
-          <Link to="/invocations"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Invocations</Link>
+          <Link to="/traces"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Traces</Link>
         </Button>
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
-          <p>Failed to load invocation{id ? ` ${id}` : ""}.</p>
+          <p>Failed to load trace{id ? ` ${id}` : ""}.</p>
         </div>
       </div>
     )
@@ -121,11 +123,11 @@ export function InvocationDetailPage() {
   return (
     <div className="space-y-6">
       <Button variant="ghost" asChild>
-        <Link to="/invocations"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Invocations</Link>
+        <Link to="/traces"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Traces</Link>
       </Button>
 
       <div className="flex items-center gap-3">
-        <h1 className="text-2xl font-bold">Invocation</h1>
+        <h1 className="text-2xl font-bold">Trace</h1>
         <Badge
           variant={statusVariant[trace.status] ?? "outline"}
           className={statusColor[trace.status] ?? ""}
@@ -134,7 +136,6 @@ export function InvocationDetailPage() {
         </Badge>
       </div>
 
-      {/* Metadata Card */}
       <Card>
         <CardHeader>
           <CardTitle>Details</CardTitle>
@@ -173,7 +174,6 @@ export function InvocationDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Audit Trail */}
       {message?.audit_trail && message.audit_trail.length > 0 && (
         <Card>
           <CardHeader>
@@ -189,62 +189,23 @@ export function InvocationDetailPage() {
         </Card>
       )}
 
-      {/* Errors from message */}
       {message?.errors && message.errors.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Errors</CardTitle>
           </CardHeader>
           <CardContent>
-            <pre className="text-xs font-mono bg-muted p-3 rounded-md overflow-auto max-h-60">
-              {JSON.stringify(message.errors, null, 2)}
-            </pre>
+            <JsonViewer data={message.errors} maxHeight="15rem" />
           </CardContent>
         </Card>
       )}
 
-      {/* Payload */}
       {message?.payload && (
-        <Card>
-          <CardHeader>
-            <button
-              onClick={() => setPayloadOpen(!payloadOpen)}
-              className="flex items-center gap-2 w-full text-left"
-            >
-              {payloadOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              <CardTitle>Payload</CardTitle>
-            </button>
-          </CardHeader>
-          {payloadOpen && (
-            <CardContent>
-              <pre className="text-xs font-mono bg-muted p-3 rounded-md overflow-auto max-h-96">
-                {JSON.stringify(message.payload, null, 2)}
-              </pre>
-            </CardContent>
-          )}
-        </Card>
+        <JsonViewer data={message.payload} label="Payload" />
       )}
 
-      {/* Context */}
       {message?.context && (
-        <Card>
-          <CardHeader>
-            <button
-              onClick={() => setContextOpen(!contextOpen)}
-              className="flex items-center gap-2 w-full text-left"
-            >
-              {contextOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              <CardTitle>Context</CardTitle>
-            </button>
-          </CardHeader>
-          {contextOpen && (
-            <CardContent>
-              <pre className="text-xs font-mono bg-muted p-3 rounded-md overflow-auto max-h-96">
-                {JSON.stringify(message.context, null, 2)}
-              </pre>
-            </CardContent>
-          )}
-        </Card>
+        <JsonViewer data={message.context} label="Context" />
       )}
     </div>
   )

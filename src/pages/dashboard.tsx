@@ -1,10 +1,14 @@
+import { useNavigate } from "react-router"
 import { useEngineStatus, useEngineReload } from "@/hooks/use-engine"
 import { useHealth } from "@/hooks/use-health"
+import { useTraces } from "@/hooks/use-traces"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Activity, GitBranch, Server, Clock, RefreshCw } from "lucide-react"
+import { PageHeader } from "@/components/shared/page-header"
+import { Activity, GitBranch, Server, Clock, RefreshCw, Radio } from "lucide-react"
+import { formatDate } from "@/lib/utils"
 
 function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
@@ -15,25 +19,44 @@ function formatUptime(seconds: number): string {
   return `${m}m`
 }
 
+const traceStatusColor: Record<string, string> = {
+  completed: "bg-emerald-500",
+  failed: "",
+  pending: "",
+  running: "",
+}
+
+const traceStatusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  completed: "default",
+  running: "outline",
+  pending: "secondary",
+  failed: "destructive",
+}
+
 export function DashboardPage() {
+  const navigate = useNavigate()
   const { data: engine, isLoading: engineLoading } = useEngineStatus()
   const { data: health } = useHealth()
+  const { data: recentTraces } = useTraces({
+    limit: 5,
+    sort_by: "created_at",
+    sort_order: "desc",
+  })
   const reload = useEngineReload()
 
   const isHealthy = health?.status === "ok"
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Dashboard</h1>
+      <PageHeader title="Dashboard">
         <Button
           onClick={() => reload.mutate()}
           disabled={reload.isPending}
         >
-          <RefreshCw className={`mr-2 h-4 w-4 ${reload.isPending ? "animate-spin" : ""}`} />
+          <RefreshCw className={`h-4 w-4 ${reload.isPending ? "animate-spin" : ""}`} />
           {reload.isPending ? "Reloading..." : "Reload Engine"}
         </Button>
-      </div>
+      </PageHeader>
 
       {reload.isSuccess && (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
@@ -48,7 +71,6 @@ export function DashboardPage() {
       )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {/* Health */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Health</CardTitle>
@@ -68,7 +90,6 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Version */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Engine Version</CardTitle>
@@ -85,7 +106,6 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Uptime */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Uptime</CardTitle>
@@ -97,63 +117,55 @@ export function DashboardPage() {
             ) : engine ? (
               <p className="text-2xl font-bold">{formatUptime(engine.uptime_seconds)}</p>
             ) : (
-              <span className="text-sm text-muted-foreground">—</span>
+              <span className="text-sm text-muted-foreground">--</span>
             )}
           </CardContent>
         </Card>
 
-        {/* Rules Count */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Rules Count</CardTitle>
+            <CardTitle className="text-sm font-medium">Workflows</CardTitle>
             <GitBranch className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             {engineLoading ? (
               <Skeleton className="h-7 w-16" />
             ) : engine ? (
-              <p className="text-2xl font-bold">{engine.rules_count}</p>
+              <p className="text-2xl font-bold">{engine.workflows_count}</p>
             ) : (
-              <span className="text-sm text-muted-foreground">—</span>
+              <span className="text-sm text-muted-foreground">--</span>
             )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Rule counts + channels */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Active Rules</CardTitle>
+            <CardTitle className="text-sm font-medium">Active Workflows</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold text-emerald-600">{engine?.active_rules ?? "—"}</p>
+            <p className="text-3xl font-bold text-emerald-600">{engine?.active_workflows ?? "--"}</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Paused Rules</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold text-amber-600">{engine?.paused_rules ?? "—"}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Channels</CardTitle>
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Radio className="h-4 w-4" /> Channels
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-1">
               {engine?.channels.map((ch) => (
                 <Badge key={ch} variant="outline">{ch}</Badge>
-              )) ?? <span className="text-muted-foreground">—</span>}
+              )) ?? <span className="text-muted-foreground">--</span>}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Engine Details + Health Checks */}
       <div className="grid gap-4 md:grid-cols-2">
+        {/* Engine Details */}
         <Card>
           <CardHeader>
             <CardTitle>Engine Status</CardTitle>
@@ -175,24 +187,16 @@ export function DashboardPage() {
                   <span>{formatUptime(engine.uptime_seconds)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total Rules</span>
-                  <span className="font-bold">{engine.rules_count}</span>
+                  <span className="text-muted-foreground">Total Workflows</span>
+                  <span className="font-bold">{engine.workflows_count}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Active Rules</span>
-                  <span className="font-bold text-emerald-600">{engine.active_rules}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Paused Rules</span>
-                  <span className="font-bold text-amber-600">{engine.paused_rules}</span>
+                  <span className="text-muted-foreground">Active</span>
+                  <span className="font-bold text-emerald-600">{engine.active_workflows}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Channels</span>
-                  <div className="flex flex-wrap gap-1">
-                    {engine.channels.map((ch) => (
-                      <Badge key={ch} variant="outline" className="text-xs">{ch}</Badge>
-                    ))}
-                  </div>
+                  <span className="font-bold">{engine.channels.length}</span>
                 </div>
               </div>
             ) : (
@@ -201,6 +205,7 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
+        {/* Health Checks */}
         <Card>
           <CardHeader>
             <CardTitle>Health Checks</CardTitle>
@@ -233,7 +238,7 @@ export function DashboardPage() {
                   </div>
                 ))}
                 <div className="mt-3 pt-2 border-t text-sm text-muted-foreground">
-                  <span>Rules loaded: {health.rules_loaded}</span>
+                  <span>Workflows loaded: {health.workflows_loaded}</span>
                 </div>
               </div>
             ) : (
@@ -242,6 +247,43 @@ export function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Recent Traces */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Recent Traces</CardTitle>
+          <Button variant="ghost" size="sm" onClick={() => navigate("/traces")}>
+            View all
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {recentTraces?.data && recentTraces.data.length > 0 ? (
+            <div className="space-y-2">
+              {recentTraces.data.map((trace) => (
+                <div
+                  key={trace.id}
+                  className="flex items-center justify-between rounded-md border px-3 py-2 cursor-pointer hover:bg-muted/50"
+                  onClick={() => navigate(`/traces/${trace.id}`)}
+                >
+                  <div className="flex items-center gap-3">
+                    <Badge
+                      variant={traceStatusVariant[trace.status] ?? "outline"}
+                      className={traceStatusColor[trace.status] ?? ""}
+                    >
+                      {trace.status}
+                    </Badge>
+                    <span className="text-sm font-medium">{trace.channel}</span>
+                    <Badge variant="outline" className="text-xs">{trace.mode}</Badge>
+                  </div>
+                  <span className="text-xs text-muted-foreground">{formatDate(trace.created_at)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No recent traces</p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

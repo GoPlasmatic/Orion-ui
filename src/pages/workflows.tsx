@@ -1,52 +1,88 @@
 import { useState } from "react"
 import { useNavigate } from "react-router"
-import { useConnectors, useReloadConnectors } from "@/hooks/use-connectors"
+import { useWorkflows } from "@/hooks/use-workflows"
 import {
   useReactTable,
   getCoreRowModel,
   flexRender,
   createColumnHelper,
 } from "@tanstack/react-table"
-import type { Connector, ConnectorType } from "@/api/types"
+import type { Workflow, EntityStatus } from "@/api/types"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
+import { StatusBadge } from "@/components/shared/status-badge"
 import { formatDate } from "@/lib/utils"
-import { ChevronLeft, ChevronRight, Plus, RefreshCw } from "lucide-react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 
 const PAGE_SIZE = 20
-const columnHelper = createColumnHelper<Connector>()
+const columnHelper = createColumnHelper<Workflow>()
 
 const columns = [
   columnHelper.accessor("name", {
     header: "Name",
     cell: (info) => <span className="font-medium">{info.getValue()}</span>,
   }),
-  columnHelper.accessor("connector_type", {
-    header: "Type",
-    cell: (info) => (
-      <Badge variant="outline" className="uppercase">{info.getValue()}</Badge>
-    ),
+  columnHelper.accessor("tags", {
+    header: "Tags",
+    cell: (info) => {
+      const tags = info.getValue()
+      if (!tags || tags.length === 0) return <span className="text-muted-foreground">--</span>
+      return (
+        <div className="flex flex-wrap gap-1">
+          {tags.slice(0, 3).map((tag) => (
+            <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+          ))}
+          {tags.length > 3 && (
+            <Badge variant="outline" className="text-xs">+{tags.length - 3}</Badge>
+          )}
+        </div>
+      )
+    },
+  }),
+  columnHelper.accessor("status", {
+    header: "Status",
+    cell: (info) => <StatusBadge status={info.getValue()} />,
+  }),
+  columnHelper.accessor("version", {
+    header: "Version",
+    cell: (info) => <span className="text-muted-foreground">v{info.getValue()}</span>,
+  }),
+  columnHelper.accessor("rollout_percentage", {
+    header: "Rollout",
+    cell: (info) => {
+      const val = info.getValue()
+      if (val === undefined || val === null) return <span className="text-muted-foreground">--</span>
+      return <span className="text-sm">{val}%</span>
+    },
+  }),
+  columnHelper.accessor("tasks", {
+    header: "Tasks",
+    cell: (info) => <span className="text-muted-foreground">{info.getValue()?.length ?? 0}</span>,
   }),
   columnHelper.accessor("updated_at", {
     header: "Updated",
-    cell: (info) => <span className="text-muted-foreground">{formatDate(info.getValue())}</span>,
+    cell: (info) => (
+      <span className="text-muted-foreground">{formatDate(info.getValue())}</span>
+    ),
   }),
 ]
 
-export function ConnectorsPage() {
+export function WorkflowsPage() {
   const navigate = useNavigate()
   const [offset, setOffset] = useState(0)
-  const [typeFilter, setTypeFilter] = useState<ConnectorType | "">("")
-  const reloadConnectors = useReloadConnectors()
+  const [statusFilter, setStatusFilter] = useState<EntityStatus | "">("")
+  const [tagFilter, setTagFilter] = useState("")
 
-  const { data, isLoading } = useConnectors({
+  const { data, isLoading } = useWorkflows({
     limit: PAGE_SIZE,
     offset,
-    connector_type: typeFilter || undefined,
+    status: statusFilter || undefined,
+    tag: tagFilter || undefined,
   })
 
   const table = useReactTable({
@@ -61,37 +97,30 @@ export function ConnectorsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Connectors" description="Manage external system connections">
-        <Button
-          variant="outline"
-          onClick={() => reloadConnectors.mutate()}
-          disabled={reloadConnectors.isPending}
-        >
-          <RefreshCw className={`h-4 w-4 ${reloadConnectors.isPending ? "animate-spin" : ""}`} />
-          Reload All
-        </Button>
-        <Button onClick={() => navigate("/connectors/new")}>
-          <Plus className="h-4 w-4" />
-          Create Connector
-        </Button>
-      </PageHeader>
+      <PageHeader title="Workflows" description="View workflow pipelines and task definitions" />
 
       <div className="flex items-center gap-3">
         <Select
-          value={typeFilter}
+          value={statusFilter}
           onChange={(e) => {
-            setTypeFilter(e.target.value as ConnectorType | "")
+            setStatusFilter(e.target.value as EntityStatus | "")
             setOffset(0)
           }}
         >
-          <option value="">All types</option>
-          <option value="http">HTTP</option>
-          <option value="kafka">Kafka</option>
-          <option value="db">Database</option>
-          <option value="cache">Cache</option>
-          <option value="mongo">MongoDB</option>
-          <option value="storage">Storage</option>
+          <option value="">All statuses</option>
+          <option value="draft">Draft</option>
+          <option value="active">Active</option>
+          <option value="archived">Archived</option>
         </Select>
+        <Input
+          placeholder="Filter by tag..."
+          value={tagFilter}
+          onChange={(e) => {
+            setTagFilter(e.target.value)
+            setOffset(0)
+          }}
+          className="w-48"
+        />
       </div>
 
       <div className="rounded-md border">
@@ -119,7 +148,7 @@ export function ConnectorsPage() {
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={columns.length} className="text-center text-muted-foreground py-8">
-                  No connectors found
+                  No workflows found
                 </TableCell>
               </TableRow>
             ) : (
@@ -127,7 +156,7 @@ export function ConnectorsPage() {
                 <TableRow
                   key={row.id}
                   className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => navigate(`/connectors/${row.original.name}`)}
+                  onClick={() => navigate(`/workflows/${row.original.workflow_id}`)}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>

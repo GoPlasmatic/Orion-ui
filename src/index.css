@@ -40,42 +40,81 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "DM Mono", "Fira Code", monospace;
 }
 
+/* Light theme */
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 0.5rem;
+  --background: #F8FBFD;
+  --foreground: #07111A;
+  --card: #FFFFFF;
+  --card-foreground: #07111A;
+  --popover: #FFFFFF;
+  --popover-foreground: #07111A;
+  --primary: #119FCD;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EDF3F7;
+  --secondary-foreground: #0B1925;
+  --muted: #EDF3F7;
+  --muted-foreground: #3D6B7D;
+  --accent: #E5F5ED;
+  --accent-foreground: #063B4C;
+  --destructive: #EF476F;
+  --destructive-foreground: #FFFFFF;
+  --border: #D0DEE6;
+  --input: #D0DEE6;
+  --ring: #119FCD;
+  --chart-1: #119FCD;
+  --chart-2: #4CBD97;
+  --chart-3: #FFD167;
+  --chart-4: #EF476F;
+  --chart-5: #7FAFC0;
+  --sidebar: #F0F5F8;
+  --sidebar-foreground: #07111A;
+  --sidebar-primary: #119FCD;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #E0ECF2;
+  --sidebar-accent-foreground: #063B4C;
+  --sidebar-border: #D0DEE6;
+  --sidebar-ring: #119FCD;
+}
+
+/* Dark theme — Plasmatic design guide */
+.dark {
+  --background: #07111A;
+  --foreground: #ECF4F8;
+  --card: #152839;
+  --card-foreground: #ECF4F8;
+  --popover: #0F2030;
+  --popover-foreground: #ECF4F8;
+  --primary: #119FCD;
+  --primary-foreground: #063B4C;
+  --secondary: #0F2030;
+  --secondary-foreground: #7FAFC0;
+  --muted: #0F2030;
+  --muted-foreground: #3D6B7D;
+  --accent: rgba(17, 159, 205, 0.12);
+  --accent-foreground: #ECF4F8;
+  --destructive: #EF476F;
+  --destructive-foreground: #ECF4F8;
+  --border: rgba(61, 107, 125, 0.25);
+  --input: rgba(61, 107, 125, 0.25);
+  --ring: #119FCD;
+  --chart-1: #119FCD;
+  --chart-2: #4CBD97;
+  --chart-3: #FFD167;
+  --chart-4: #EF476F;
+  --chart-5: #7FAFC0;
+  --sidebar: #0B1925;
+  --sidebar-foreground: #ECF4F8;
+  --sidebar-primary: #119FCD;
+  --sidebar-primary-foreground: #ECF4F8;
+  --sidebar-accent: rgba(17, 159, 205, 0.12);
+  --sidebar-accent-foreground: #ECF4F8;
+  --sidebar-border: rgba(61, 107, 125, 0.15);
+  --sidebar-ring: #119FCD;
 }
 
 @layer base {
@@ -84,6 +123,5 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: system-ui, -apple-system, sans-serif;
   }
 }

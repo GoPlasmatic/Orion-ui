@@ -14,8 +14,3 @@ export function formatDate(date: string) {
     minute: "2-digit",
   })
 }
-
-export function truncate(str: string, length: number) {
-  if (str.length <= length) return str
-  return str.slice(0, length) + "..."
-}

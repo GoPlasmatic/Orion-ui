@@ -5,9 +5,11 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { PageHeader } from "@/components/shared/page-header"
+import { JsonViewer } from "@/components/shared/json-viewer"
 import { Send } from "lucide-react"
 
-export function DataPage() {
+export function ConsolePage() {
   const [channel, setChannel] = useState("")
   const [payload, setPayload] = useState('{\n  \n}')
   const [sync, setSync] = useState(true)
@@ -47,12 +49,12 @@ export function DataPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Data Test</h1>
+      <PageHeader title="Data Console" description="Send test requests to channels" />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Send Data</CardTitle>
+            <CardTitle>Request</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
@@ -89,7 +91,7 @@ export function DataPage() {
             </div>
 
             <Button onClick={handleSend} disabled={loading} className="w-full">
-              <Send className="mr-2 h-4 w-4" />
+              <Send className="h-4 w-4" />
               {loading ? "Sending..." : "Send"}
             </Button>
 
@@ -107,9 +109,7 @@ export function DataPage() {
           </CardHeader>
           <CardContent>
             {result ? (
-              <pre className="max-h-[500px] overflow-auto rounded-md bg-muted p-4 text-xs font-mono">
-                {JSON.stringify(result, null, 2)}
-              </pre>
+              <JsonViewer data={result} maxHeight="500px" />
             ) : (
               <p className="text-sm text-muted-foreground">
                 Send a request to see the response here.

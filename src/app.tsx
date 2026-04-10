@@ -1,13 +1,19 @@
 import { BrowserRouter, Routes, Route } from "react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { ThemeProvider } from "@/lib/theme-provider"
 import { AppLayout } from "@/components/layout/app-layout"
 import { DashboardPage } from "@/pages/dashboard"
-import { InvocationsPage } from "@/pages/invocations"
-import { InvocationDetailPage } from "@/pages/invocation-detail"
 import { ChannelsPage } from "@/pages/channels"
+import { ChannelDetailPage } from "@/pages/channel-detail"
+import { WorkflowsPage } from "@/pages/workflows"
+import { WorkflowDetailPage } from "@/pages/workflow-detail"
 import { ConnectorsPage } from "@/pages/connectors"
 import { ConnectorDetailPage } from "@/pages/connector-detail"
-import { DataPage } from "@/pages/data"
+import { TracesPage } from "@/pages/traces"
+import { TraceDetailPage } from "@/pages/trace-detail"
+import { AuditPage } from "@/pages/audit"
+import { ConsolePage } from "@/pages/console"
+import { SettingsPage } from "@/pages/settings"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -20,20 +26,27 @@ const queryClient = new QueryClient({
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<AppLayout />}>
-            <Route index element={<DashboardPage />} />
-            <Route path="invocations" element={<InvocationsPage />} />
-            <Route path="invocations/:id" element={<InvocationDetailPage />} />
-            <Route path="channels" element={<ChannelsPage />} />
-            <Route path="connectors" element={<ConnectorsPage />} />
-            <Route path="connectors/:id" element={<ConnectorDetailPage />} />
-            <Route path="data" element={<DataPage />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <Routes>
+            <Route element={<AppLayout />}>
+              <Route index element={<DashboardPage />} />
+              <Route path="channels" element={<ChannelsPage />} />
+              <Route path="channels/:id" element={<ChannelDetailPage />} />
+              <Route path="workflows" element={<WorkflowsPage />} />
+              <Route path="workflows/:id" element={<WorkflowDetailPage />} />
+              <Route path="connectors" element={<ConnectorsPage />} />
+              <Route path="connectors/:id" element={<ConnectorDetailPage />} />
+              <Route path="traces" element={<TracesPage />} />
+              <Route path="traces/:id" element={<TraceDetailPage />} />
+              <Route path="audit" element={<AuditPage />} />
+              <Route path="console" element={<ConsolePage />} />
+              <Route path="settings" element={<SettingsPage />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </ThemeProvider>
   )
 }
