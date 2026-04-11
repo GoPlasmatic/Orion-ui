@@ -1,5 +1,5 @@
 import { useHealth } from "@/hooks/use-health"
-import { useTheme } from "@/lib/theme-provider"
+import { useTheme } from "@/lib/use-theme"
 import { cn } from "@/lib/utils"
 import { Activity, Moon, Sun } from "lucide-react"
 
