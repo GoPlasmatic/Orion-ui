@@ -25,7 +25,10 @@ const navItems = [
 export function Sidebar() {
   return (
     <aside className="flex h-full w-60 flex-col border-r border-sidebar-border bg-sidebar">
-      <div className="flex h-14 items-center gap-2.5 border-b border-sidebar-border px-4">
+      <NavLink
+        to="/"
+        className="flex h-14 items-center gap-2.5 border-b border-sidebar-border px-4 transition-colors hover:bg-sidebar-accent/50"
+      >
         <img
           src="/plasmatic-logo.png"
           alt="Plasmatic"
@@ -34,7 +37,7 @@ export function Sidebar() {
         <span className="text-lg font-semibold tracking-tight text-sidebar-foreground">
           Orion
         </span>
-      </div>
+      </NavLink>
       <nav className="flex-1 space-y-1 p-3">
         {navItems.map((item) => (
           <NavLink

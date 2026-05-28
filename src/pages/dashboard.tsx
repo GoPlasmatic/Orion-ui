@@ -3,12 +3,14 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useEngineStatus } from "@/hooks/use-engine"
 import { useHealth } from "@/hooks/use-health"
 import { useTraces } from "@/hooks/use-traces"
+import { useChannels } from "@/hooks/use-channels"
+import { useConnectors } from "@/hooks/use-connectors"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PageHeader } from "@/components/shared/page-header"
-import { Activity, GitBranch, Server, Clock, RefreshCw, Radio } from "lucide-react"
+import { Activity, GitBranch, RefreshCw, Radio, Plug } from "lucide-react"
 import { formatDate } from "@/lib/utils"
 
 function formatUptime(seconds: number): string {
@@ -44,13 +46,18 @@ export function DashboardPage() {
     sort_by: "created_at",
     sort_order: "desc",
   })
+  const { data: channels } = useChannels({ limit: 1 })
+  const { data: connectors } = useConnectors({ limit: 200 })
 
   const isHealthy = health?.status === "ok"
+  const enabledConnectors = connectors?.data.filter((c) => c.enabled).length
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["engine"] })
     queryClient.invalidateQueries({ queryKey: ["health"] })
     queryClient.invalidateQueries({ queryKey: ["traces"] })
+    queryClient.invalidateQueries({ queryKey: ["channels"] })
+    queryClient.invalidateQueries({ queryKey: ["connectors"] })
   }
 
   return (
@@ -82,39 +89,10 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Engine Version</CardTitle>
-            <Server className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {engineLoading ? (
-              <Skeleton className="h-7 w-24" />
-            ) : engine ? (
-              <p className="text-2xl font-bold">v{engine.version}</p>
-            ) : (
-              <span className="text-sm text-muted-foreground">Unavailable</span>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Uptime</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {engineLoading ? (
-              <Skeleton className="h-7 w-24" />
-            ) : engine ? (
-              <p className="text-2xl font-bold">{formatUptime(engine.uptime_seconds)}</p>
-            ) : (
-              <span className="text-sm text-muted-foreground">--</span>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
+        <Card
+          className="cursor-pointer transition-colors hover:bg-muted/50"
+          onClick={() => navigate("/workflows")}
+        >
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Workflows</CardTitle>
             <GitBranch className="h-4 w-4 text-muted-foreground" />
@@ -127,12 +105,58 @@ export function DashboardPage() {
             ) : (
               <span className="text-sm text-muted-foreground">--</span>
             )}
+            <p className="text-xs text-muted-foreground">
+              {engine ? `${engine.active_workflows} active` : " "}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card
+          className="cursor-pointer transition-colors hover:bg-muted/50"
+          onClick={() => navigate("/channels")}
+        >
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Channels</CardTitle>
+            <Radio className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            {channels ? (
+              <p className="text-2xl font-bold">{channels.total}</p>
+            ) : (
+              <Skeleton className="h-7 w-16" />
+            )}
+            <p className="text-xs text-muted-foreground">
+              {engine ? `${engine.channels.length} active` : " "}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card
+          className="cursor-pointer transition-colors hover:bg-muted/50"
+          onClick={() => navigate("/connectors")}
+        >
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Connectors</CardTitle>
+            <Plug className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            {connectors ? (
+              <p className="text-2xl font-bold">{connectors.total}</p>
+            ) : (
+              <Skeleton className="h-7 w-16" />
+            )}
+            <p className="text-xs text-muted-foreground">
+              {connectors ? `${enabledConnectors} enabled` : " "}
+            </p>
           </CardContent>
         </Card>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Card>
+        <Card
+          className="cursor-pointer transition-colors hover:bg-muted/50"
+          onClick={() => navigate("/workflows")}
+        >
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Active Workflows</CardTitle>
           </CardHeader>
@@ -140,17 +164,22 @@ export function DashboardPage() {
             <p className="text-3xl font-bold text-emerald-600">{engine?.active_workflows ?? "--"}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card
+          className="cursor-pointer transition-colors hover:bg-muted/50"
+          onClick={() => navigate("/channels")}
+        >
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Radio className="h-4 w-4" /> Channels
+              <Radio className="h-4 w-4" /> Active Channels
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-1">
-              {engine?.channels.map((ch) => (
-                <Badge key={ch} variant="outline">{ch}</Badge>
-              )) ?? <span className="text-muted-foreground">--</span>}
+              {engine && engine.channels.length > 0
+                ? engine.channels.map((ch) => (
+                    <Badge key={ch} variant="outline">{ch}</Badge>
+                  ))
+                : <span className="text-muted-foreground">--</span>}
             </div>
           </CardContent>
         </Card>

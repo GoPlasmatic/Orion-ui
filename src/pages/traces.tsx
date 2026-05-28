@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
-import { formatDate } from "@/lib/utils"
+import { formatDate, formatDuration } from "@/lib/utils"
 import { ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 
 const PAGE_SIZE = 20
@@ -32,13 +32,6 @@ const statusColor: Record<string, string> = {
   running: "",
   pending: "",
   failed: "",
-}
-
-function formatDuration(ms: number | null): string {
-  if (ms === null) return "--"
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
-  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
 }
 
 const columnHelper = createColumnHelper<Trace>()

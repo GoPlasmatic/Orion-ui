@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { JsonViewer } from "@/components/shared/json-viewer"
-import { formatDate } from "@/lib/utils"
+import { formatDate, formatDuration } from "@/lib/utils"
 import { ArrowLeft, ChevronDown, ChevronRight, AlertCircle } from "lucide-react"
 
 const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -22,13 +22,6 @@ const statusColor: Record<string, string> = {
   running: "",
   pending: "",
   failed: "",
-}
-
-function formatDuration(ms: number | null | undefined): string {
-  if (ms == null) return "--"
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
-  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
 }
 
 const stepResultClass: Record<string, string> = {
