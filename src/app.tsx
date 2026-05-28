@@ -5,10 +5,12 @@ import { AppLayout } from "@/components/layout/app-layout"
 import { DashboardPage } from "@/pages/dashboard"
 import { ChannelsPage } from "@/pages/channels"
 import { ChannelDetailPage } from "@/pages/channel-detail"
+import { ChannelFormPage } from "@/pages/channel-form"
 import { WorkflowsPage } from "@/pages/workflows"
 import { WorkflowDetailPage } from "@/pages/workflow-detail"
 import { ConnectorsPage } from "@/pages/connectors"
 import { ConnectorDetailPage } from "@/pages/connector-detail"
+import { ConnectorFormPage } from "@/pages/connector-form"
 import { TracesPage } from "@/pages/traces"
 import { TraceDetailPage } from "@/pages/trace-detail"
 import { AuditPage } from "@/pages/audit"
@@ -33,11 +35,15 @@ export default function App() {
             <Route element={<AppLayout />}>
               <Route index element={<DashboardPage />} />
               <Route path="channels" element={<ChannelsPage />} />
+              <Route path="channels/new" element={<ChannelFormPage />} />
               <Route path="channels/:id" element={<ChannelDetailPage />} />
+              <Route path="channels/:id/edit" element={<ChannelFormPage />} />
               <Route path="workflows" element={<WorkflowsPage />} />
               <Route path="workflows/:id" element={<WorkflowDetailPage />} />
               <Route path="connectors" element={<ConnectorsPage />} />
+              <Route path="connectors/new" element={<ConnectorFormPage />} />
               <Route path="connectors/:id" element={<ConnectorDetailPage />} />
+              <Route path="connectors/:id/edit" element={<ConnectorFormPage />} />
               <Route path="traces" element={<TracesPage />} />
               <Route path="traces/:id" element={<TraceDetailPage />} />
               <Route path="audit" element={<AuditPage />} />

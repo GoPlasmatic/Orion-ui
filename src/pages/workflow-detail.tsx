@@ -179,34 +179,51 @@ export function WorkflowDetailPage() {
                 {testResult ? (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <Badge variant={testResult.success ? "default" : "destructive"} className={testResult.success ? "bg-emerald-500" : ""}>
-                        {testResult.success ? "Passed" : "Failed"}
+                      <Badge variant={testResult.matched ? "default" : "secondary"} className={testResult.matched ? "bg-emerald-500" : ""}>
+                        {testResult.matched ? "Matched" : "No Match"}
                       </Badge>
-                      <span className="text-sm text-muted-foreground">{testResult.duration_ms}ms</span>
+                      {testResult.errors.length > 0 && (
+                        <Badge variant="destructive">
+                          {testResult.errors.length} error{testResult.errors.length !== 1 ? "s" : ""}
+                        </Badge>
+                      )}
                     </div>
 
-                    {testResult.trace && testResult.trace.length > 0 && (
+                    {testResult.trace?.steps && testResult.trace.steps.length > 0 && (
                       <div className="space-y-2">
                         <h4 className="text-sm font-medium">Trace Steps</h4>
-                        {testResult.trace.map((step) => (
-                          <div key={step.task_id} className="flex items-center justify-between rounded border px-3 py-2">
-                            <div className="flex items-center gap-2">
-                              <Badge
-                                variant={step.status === "executed" ? "default" : step.status === "skipped" ? "secondary" : "destructive"}
-                                className={step.status === "executed" ? "bg-emerald-500" : ""}
-                              >
-                                {step.status}
-                              </Badge>
-                              <span className="text-sm font-medium">{step.task_name}</span>
-                              <span className="text-xs text-muted-foreground font-mono">{step.function}</span>
+                        {testResult.trace.steps.map((step, i) => {
+                          const result = typeof step.result === "string" ? step.result.toLowerCase() : undefined
+                          return (
+                            <div key={i} className="flex items-center justify-between rounded border px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                {result && (
+                                  <Badge
+                                    variant={result === "executed" ? "default" : result === "skipped" ? "secondary" : "destructive"}
+                                    className={result === "executed" ? "bg-emerald-500" : ""}
+                                  >
+                                    {result}
+                                  </Badge>
+                                )}
+                                <span className="text-sm font-medium">{step.task_name ?? step.task_id}</span>
+                                {step.function && (
+                                  <span className="text-xs text-muted-foreground font-mono">{step.function}</span>
+                                )}
+                              </div>
+                              {step.duration_ms !== undefined && (
+                                <span className="text-xs text-muted-foreground">{step.duration_ms}ms</span>
+                              )}
                             </div>
-                            <span className="text-xs text-muted-foreground">{step.duration_ms}ms</span>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     )}
 
-                    <JsonViewer data={testResult.result} label="Output" />
+                    {testResult.errors.length > 0 && (
+                      <JsonViewer data={testResult.errors} label="Errors" maxHeight="12rem" />
+                    )}
+
+                    <JsonViewer data={testResult.output} label="Output" />
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">

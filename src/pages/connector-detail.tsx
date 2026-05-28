@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
-import { formatDate } from "@/lib/utils"
-import { ArrowLeft, AlertCircle, Trash2, RefreshCw } from "lucide-react"
+import { formatDate, parseJson } from "@/lib/utils"
+import { ArrowLeft, AlertCircle, Trash2, RefreshCw, Pencil } from "lucide-react"
 import { useState } from "react"
 
 export function ConnectorDetailPage() {
@@ -43,9 +43,9 @@ export function ConnectorDetailPage() {
     )
   }
 
-  const connectorBreakers = circuitBreakers?.filter((cb) =>
-    cb.key.includes(connector.name)
-  ) ?? []
+  const connectorBreakers = Object.entries(circuitBreakers?.breakers ?? {}).filter(([key]) =>
+    key.includes(connector.name)
+  )
 
   return (
     <div className="space-y-6">
@@ -57,16 +57,34 @@ export function ConnectorDetailPage() {
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold">{connector.name}</h1>
           <Badge variant="outline" className="uppercase">{connector.connector_type}</Badge>
+          <Badge
+            variant="outline"
+            className={
+              connector.enabled
+                ? "border-emerald-200 text-emerald-700"
+                : "border-muted-foreground/30 text-muted-foreground"
+            }
+          >
+            {connector.enabled ? "Enabled" : "Disabled"}
+          </Badge>
         </div>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setShowDeleteConfirm(true)}
-          disabled={deleteConnector.isPending}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          Delete
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" asChild>
+            <Link to={`/connectors/${connector.id}/edit`}>
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </Link>
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setShowDeleteConfirm(true)}
+            disabled={deleteConnector.isPending}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete
+          </Button>
+        </div>
       </div>
 
       <div className="text-sm text-muted-foreground">
@@ -81,21 +99,32 @@ export function ConnectorDetailPage() {
         </TabsList>
 
         <TabsContent value="config">
-          <JsonViewer data={connector.config} label="Connector Configuration" maxHeight="32rem" />
+          <p className="mb-2 text-xs text-muted-foreground">
+            Secret fields (passwords, tokens, API keys) are masked by the server.
+          </p>
+          <JsonViewer
+            data={parseJson(connector.config_json)}
+            label="Connector Configuration"
+            maxHeight="32rem"
+          />
         </TabsContent>
 
         <TabsContent value="circuit-breaker">
-          {connectorBreakers.length > 0 ? (
+          {circuitBreakers && !circuitBreakers.enabled ? (
+            <p className="text-sm text-muted-foreground py-4">
+              Circuit breakers are disabled on this engine.
+            </p>
+          ) : connectorBreakers.length > 0 ? (
             <div className="space-y-3">
-              {connectorBreakers.map((cb) => (
-                <Card key={cb.key}>
+              {connectorBreakers.map(([key, state]) => (
+                <Card key={key}>
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm font-mono">{cb.key}</CardTitle>
+                      <CardTitle className="text-sm font-mono">{key}</CardTitle>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => resetBreaker.mutate(cb.key)}
+                        onClick={() => resetBreaker.mutate(key)}
                         disabled={resetBreaker.isPending}
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
@@ -104,34 +133,20 @@ export function ConnectorDetailPage() {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-1 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">State</span>
-                        <Badge
-                          variant="outline"
-                          className={
-                            cb.state === "closed"
-                              ? "border-emerald-200 text-emerald-700"
-                              : cb.state === "open"
-                                ? "border-red-200 text-red-700"
-                                : "border-amber-200 text-amber-700"
-                          }
-                        >
-                          {cb.state}
-                        </Badge>
-                      </div>
-                      {cb.failure_count !== undefined && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Failures</span>
-                          <span>{cb.failure_count}</span>
-                        </div>
-                      )}
-                      {cb.last_failure && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Last Failure</span>
-                          <span>{formatDate(cb.last_failure)}</span>
-                        </div>
-                      )}
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">State</span>
+                      <Badge
+                        variant="outline"
+                        className={
+                          state === "closed"
+                            ? "border-emerald-200 text-emerald-700"
+                            : state === "open"
+                              ? "border-red-200 text-red-700"
+                              : "border-amber-200 text-amber-700"
+                        }
+                      >
+                        {state}
+                      </Badge>
                     </div>
                   </CardContent>
                 </Card>
@@ -151,7 +166,7 @@ export function ConnectorDetailPage() {
           description={`Are you sure you want to delete "${connector.name}"? This action cannot be undone.`}
           destructive
           onConfirm={() => {
-            deleteConnector.mutate(connector.name, {
+            deleteConnector.mutate(connector.id, {
               onSuccess: () => navigate("/connectors"),
             })
             setShowDeleteConfirm(false)

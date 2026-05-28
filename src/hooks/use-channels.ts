@@ -83,3 +83,14 @@ export function useCreateChannelVersion() {
     },
   })
 }
+
+export function useImportChannels() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ items, dryRun }: { items: CreateChannelRequest[]; dryRun?: boolean }) =>
+      channelsApi.import(items, dryRun),
+    onSuccess: (_data, vars) => {
+      if (!vars.dryRun) queryClient.invalidateQueries({ queryKey: ["channels"] })
+    },
+  })
+}

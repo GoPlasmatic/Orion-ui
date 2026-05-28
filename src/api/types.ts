@@ -27,31 +27,46 @@ export interface StatusChangeRequest {
 
 // Channel types
 export type ChannelType = "sync" | "async"
-export type ChannelProtocol = "http" | "rest" | "kafka"
+export type ChannelProtocol = "rest" | "http" | "kafka"
+
+// Trace storage mode (global default + per-channel override via config.tracing)
+export type TraceStorageMode = "sync" | "async" | "batch" | "off"
 
 export interface RateLimitConfig {
-  rps?: number
+  requests_per_second?: number
   burst?: number
   key_logic?: JsonLogicValue
 }
 
 export interface BackpressureConfig {
   max_concurrent?: number
+  queue_depth?: number
 }
 
 export interface CorsConfig {
-  origins?: string[]
+  allowed_origins?: string[]
+  allowed_methods?: string[]
+  allowed_headers?: string[]
 }
 
 export interface CacheConfig {
   enabled?: boolean
   ttl_secs?: number
   cache_key_fields?: string[]
+  connector?: string
 }
 
 export interface DeduplicationConfig {
   header?: string
-  retention_secs?: number
+  window_secs?: number
+  connector?: string
+}
+
+export interface ChannelTracingConfig {
+  mode?: TraceStorageMode
+  sample_rate?: number
+  errors_only?: boolean
+  task_details?: boolean
 }
 
 export interface ChannelConfig {
@@ -62,6 +77,7 @@ export interface ChannelConfig {
   validation_logic?: JsonLogicValue
   cache?: CacheConfig
   deduplication?: DeduplicationConfig
+  tracing?: ChannelTracingConfig
 }
 
 export interface Channel {
@@ -71,7 +87,7 @@ export interface Channel {
   channel_type: ChannelType
   protocol: ChannelProtocol
   route_pattern: string | null
-  methods: string[]
+  methods: string[] | null
   topic: string | null
   consumer_group: string | null
   transport_config: Record<string, unknown>
@@ -93,23 +109,32 @@ export interface ListChannelsParams {
 }
 
 export interface CreateChannelRequest {
+  channel_id?: string
   name: string
+  description?: string
   channel_type: ChannelType
   protocol: ChannelProtocol
-  route_pattern?: string
   methods?: string[]
+  route_pattern?: string
+  topic?: string
+  consumer_group?: string
+  transport_config?: Record<string, unknown>
   workflow_id?: string
   config?: ChannelConfig
+  priority?: number
 }
 
 export interface UpdateChannelRequest {
   name?: string
-  channel_type?: ChannelType
-  protocol?: ChannelProtocol
-  route_pattern?: string
+  description?: string
   methods?: string[]
+  route_pattern?: string
+  topic?: string
+  consumer_group?: string
+  transport_config?: Record<string, unknown>
   workflow_id?: string
   config?: ChannelConfig
+  priority?: number
 }
 
 export interface ChannelVersion {
@@ -161,21 +186,42 @@ export interface WorkflowTestRequest {
   metadata?: Record<string, unknown>
 }
 
-export interface TraceStep {
-  task_id: string
-  task_name: string
-  function: string
-  status: "executed" | "skipped" | "error"
-  duration_ms: number
-  error?: string
-  output?: Record<string, unknown>
+// dataflow-rs 3.0 per-task execution trace.
+// `result` is lowercase on the wire ("executed" | "skipped" | "error"); each step
+// carries a `message` snapshot of the message state after that task.
+export type ExecutionStepResult = "executed" | "skipped" | "error" | string
+
+export interface ExecutionStepMessage {
+  id?: string
+  payload?: unknown
+  context?: { data?: unknown; metadata?: unknown; [key: string]: unknown }
+  [key: string]: unknown
+}
+
+export interface ExecutionStep {
+  task_id?: string
+  task_name?: string
+  workflow_id?: string
+  function?: string
+  result?: ExecutionStepResult
+  duration_ms?: number
+  error?: unknown
+  input?: unknown
+  output?: unknown
+  message?: ExecutionStepMessage
+  [key: string]: unknown
+}
+
+export interface ExecutionTrace {
+  steps: ExecutionStep[]
+  [key: string]: unknown
 }
 
 export interface WorkflowTestResponse {
-  success: boolean
-  result: Record<string, unknown>
-  trace: TraceStep[]
-  duration_ms: number
+  matched: boolean
+  trace: ExecutionTrace
+  output: Record<string, unknown>
+  errors: unknown[]
 }
 
 export interface WorkflowVersion {
@@ -188,14 +234,43 @@ export interface WorkflowRolloutRequest {
   rollout_percentage: number
 }
 
+// Workflow validation
+export interface ValidationIssue {
+  field: string
+  message: string
+}
+
+export interface ValidationResponse {
+  valid: boolean
+  errors: ValidationIssue[]
+  warnings: ValidationIssue[]
+}
+
+// Bulk import (channels / connectors / workflows)
+export interface ImportError {
+  index: number
+  error: string
+}
+
+export interface ImportResult {
+  dry_run?: boolean
+  imported: number
+  failed: number
+  would_create?: number
+  would_fail?: number
+  errors: ImportError[]
+}
+
 // Connector types
-export type ConnectorType = "http" | "kafka" | "db" | "cache" | "mongo" | "storage"
+export type ConnectorType = "http" | "kafka" | "db" | "cache" | "storage"
 
 export interface Connector {
   id: string
   name: string
   connector_type: ConnectorType
-  config: Record<string, unknown>
+  // JSON string of the connector config, with secrets masked. Parse to display.
+  config_json: string
+  enabled: boolean
   created_at: string
   updated_at: string
 }
@@ -203,10 +278,10 @@ export interface Connector {
 export interface ListConnectorsParams {
   limit?: number
   offset?: number
-  connector_type?: ConnectorType
 }
 
 export interface CreateConnectorRequest {
+  id?: string
   name: string
   connector_type: ConnectorType
   config: Record<string, unknown>
@@ -216,13 +291,13 @@ export interface UpdateConnectorRequest {
   name?: string
   connector_type?: ConnectorType
   config?: Record<string, unknown>
+  enabled?: boolean
 }
 
-export interface CircuitBreaker {
-  key: string
-  state: string
-  failure_count?: number
-  last_failure?: string
+// Connector circuit breakers: { enabled, breakers: { "channel:connector": "closed" | "open" | "half_open" } }
+export interface CircuitBreakerStatus {
+  enabled: boolean
+  breakers: Record<string, string>
 }
 
 // Engine types
@@ -249,6 +324,7 @@ export type TraceStatus = "pending" | "running" | "completed" | "failed"
 export interface Trace {
   id: string
   channel: string
+  channel_id?: string | null
   status: string
   mode: string
   error_message: string | null
@@ -259,39 +335,32 @@ export interface Trace {
   started_at: string | null
   completed_at: string | null
   updated_at: string
+  task_trace_json?: string | null
 }
 
-export interface AuditChange {
-  path: string
-  old_value: unknown
-  new_value: unknown
-}
-
-export interface AuditTrailEntry {
-  workflow_id: string
-  task_id: string
-  timestamp: string
-  status: number
-  changes: AuditChange[]
-}
-
-export interface TraceMessage {
-  id: string
-  payload: Record<string, unknown>
-  context: Record<string, unknown>
-  audit_trail: AuditTrailEntry[]
-  errors: unknown[]
+// Parsed workflow result stored on a completed trace (dataflow-rs 3.0 shape).
+export interface WorkflowResult {
+  id?: string
+  status?: string
+  data?: Record<string, unknown>
+  errors?: unknown[]
 }
 
 export interface TraceDetail {
   id: string
   status: string
   mode: string
-  duration_ms: number | null
-  message: TraceMessage | null
+  duration_ms?: number | null
+  // Parsed workflow result, present only when status === "completed".
+  message?: WorkflowResult
+  // Error text, present only when status === "failed".
+  error?: string
+  // Parsed per-task execution trace, present only when the channel opted into
+  // task_details. Shape mirrors ExecutionTrace.
+  task_trace_json?: ExecutionTrace | unknown
   created_at: string
-  started_at: string | null
-  completed_at: string | null
+  started_at?: string | null
+  completed_at?: string | null
 }
 
 export type TraceSortBy = "created_at" | "updated_at" | "status" | "channel" | "mode"
@@ -309,12 +378,12 @@ export interface ListTracesParams {
 // Audit log types
 export interface AuditLog {
   id: string
+  principal: string
   action: string
   resource_type: string
   resource_id: string
-  details?: Record<string, unknown>
-  timestamp: string
-  user?: string
+  details?: string | null
+  created_at: string
 }
 
 export interface ListAuditLogsParams {
@@ -330,6 +399,33 @@ export interface ProcessRequest {
   metadata?: Record<string, unknown>
 }
 
+// Per-request profiling, present under `_orion.profile` when profiling is
+// enabled (X-Orion-Profile header) and the server allows it.
+export interface ProfilePhase {
+  name: string
+  ms: number
+  pct: number
+}
+
+export interface ProfileResult {
+  version: number
+  totals_ms?: number
+  request_total_ms?: number
+  handlers_total_ms?: number
+  workflow_total_ms?: number
+  phases?: ProfilePhase[]
+  handlers?: Array<Record<string, unknown>>
+  by_function?: Record<string, { count: number; total_ms: number }>
+  by_connector?: Record<string, { count: number; total_ms: number }>
+  breakdown_pct?: Record<string, number>
+  [key: string]: unknown
+}
+
 export interface ProcessResponse {
+  id?: string
+  status?: string
+  data?: Record<string, unknown>
+  errors?: unknown[]
+  _orion?: { profile?: ProfileResult }
   [key: string]: unknown
 }

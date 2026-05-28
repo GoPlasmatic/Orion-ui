@@ -4,7 +4,8 @@ import type { EngineStatus, HealthResponse } from "./types"
 export const engineApi = {
   status: () => api.get<EngineStatus>("admin/engine/status"),
 
-  reload: () => api.post<{ message: string }>("admin/engine/reload"),
+  reload: () =>
+    api.post<{ reloaded: boolean; workflows_count: number }>("admin/engine/reload"),
 
   health: () => api.get<HealthResponse>("/health"),
 }

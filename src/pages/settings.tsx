@@ -67,12 +67,13 @@ export function SettingsPage() {
               <Plug className="h-4 w-4" /> Connectors
             </CardTitle>
             <CardDescription>
-              Reload all connectors from the database.
+              Refresh connector bindings via an engine reload.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Reconnects all connectors and refreshes their configuration.
+              Reloads the engine so channels pick up the latest connector configuration.
+              Connector edits already reload the registry automatically.
             </p>
             <Button
               variant="outline"

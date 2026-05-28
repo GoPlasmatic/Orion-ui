@@ -10,7 +10,7 @@ import { LifecycleActions } from "@/components/shared/lifecycle-actions"
 import { VersionHistory } from "@/components/shared/version-history"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { formatDate } from "@/lib/utils"
-import { ArrowLeft, AlertCircle } from "lucide-react"
+import { ArrowLeft, AlertCircle, Pencil } from "lucide-react"
 
 export function ChannelDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -58,14 +58,24 @@ export function ChannelDetailPage() {
           <StatusBadge status={channel.status} />
           <Badge variant="outline">v{channel.version}</Badge>
         </div>
-        <LifecycleActions
-          status={channel.status}
-          isPending={isPending}
-          onActivate={() => changeStatus.mutate({ id: channel.channel_id, req: { status: "active" } })}
-          onArchive={() => changeStatus.mutate({ id: channel.channel_id, req: { status: "archived" } })}
-          onNewVersion={() => createVersion.mutate(channel.channel_id)}
-          onDelete={() => deleteChannel.mutate(channel.channel_id, { onSuccess: () => navigate("/channels") })}
-        />
+        <div className="flex items-center gap-2">
+          {channel.status === "draft" && (
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/channels/${channel.channel_id}/edit`}>
+                <Pencil className="h-3.5 w-3.5" />
+                Edit
+              </Link>
+            </Button>
+          )}
+          <LifecycleActions
+            status={channel.status}
+            isPending={isPending}
+            onActivate={() => changeStatus.mutate({ id: channel.channel_id, req: { status: "active" } })}
+            onArchive={() => changeStatus.mutate({ id: channel.channel_id, req: { status: "archived" } })}
+            onNewVersion={() => createVersion.mutate(channel.channel_id)}
+            onDelete={() => deleteChannel.mutate(channel.channel_id, { onSuccess: () => navigate("/channels") })}
+          />
+        </div>
       </div>
 
       <Tabs defaultValue="overview">
@@ -101,7 +111,7 @@ export function ChannelDetailPage() {
                 <div>
                   <dt className="text-muted-foreground">Methods</dt>
                   <dd className="mt-0.5 flex gap-1">
-                    {channel.methods?.length > 0
+                    {channel.methods && channel.methods.length > 0
                       ? channel.methods.map((m) => (
                           <Badge key={m} variant="outline" className="text-xs">{m}</Badge>
                         ))
@@ -140,10 +150,10 @@ export function ChannelDetailPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-1 text-sm">
-                    {channel.config.rate_limit.rps !== undefined && (
+                    {channel.config.rate_limit.requests_per_second !== undefined && (
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Requests/sec</span>
-                        <span>{channel.config.rate_limit.rps}</span>
+                        <span>{channel.config.rate_limit.requests_per_second}</span>
                       </div>
                     )}
                     {channel.config.rate_limit.burst !== undefined && (
@@ -218,10 +228,10 @@ export function ChannelDetailPage() {
                       <span className="text-muted-foreground">Header</span>
                       <span className="font-mono text-xs">{channel.config.deduplication.header ?? "Idempotency-Key"}</span>
                     </div>
-                    {channel.config.deduplication.retention_secs !== undefined && (
+                    {channel.config.deduplication.window_secs !== undefined && (
                       <div className="flex justify-between">
-                        <span className="text-muted-foreground">Retention</span>
-                        <span>{channel.config.deduplication.retention_secs}s</span>
+                        <span className="text-muted-foreground">Window</span>
+                        <span>{channel.config.deduplication.window_secs}s</span>
                       </div>
                     )}
                   </div>
@@ -236,9 +246,45 @@ export function ChannelDetailPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="flex flex-wrap gap-1">
-                    {channel.config.cors.origins?.map((origin) => (
+                    {channel.config.cors.allowed_origins?.map((origin) => (
                       <Badge key={origin} variant="outline" className="text-xs">{origin}</Badge>
                     )) ?? <span className="text-sm text-muted-foreground">None configured</span>}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {channel.config.tracing && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Trace Storage</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1 text-sm">
+                    {channel.config.tracing.mode !== undefined && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Mode</span>
+                        <Badge variant="outline" className="uppercase">{channel.config.tracing.mode}</Badge>
+                      </div>
+                    )}
+                    {channel.config.tracing.sample_rate !== undefined && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Sample Rate</span>
+                        <span>{channel.config.tracing.sample_rate}</span>
+                      </div>
+                    )}
+                    {channel.config.tracing.errors_only !== undefined && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Errors Only</span>
+                        <span>{channel.config.tracing.errors_only ? "Yes" : "No"}</span>
+                      </div>
+                    )}
+                    {channel.config.tracing.task_details !== undefined && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Per-Task Trace</span>
+                        <span>{channel.config.tracing.task_details ? "Captured" : "Off"}</span>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>

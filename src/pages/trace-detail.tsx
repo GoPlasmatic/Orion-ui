@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Link, useParams } from "react-router"
 import { useTrace } from "@/hooks/use-traces"
-import type { AuditTrailEntry } from "@/api/types"
+import type { ExecutionStep } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
@@ -24,65 +24,70 @@ const statusColor: Record<string, string> = {
   failed: "",
 }
 
-function formatDuration(ms: number | null): string {
-  if (ms === null) return "--"
+function formatDuration(ms: number | null | undefined): string {
+  if (ms == null) return "--"
   if (ms < 1000) return `${ms}ms`
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
   return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
 }
 
-function AuditStep({ entry, index }: { entry: AuditTrailEntry; index: number }) {
+const stepResultClass: Record<string, string> = {
+  executed: "border-emerald-200 text-emerald-700",
+  skipped: "border-muted-foreground/30 text-muted-foreground",
+  error: "border-red-200 text-red-700",
+}
+
+/** Normalise the parsed task_trace_json into a list of execution steps. */
+function extractSteps(raw: unknown): ExecutionStep[] {
+  if (Array.isArray(raw)) return raw as ExecutionStep[]
+  if (raw && typeof raw === "object" && Array.isArray((raw as { steps?: unknown }).steps)) {
+    return (raw as { steps: ExecutionStep[] }).steps
+  }
+  return []
+}
+
+function TaskStep({ step, index }: { step: ExecutionStep; index: number }) {
   const [open, setOpen] = useState(false)
-  const hasChanges = entry.changes && entry.changes.length > 0
+  const result = typeof step.result === "string" ? step.result.toLowerCase() : undefined
+  const label = step.task_name || step.task_id || step.function || `Task ${index + 1}`
+  const snapshotData = step.message?.context?.data
+  const hasError = step.error !== undefined && step.error !== null
 
   return (
-    <div className="relative pl-8 pb-6 last:pb-0">
-      <div className="absolute left-3 top-0 bottom-0 w-px bg-border" />
-      <div className="absolute left-1.5 top-1.5 h-3 w-3 rounded-full border-2 border-primary bg-background" />
-
-      <div className="space-y-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-medium text-sm">Step {index + 1}</span>
-          <Badge variant="outline" className="text-xs">{entry.task_id}</Badge>
-          <Badge variant="secondary" className="text-xs">status: {entry.status}</Badge>
-          {entry.timestamp && (
-            <span className="text-xs text-muted-foreground">{formatDate(entry.timestamp)}</span>
+    <div className="rounded-md border">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50"
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        <span className="font-medium">{label}</span>
+        {step.function && (
+          <span className="font-mono text-xs text-muted-foreground">{step.function}</span>
+        )}
+        <span className="ml-auto flex items-center gap-2">
+          {step.duration_ms !== undefined && (
+            <span className="text-xs text-muted-foreground">{formatDuration(step.duration_ms)}</span>
           )}
+          {result && (
+            <Badge variant="outline" className={stepResultClass[result] ?? ""}>
+              {result}
+            </Badge>
+          )}
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-3 border-t px-3 py-3">
+          {step.input !== undefined && <JsonViewer data={step.input} label="Input" maxHeight="14rem" />}
+          {step.output !== undefined && <JsonViewer data={step.output} label="Output" maxHeight="14rem" />}
+          {snapshotData !== undefined && (
+            <JsonViewer data={snapshotData} label="Data after task" maxHeight="14rem" />
+          )}
+          {step.input === undefined && step.output === undefined && snapshotData === undefined && step.message && (
+            <JsonViewer data={step.message} label="Message snapshot" maxHeight="14rem" />
+          )}
+          {hasError && <JsonViewer data={step.error} label="Error" maxHeight="10rem" />}
         </div>
-
-        {entry.workflow_id && (
-          <p className="text-xs text-muted-foreground">
-            workflow:{" "}
-            <Link to={`/workflows/${entry.workflow_id}`} className="text-primary hover:underline">
-              {entry.workflow_id}
-            </Link>
-          </p>
-        )}
-
-        {hasChanges && (
-          <button
-            onClick={() => setOpen(!open)}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mt-1"
-          >
-            {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            {entry.changes.length} change{entry.changes.length !== 1 ? "s" : ""}
-          </button>
-        )}
-
-        {open && hasChanges && (
-          <div className="mt-2 space-y-1">
-            {entry.changes.map((change, ci) => (
-              <div key={ci} className="rounded bg-muted p-2 text-xs font-mono">
-                <span className="text-muted-foreground">{change.path}</span>
-                <div className="flex gap-4 mt-1">
-                  <span className="text-red-500">- {JSON.stringify(change.old_value)}</span>
-                  <span className="text-emerald-500">+ {JSON.stringify(change.new_value)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   )
 }
@@ -118,7 +123,9 @@ export function TraceDetailPage() {
     )
   }
 
-  const message = trace.message
+  const result = trace.message
+  const resultErrors = result?.errors
+  const taskSteps = extractSteps(trace.task_trace_json)
 
   return (
     <div className="space-y-6">
@@ -174,38 +181,49 @@ export function TraceDetailPage() {
         </CardContent>
       </Card>
 
-      {message?.audit_trail && message.audit_trail.length > 0 && (
+      {trace.error && (
         <Card>
           <CardHeader>
-            <CardTitle>Audit Trail</CardTitle>
+            <CardTitle className="text-destructive">Error</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-0">
-              {message.audit_trail.map((entry, i) => (
-                <AuditStep key={i} entry={entry} index={i} />
+            <pre className="whitespace-pre-wrap rounded bg-muted p-3 text-sm">{trace.error}</pre>
+          </CardContent>
+        </Card>
+      )}
+
+      {taskSteps.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Per-Task Execution Trace</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {taskSteps.map((step, i) => (
+                <TaskStep key={i} step={step} index={i} />
               ))}
             </div>
           </CardContent>
         </Card>
       )}
 
-      {message?.errors && message.errors.length > 0 && (
+      {Array.isArray(resultErrors) && resultErrors.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Errors</CardTitle>
+            <CardTitle>Workflow Errors</CardTitle>
           </CardHeader>
           <CardContent>
-            <JsonViewer data={message.errors} maxHeight="15rem" />
+            <JsonViewer data={resultErrors} maxHeight="15rem" />
           </CardContent>
         </Card>
       )}
 
-      {message?.payload && (
-        <JsonViewer data={message.payload} label="Payload" />
+      {result?.data !== undefined && (
+        <JsonViewer data={result.data} label="Output" />
       )}
 
-      {message?.context && (
-        <JsonViewer data={message.context} label="Context" />
+      {trace.task_trace_json !== undefined && taskSteps.length === 0 && (
+        <JsonViewer data={trace.task_trace_json} label="Task Trace (raw)" maxHeight="20rem" />
       )}
     </div>
   )

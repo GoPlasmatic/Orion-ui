@@ -3,6 +3,7 @@ import type {
   Channel,
   CreateChannelRequest,
   DataResponse,
+  ImportResult,
   ListChannelsParams,
   PaginatedResponse,
   StatusChangeRequest,
@@ -34,4 +35,7 @@ export const channelsApi = {
 
   createVersion: (id: string) =>
     api.post<DataResponse<Channel>>(`admin/channels/${id}/versions`).then((r) => r.data),
+
+  import: (items: CreateChannelRequest[], dryRun = false) =>
+    api.post<ImportResult>(`admin/channels/import${buildQuery({ dry_run: dryRun })}`, items),
 }

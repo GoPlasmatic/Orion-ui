@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router"
-import { useEngineStatus, useEngineReload } from "@/hooks/use-engine"
+import { useQueryClient } from "@tanstack/react-query"
+import { useEngineStatus } from "@/hooks/use-engine"
 import { useHealth } from "@/hooks/use-health"
 import { useTraces } from "@/hooks/use-traces"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -35,40 +36,31 @@ const traceStatusVariant: Record<string, "default" | "secondary" | "destructive"
 
 export function DashboardPage() {
   const navigate = useNavigate()
-  const { data: engine, isLoading: engineLoading } = useEngineStatus()
+  const queryClient = useQueryClient()
+  const { data: engine, isLoading: engineLoading, isFetching: engineFetching } = useEngineStatus()
   const { data: health } = useHealth()
   const { data: recentTraces } = useTraces({
     limit: 5,
     sort_by: "created_at",
     sort_order: "desc",
   })
-  const reload = useEngineReload()
 
   const isHealthy = health?.status === "ok"
+
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["engine"] })
+    queryClient.invalidateQueries({ queryKey: ["health"] })
+    queryClient.invalidateQueries({ queryKey: ["traces"] })
+  }
 
   return (
     <div className="space-y-6">
       <PageHeader title="Dashboard">
-        <Button
-          onClick={() => reload.mutate()}
-          disabled={reload.isPending}
-        >
-          <RefreshCw className={`h-4 w-4 ${reload.isPending ? "animate-spin" : ""}`} />
-          {reload.isPending ? "Reloading..." : "Reload Engine"}
+        <Button variant="outline" onClick={handleRefresh}>
+          <RefreshCw className={`h-4 w-4 ${engineFetching ? "animate-spin" : ""}`} />
+          Refresh
         </Button>
       </PageHeader>
-
-      {reload.isSuccess && (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          Engine reloaded successfully.
-        </div>
-      )}
-
-      {reload.isError && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          Failed to reload engine: {reload.error?.message}
-        </div>
-      )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>

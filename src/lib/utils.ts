@@ -14,3 +14,13 @@ export function formatDate(date: string) {
     minute: "2-digit",
   })
 }
+
+/** Safely parse a JSON string; returns the original string on failure. */
+export function parseJson(value: string | null | undefined): unknown {
+  if (value == null) return null
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}

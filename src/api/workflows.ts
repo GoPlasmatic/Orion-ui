@@ -1,9 +1,11 @@
 import { api, buildQuery } from "./client"
 import type {
   DataResponse,
+  ImportResult,
   ListWorkflowsParams,
   PaginatedResponse,
   StatusChangeRequest,
+  ValidationResponse,
   Workflow,
   WorkflowRolloutRequest,
   WorkflowTestRequest,
@@ -37,10 +39,10 @@ export const workflowsApi = {
     api.post<WorkflowTestResponse>(`admin/workflows/${id}/test`, req),
 
   validate: (req: unknown) =>
-    api.post<{ valid: boolean; errors?: string[] }>("admin/workflows/validate", req),
+    api.post<ValidationResponse>("admin/workflows/validate", req),
 
-  import: (req: unknown) =>
-    api.post<Workflow[]>("admin/workflows/import", req),
+  import: (items: unknown[], dryRun = false) =>
+    api.post<ImportResult>(`admin/workflows/import${buildQuery({ dry_run: dryRun })}`, items),
 
   export: (params: { tag?: string; status?: string } = {}) =>
     api.get<Workflow[]>(

@@ -1,8 +1,10 @@
 import { api, buildQuery } from "./client"
 import type {
-  CircuitBreaker,
+  CircuitBreakerStatus,
   Connector,
   CreateConnectorRequest,
+  DataResponse,
+  ImportResult,
   ListConnectorsParams,
   PaginatedResponse,
   UpdateConnectorRequest,
@@ -14,21 +16,23 @@ export const connectorsApi = {
       `admin/connectors${buildQuery(params as Record<string, string | number | undefined>)}`
     ),
 
-  get: (id: string) => api.get<Connector>(`admin/connectors/${id}`),
+  get: (id: string) =>
+    api.get<DataResponse<Connector>>(`admin/connectors/${id}`).then((r) => r.data),
 
   create: (req: CreateConnectorRequest) =>
-    api.post<Connector>("admin/connectors", req),
+    api.post<DataResponse<Connector>>("admin/connectors", req).then((r) => r.data),
 
   update: (id: string, req: UpdateConnectorRequest) =>
-    api.put<Connector>(`admin/connectors/${id}`, req),
+    api.put<DataResponse<Connector>>(`admin/connectors/${id}`, req).then((r) => r.data),
 
   delete: (id: string) => api.delete<void>(`admin/connectors/${id}`),
 
-  reload: () => api.post<{ message: string }>("admin/connectors/reload"),
+  import: (items: CreateConnectorRequest[], dryRun = false) =>
+    api.post<ImportResult>(`admin/connectors/import${buildQuery({ dry_run: dryRun })}`, items),
 
   getCircuitBreakers: () =>
-    api.get<CircuitBreaker[]>("admin/connectors/circuit-breakers"),
+    api.get<CircuitBreakerStatus>("admin/connectors/circuit-breakers"),
 
   resetCircuitBreaker: (key: string) =>
-    api.post<void>(`admin/connectors/circuit-breakers/${key}`),
+    api.post<{ reset: boolean; key: string }>(`admin/connectors/circuit-breakers/${key}`),
 }

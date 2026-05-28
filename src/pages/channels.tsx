@@ -1,6 +1,8 @@
 import { useState } from "react"
 import { useNavigate } from "react-router"
-import { useChannels } from "@/hooks/use-channels"
+import { useChannels, useImportChannels } from "@/hooks/use-channels"
+import { ImportDialog } from "@/components/shared/import-dialog"
+import type { CreateChannelRequest } from "@/api/types"
 import {
   useReactTable,
   getCoreRowModel,
@@ -16,7 +18,7 @@ import { Select } from "@/components/ui/select"
 import { PageHeader } from "@/components/shared/page-header"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { formatDate } from "@/lib/utils"
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react"
+import { ChevronLeft, ChevronRight, Plus, Upload } from "lucide-react"
 
 const PAGE_SIZE = 20
 const columnHelper = createColumnHelper<Channel>()
@@ -65,6 +67,8 @@ export function ChannelsPage() {
   const [offset, setOffset] = useState(0)
   const [statusFilter, setStatusFilter] = useState<EntityStatus | "">("")
   const [protocolFilter, setProtocolFilter] = useState<ChannelProtocol | "">("")
+  const [showImport, setShowImport] = useState(false)
+  const importChannels = useImportChannels()
 
   const { data, isLoading } = useChannels({
     limit: PAGE_SIZE,
@@ -86,11 +90,25 @@ export function ChannelsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Channels" description="Manage service endpoints and routing">
+        <Button variant="outline" onClick={() => setShowImport(true)}>
+          <Upload className="h-4 w-4" />
+          Import
+        </Button>
         <Button onClick={() => navigate("/channels/new")}>
           <Plus className="h-4 w-4" />
           Create Channel
         </Button>
       </PageHeader>
+
+      {showImport && (
+        <ImportDialog
+          title="Import Channels"
+          onImport={(items, dryRun) =>
+            importChannels.mutateAsync({ items: items as CreateChannelRequest[], dryRun })
+          }
+          onClose={() => setShowImport(false)}
+        />
+      )}
 
       <div className="flex items-center gap-3">
         <Select

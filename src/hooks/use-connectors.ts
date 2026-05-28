@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { connectorsApi } from "@/api/connectors"
+import { engineApi } from "@/api/engine"
 import type {
   CreateConnectorRequest,
   ListConnectorsParams,
@@ -52,10 +53,24 @@ export function useDeleteConnector() {
   })
 }
 
+export function useImportConnectors() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ items, dryRun }: { items: CreateConnectorRequest[]; dryRun?: boolean }) =>
+      connectorsApi.import(items, dryRun),
+    onSuccess: (_data, vars) => {
+      if (!vars.dryRun) queryClient.invalidateQueries({ queryKey: ["connectors"] })
+    },
+  })
+}
+
+// v0.2 has no dedicated connectors-reload endpoint; connector mutations reload
+// the registry server-side. This triggers a full engine reload for the manual
+// "reload" affordance still surfaced in the UI.
 export function useReloadConnectors() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () => connectorsApi.reload(),
+    mutationFn: () => engineApi.reload(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["connectors"] })
     },

@@ -20,7 +20,7 @@ const PAGE_SIZE = 20
 const columnHelper = createColumnHelper<AuditLog>()
 
 const columns = [
-  columnHelper.accessor("timestamp", {
+  columnHelper.accessor("created_at", {
     header: "Time",
     cell: (info) => (
       <span className="text-sm">{formatDate(info.getValue())}</span>
@@ -44,7 +44,7 @@ const columns = [
       <span className="font-mono text-xs">{info.getValue()}</span>
     ),
   }),
-  columnHelper.accessor("user", {
+  columnHelper.accessor("principal", {
     header: "User",
     cell: (info) => (
       <span className="text-muted-foreground">{info.getValue() ?? "--"}</span>
