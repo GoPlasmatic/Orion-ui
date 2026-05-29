@@ -178,7 +178,7 @@ function ChannelForm({ existing }: { existing?: Channel }) {
           <ChannelConfigEditor value={config} onChange={setConfig} />
 
           {error && (
-            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
               {error}
             </div>
           )}

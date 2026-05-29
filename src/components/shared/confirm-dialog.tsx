@@ -1,5 +1,11 @@
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogBody,
+  DialogFooter,
+} from "@/components/ui/dialog"
 
 interface ConfirmDialogProps {
   title: string
@@ -17,26 +23,21 @@ export function ConfirmDialog({
   destructive,
 }: ConfirmDialogProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>{title}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">{description}</p>
-        </CardContent>
-        <CardFooter className="justify-end gap-2">
-          <Button variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button
-            variant={destructive ? "destructive" : "default"}
-            onClick={onConfirm}
-          >
-            Confirm
-          </Button>
-        </CardFooter>
-      </Card>
-    </div>
+    <Dialog open onClose={onCancel} className="max-w-md" aria-label={title}>
+      <DialogHeader>
+        <DialogTitle>{title}</DialogTitle>
+      </DialogHeader>
+      <DialogBody>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </DialogBody>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant={destructive ? "destructive" : "default"} onClick={onConfirm}>
+          Confirm
+        </Button>
+      </DialogFooter>
+    </Dialog>
   )
 }

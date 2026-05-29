@@ -17,8 +17,9 @@ import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { WorkflowImportWizard } from "@/components/shared/workflow-import-wizard"
+import { EmptyState } from "@/components/shared/empty-state"
 import { formatDate } from "@/lib/utils"
-import { ChevronLeft, ChevronRight, Upload } from "lucide-react"
+import { ChevronLeft, ChevronRight, GitBranch, Upload } from "lucide-react"
 
 const PAGE_SIZE = 20
 const columnHelper = createColumnHelper<Workflow>()
@@ -156,8 +157,17 @@ export function WorkflowsPage() {
               ))
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={columns.length} className="text-center text-muted-foreground py-8">
-                  No workflows found
+                <TableCell colSpan={columns.length} className="p-0">
+                  <EmptyState
+                    icon={GitBranch}
+                    title="No workflows yet"
+                    description="Workflows are task pipelines, often AI-generated and imported here for review, validation, dry-run, and safe rollout."
+                    action={
+                      <Button onClick={() => setShowImport(true)}>
+                        <Upload className="h-4 w-4" /> Import workflow
+                      </Button>
+                    }
+                  />
                 </TableCell>
               </TableRow>
             ) : (

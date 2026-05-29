@@ -15,8 +15,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
 import { PageHeader } from "@/components/shared/page-header"
+import { EmptyState } from "@/components/shared/empty-state"
+import { enabledBadgeClass, disabledBadgeClass } from "@/lib/status"
 import { formatDate } from "@/lib/utils"
-import { ChevronLeft, ChevronRight, Plus, RefreshCw, Upload } from "lucide-react"
+import { ChevronLeft, ChevronRight, Plug, Plus, RefreshCw, Upload } from "lucide-react"
 
 const PAGE_SIZE = 20
 const columnHelper = createColumnHelper<Connector>()
@@ -37,11 +39,7 @@ const columns = [
     cell: (info) => (
       <Badge
         variant="outline"
-        className={
-          info.getValue()
-            ? "border-emerald-200 text-emerald-700"
-            : "border-muted-foreground/30 text-muted-foreground"
-        }
+        className={info.getValue() ? enabledBadgeClass : disabledBadgeClass}
       >
         {info.getValue() ? "Enabled" : "Disabled"}
       </Badge>
@@ -153,8 +151,22 @@ export function ConnectorsPage() {
               ))
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={columns.length} className="text-center text-muted-foreground py-8">
-                  No connectors found
+                <TableCell colSpan={columns.length} className="p-0">
+                  <EmptyState
+                    icon={Plug}
+                    title="No connectors yet"
+                    description="Connectors link workflows to external systems — HTTP services, databases, Kafka, caches, and storage. Create one or import existing definitions."
+                    action={
+                      <>
+                        <Button variant="outline" onClick={() => setShowImport(true)}>
+                          <Upload className="h-4 w-4" /> Import
+                        </Button>
+                        <Button onClick={() => navigate("/connectors/new")}>
+                          <Plus className="h-4 w-4" /> Create Connector
+                        </Button>
+                      </>
+                    }
+                  />
                 </TableCell>
               </TableRow>
             ) : (

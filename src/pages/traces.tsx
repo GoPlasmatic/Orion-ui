@@ -17,9 +17,10 @@ import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { TraceAnalytics } from "@/components/traces/trace-analytics"
+import { EmptyState } from "@/components/shared/empty-state"
 import { formatDate, formatDuration } from "@/lib/utils"
 import { traceStatusBadgeClass } from "@/lib/status"
-import { ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Activity } from "lucide-react"
 
 const PAGE_SIZE = 20
 
@@ -196,8 +197,17 @@ export function TracesPage() {
               ))
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={columns.length} className="text-center text-muted-foreground py-8">
-                  No traces found
+                <TableCell colSpan={columns.length} className="p-0">
+                  <EmptyState
+                    icon={Activity}
+                    title="No traces found"
+                    description="Traces are captured as requests flow through channels. Adjust the filters above, or send a request from the Data Console to generate one."
+                    action={
+                      <Button variant="outline" onClick={() => navigate("/console")}>
+                        Open Data Console
+                      </Button>
+                    }
+                  />
                 </TableCell>
               </TableRow>
             ) : (

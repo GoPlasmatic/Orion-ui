@@ -179,7 +179,7 @@ export function WorkflowDetailPage() {
                 </Button>
 
                 {testError && (
-                  <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                     {testError}
                   </div>
                 )}
@@ -194,7 +194,7 @@ export function WorkflowDetailPage() {
                 {testResult ? (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <Badge variant={testResult.matched ? "default" : "secondary"} className={testResult.matched ? "bg-emerald-500" : ""}>
+                      <Badge variant={testResult.matched ? "default" : "secondary"} className={testResult.matched ? "bg-chart-2 text-white" : ""}>
                         {testResult.matched ? "Matched" : "No Match"}
                       </Badge>
                       {testResult.errors.length > 0 && (

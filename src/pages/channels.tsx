@@ -17,8 +17,9 @@ import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
 import { PageHeader } from "@/components/shared/page-header"
 import { StatusBadge } from "@/components/shared/status-badge"
+import { EmptyState } from "@/components/shared/empty-state"
 import { formatDate } from "@/lib/utils"
-import { ChevronLeft, ChevronRight, Plus, Upload } from "lucide-react"
+import { ChevronLeft, ChevronRight, Plus, Radio, Upload } from "lucide-react"
 
 const PAGE_SIZE = 20
 const columnHelper = createColumnHelper<Channel>()
@@ -161,8 +162,22 @@ export function ChannelsPage() {
               ))
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={columns.length} className="text-center text-muted-foreground py-8">
-                  No channels found
+                <TableCell colSpan={columns.length} className="p-0">
+                  <EmptyState
+                    icon={Radio}
+                    title="No channels yet"
+                    description="Channels are the service endpoints that receive requests and run a workflow. Create your first one or import existing definitions."
+                    action={
+                      <>
+                        <Button variant="outline" onClick={() => setShowImport(true)}>
+                          <Upload className="h-4 w-4" /> Import
+                        </Button>
+                        <Button onClick={() => navigate("/channels/new")}>
+                          <Plus className="h-4 w-4" /> Create Channel
+                        </Button>
+                      </>
+                    }
+                  />
                 </TableCell>
               </TableRow>
             ) : (

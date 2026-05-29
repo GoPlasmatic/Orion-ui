@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogHeader, DialogTitle, DialogBody, DialogFooter } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
+import { enabledBadgeClass } from "@/lib/status"
 import type { ImportResult } from "@/api/types"
 
 interface ImportDialogProps {
@@ -60,7 +61,7 @@ export function ImportDialog({ title, onImport, onClose }: ImportDialogProps) {
           />
 
           {error && (
-            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
               {error}
             </div>
           )}
@@ -70,12 +71,12 @@ export function ImportDialog({ title, onImport, onClose }: ImportDialogProps) {
               <div className="flex flex-wrap items-center gap-2">
                 {result.dry_run && <Badge variant="secondary">Dry run</Badge>}
                 {result.would_create !== undefined && (
-                  <Badge variant="outline" className="border-emerald-200 text-emerald-700">
+                  <Badge variant="outline" className={enabledBadgeClass}>
                     {result.would_create} would create
                   </Badge>
                 )}
                 {!result.dry_run && (
-                  <Badge variant="outline" className="border-emerald-200 text-emerald-700">
+                  <Badge variant="outline" className={enabledBadgeClass}>
                     {result.imported} imported
                   </Badge>
                 )}

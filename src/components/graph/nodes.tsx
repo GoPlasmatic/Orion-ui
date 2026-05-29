@@ -20,6 +20,22 @@ function accentDot(topo: TopoNode): string {
   }
 }
 
+// Soft neural-style glow keyed to the node's health, reinforcing the
+// "nervous system" brand metaphor for the topology canvas.
+function glow(topo: TopoNode): string {
+  if (topo.unresolved) return ""
+  if (topo.kind === "connector")
+    return topo.enabled ? "shadow-[0_0_18px_-6px_rgba(76,189,151,0.7)]" : ""
+  switch (topo.status) {
+    case "active":
+      return "shadow-[0_0_18px_-6px_rgba(76,189,151,0.7)]"
+    case "draft":
+      return "shadow-[0_0_18px_-6px_rgba(17,159,205,0.7)]"
+    default:
+      return ""
+  }
+}
+
 const ICON = { channel: Radio, workflow: GitBranch, connector: Plug }
 
 function BaseNode({ topo }: { topo: TopoNode }) {
@@ -27,7 +43,8 @@ function BaseNode({ topo }: { topo: TopoNode }) {
   return (
     <div
       className={cn(
-        "flex min-w-[150px] items-center gap-2 rounded-md border bg-card px-3 py-2 shadow-sm",
+        "flex min-w-[150px] items-center gap-2 rounded-md border bg-card px-3 py-2 transition-shadow",
+        glow(topo),
         topo.unresolved && "border-dashed text-muted-foreground",
       )}
     >

@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster } from "sonner"
 import { ThemeProvider } from "@/lib/theme-provider"
 import { useTheme } from "@/lib/use-theme"
+import { DensityProvider } from "@/lib/density-provider"
 import { AppLayout } from "@/components/layout/app-layout"
 import { OperationsPage } from "@/pages/operations"
 import { SystemMapPage } from "@/pages/system-map"
@@ -39,6 +40,7 @@ function ThemedToaster() {
 export default function App() {
   return (
     <ThemeProvider>
+      <DensityProvider>
       <QueryClientProvider client={queryClient}>
         <ThemedToaster />
         <BrowserRouter>
@@ -66,6 +68,7 @@ export default function App() {
           </Routes>
         </BrowserRouter>
       </QueryClientProvider>
+      </DensityProvider>
     </ThemeProvider>
   )
 }
