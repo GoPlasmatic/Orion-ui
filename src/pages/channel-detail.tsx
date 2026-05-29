@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/shared/status-badge"
 import { LifecycleActions } from "@/components/shared/lifecycle-actions"
 import { VersionHistory } from "@/components/shared/version-history"
 import { JsonViewer } from "@/components/shared/json-viewer"
+import { RelationshipGraph } from "@/components/graph/relationship-graph"
 import { formatDate } from "@/lib/utils"
 import { ArrowLeft, AlertCircle, Pencil } from "lucide-react"
 
@@ -82,6 +83,7 @@ export function ChannelDetailPage() {
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="config">Configuration</TabsTrigger>
+          <TabsTrigger value="relationships">Relationships</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
         </TabsList>
 
@@ -293,6 +295,10 @@ export function ChannelDetailPage() {
             {/* Raw JSON fallback */}
             <JsonViewer data={channel.config} label="Raw Configuration" />
           </div>
+        </TabsContent>
+
+        <TabsContent value="relationships">
+          <RelationshipGraph kind="channel" id={channel.channel_id} />
         </TabsContent>
 
         <TabsContent value="versions">

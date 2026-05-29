@@ -49,14 +49,6 @@ export function SettingsPage() {
               <RefreshCw className={`h-4 w-4 ${reload.isPending ? "animate-spin" : ""}`} />
               {reload.isPending ? "Reloading..." : "Reload Engine"}
             </Button>
-            {reload.isSuccess && (
-              <p className="text-sm text-emerald-600">Engine reloaded successfully.</p>
-            )}
-            {reload.isError && (
-              <p className="text-sm text-red-600">
-                Failed: {reload.error?.message}
-              </p>
-            )}
           </CardContent>
         </Card>
 
@@ -83,9 +75,6 @@ export function SettingsPage() {
               <RefreshCw className={`h-4 w-4 ${reloadConnectors.isPending ? "animate-spin" : ""}`} />
               {reloadConnectors.isPending ? "Reloading..." : "Reload Connectors"}
             </Button>
-            {reloadConnectors.isSuccess && (
-              <p className="text-sm text-emerald-600">Connectors reloaded successfully.</p>
-            )}
           </CardContent>
         </Card>
 

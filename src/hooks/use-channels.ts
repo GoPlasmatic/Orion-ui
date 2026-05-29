@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { channelsApi } from "@/api/channels"
 import type {
   CreateChannelRequest,
@@ -6,6 +7,8 @@ import type {
   StatusChangeRequest,
   UpdateChannelRequest,
 } from "@/api/types"
+
+const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
 
 export function useChannels(params: ListChannelsParams = {}) {
   return useQuery({
@@ -36,7 +39,9 @@ export function useCreateChannel() {
     mutationFn: (req: CreateChannelRequest) => channelsApi.create(req),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["channels"] })
+      toast.success("Channel created")
     },
+    onError: (e) => toast.error("Failed to create channel", { description: errorDescription(e) }),
   })
 }
 
@@ -47,7 +52,9 @@ export function useUpdateChannel() {
       channelsApi.update(id, req),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["channels"] })
+      toast.success("Channel updated")
     },
+    onError: (e) => toast.error("Failed to update channel", { description: errorDescription(e) }),
   })
 }
 
@@ -57,7 +64,9 @@ export function useDeleteChannel() {
     mutationFn: (id: string) => channelsApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["channels"] })
+      toast.success("Channel deleted")
     },
+    onError: (e) => toast.error("Failed to delete channel", { description: errorDescription(e) }),
   })
 }
 
@@ -66,10 +75,12 @@ export function useChangeChannelStatus() {
   return useMutation({
     mutationFn: ({ id, req }: { id: string; req: StatusChangeRequest }) =>
       channelsApi.changeStatus(id, req),
-    onSuccess: () => {
+    onSuccess: (_data, { req }) => {
       queryClient.invalidateQueries({ queryKey: ["channels"] })
       queryClient.invalidateQueries({ queryKey: ["engine"] })
+      toast.success(`Channel ${req.status === "active" ? "activated" : req.status}`)
     },
+    onError: (e) => toast.error("Failed to change channel status", { description: errorDescription(e) }),
   })
 }
 
@@ -80,7 +91,9 @@ export function useCreateChannelVersion() {
     onSuccess: (_data, id) => {
       queryClient.invalidateQueries({ queryKey: ["channels", id] })
       queryClient.invalidateQueries({ queryKey: ["channels", id, "versions"] })
+      toast.success("New channel version created")
     },
+    onError: (e) => toast.error("Failed to create channel version", { description: errorDescription(e) }),
   })
 }
 

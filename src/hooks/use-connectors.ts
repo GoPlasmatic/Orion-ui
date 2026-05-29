@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { connectorsApi } from "@/api/connectors"
 import { engineApi } from "@/api/engine"
 import type {
@@ -6,6 +7,8 @@ import type {
   ListConnectorsParams,
   UpdateConnectorRequest,
 } from "@/api/types"
+
+const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
 
 export function useConnectors(params: ListConnectorsParams = {}) {
   return useQuery({
@@ -28,7 +31,9 @@ export function useCreateConnector() {
     mutationFn: (req: CreateConnectorRequest) => connectorsApi.create(req),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["connectors"] })
+      toast.success("Connector created")
     },
+    onError: (e) => toast.error("Failed to create connector", { description: errorDescription(e) }),
   })
 }
 
@@ -39,7 +44,9 @@ export function useUpdateConnector() {
       connectorsApi.update(id, req),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["connectors"] })
+      toast.success("Connector updated")
     },
+    onError: (e) => toast.error("Failed to update connector", { description: errorDescription(e) }),
   })
 }
 
@@ -49,7 +56,9 @@ export function useDeleteConnector() {
     mutationFn: (id: string) => connectorsApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["connectors"] })
+      toast.success("Connector deleted")
     },
+    onError: (e) => toast.error("Failed to delete connector", { description: errorDescription(e) }),
   })
 }
 
@@ -73,14 +82,17 @@ export function useReloadConnectors() {
     mutationFn: () => engineApi.reload(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["connectors"] })
+      toast.success("Connectors reloaded")
     },
+    onError: (e) => toast.error("Failed to reload connectors", { description: errorDescription(e) }),
   })
 }
 
-export function useCircuitBreakers() {
+export function useCircuitBreakers(options?: { refetchInterval?: number }) {
   return useQuery({
     queryKey: ["connectors", "circuit-breakers"],
     queryFn: () => connectorsApi.getCircuitBreakers(),
+    refetchInterval: options?.refetchInterval,
   })
 }
 
@@ -90,6 +102,8 @@ export function useResetCircuitBreaker() {
     mutationFn: (key: string) => connectorsApi.resetCircuitBreaker(key),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["connectors", "circuit-breakers"] })
+      toast.success("Circuit breaker reset")
     },
+    onError: (e) => toast.error("Failed to reset circuit breaker", { description: errorDescription(e) }),
   })
 }

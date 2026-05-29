@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { engineApi } from "@/api/engine"
 
 export function useEngineStatus() {
@@ -15,6 +16,11 @@ export function useEngineReload() {
     mutationFn: () => engineApi.reload(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["engine"] })
+      toast.success("Engine reloaded")
     },
+    onError: (e) =>
+      toast.error("Failed to reload engine", {
+        description: e instanceof Error ? e.message : undefined,
+      }),
   })
 }

@@ -1,8 +1,11 @@
 import { BrowserRouter, Routes, Route } from "react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { Toaster } from "sonner"
 import { ThemeProvider } from "@/lib/theme-provider"
+import { useTheme } from "@/lib/use-theme"
 import { AppLayout } from "@/components/layout/app-layout"
-import { DashboardPage } from "@/pages/dashboard"
+import { OperationsPage } from "@/pages/operations"
+import { SystemMapPage } from "@/pages/system-map"
 import { ChannelsPage } from "@/pages/channels"
 import { ChannelDetailPage } from "@/pages/channel-detail"
 import { ChannelFormPage } from "@/pages/channel-form"
@@ -11,6 +14,7 @@ import { WorkflowDetailPage } from "@/pages/workflow-detail"
 import { ConnectorsPage } from "@/pages/connectors"
 import { ConnectorDetailPage } from "@/pages/connector-detail"
 import { ConnectorFormPage } from "@/pages/connector-form"
+import { CircuitBreakersPage } from "@/pages/circuit-breakers"
 import { TracesPage } from "@/pages/traces"
 import { TraceDetailPage } from "@/pages/trace-detail"
 import { AuditPage } from "@/pages/audit"
@@ -22,18 +26,26 @@ const queryClient = new QueryClient({
     queries: {
       retry: 1,
       refetchOnWindowFocus: false,
+      refetchIntervalInBackground: false,
     },
   },
 })
+
+function ThemedToaster() {
+  const { resolvedTheme } = useTheme()
+  return <Toaster theme={resolvedTheme} richColors closeButton position="bottom-right" />
+}
 
 export default function App() {
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
+        <ThemedToaster />
         <BrowserRouter>
           <Routes>
             <Route element={<AppLayout />}>
-              <Route index element={<DashboardPage />} />
+              <Route index element={<OperationsPage />} />
+              <Route path="system-map" element={<SystemMapPage />} />
               <Route path="channels" element={<ChannelsPage />} />
               <Route path="channels/new" element={<ChannelFormPage />} />
               <Route path="channels/:id" element={<ChannelDetailPage />} />
@@ -44,6 +56,7 @@ export default function App() {
               <Route path="connectors/new" element={<ConnectorFormPage />} />
               <Route path="connectors/:id" element={<ConnectorDetailPage />} />
               <Route path="connectors/:id/edit" element={<ConnectorFormPage />} />
+              <Route path="circuit-breakers" element={<CircuitBreakersPage />} />
               <Route path="traces" element={<TracesPage />} />
               <Route path="traces/:id" element={<TraceDetailPage />} />
               <Route path="audit" element={<AuditPage />} />

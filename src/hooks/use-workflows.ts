@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { workflowsApi } from "@/api/workflows"
 import type {
   ListWorkflowsParams,
@@ -6,6 +7,8 @@ import type {
   WorkflowRolloutRequest,
   WorkflowTestRequest,
 } from "@/api/types"
+
+const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
 
 export function useWorkflows(params: ListWorkflowsParams = {}) {
   return useQuery({
@@ -35,10 +38,12 @@ export function useChangeWorkflowStatus() {
   return useMutation({
     mutationFn: ({ id, req }: { id: string; req: StatusChangeRequest }) =>
       workflowsApi.changeStatus(id, req),
-    onSuccess: () => {
+    onSuccess: (_data, { req }) => {
       queryClient.invalidateQueries({ queryKey: ["workflows"] })
       queryClient.invalidateQueries({ queryKey: ["engine"] })
+      toast.success(`Workflow ${req.status === "active" ? "activated" : req.status}`)
     },
+    onError: (e) => toast.error("Failed to change workflow status", { description: errorDescription(e) }),
   })
 }
 
@@ -47,9 +52,11 @@ export function useSetWorkflowRollout() {
   return useMutation({
     mutationFn: ({ id, req }: { id: string; req: WorkflowRolloutRequest }) =>
       workflowsApi.setRollout(id, req),
-    onSuccess: (_data, { id }) => {
+    onSuccess: (_data, { id, req }) => {
       queryClient.invalidateQueries({ queryKey: ["workflows", id] })
+      toast.success(`Rollout set to ${req.rollout_percentage}%`)
     },
+    onError: (e) => toast.error("Failed to set rollout", { description: errorDescription(e) }),
   })
 }
 
@@ -67,7 +74,9 @@ export function useCreateWorkflowVersion() {
     onSuccess: (_data, id) => {
       queryClient.invalidateQueries({ queryKey: ["workflows", id] })
       queryClient.invalidateQueries({ queryKey: ["workflows", id, "versions"] })
+      toast.success("New workflow version created")
     },
+    onError: (e) => toast.error("Failed to create workflow version", { description: errorDescription(e) }),
   })
 }
 
@@ -77,6 +86,8 @@ export function useDeleteWorkflow() {
     mutationFn: (id: string) => workflowsApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workflows"] })
+      toast.success("Workflow deleted")
     },
+    onError: (e) => toast.error("Failed to delete workflow", { description: errorDescription(e) }),
   })
 }

@@ -40,13 +40,24 @@ export interface ButtonProps
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, children, ...props }, ref) => {
+    const classes = cn(buttonVariants({ variant, size, className }))
+
+    // asChild: render the single child element (e.g. a Link) as the styled
+    // element instead of wrapping it in a <button>. This keeps the flex layout
+    // (icon + label in a row) and avoids leaking `asChild` to the DOM.
+    if (asChild && React.isValidElement(children)) {
+      const child = children as React.ReactElement<Record<string, unknown>>
+      return React.cloneElement(child, {
+        ...props,
+        className: cn(classes, child.props.className as string | undefined),
+      })
+    }
+
     return (
-      <button
-        className={cn(buttonVariants({ variant, size, className }))}
-        ref={ref}
-        {...props}
-      />
+      <button className={classes} ref={ref} {...props}>
+        {children}
+      </button>
     )
   }
 )

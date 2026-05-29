@@ -6,8 +6,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { JsonViewer } from "@/components/shared/json-viewer"
+import { RelationshipGraph } from "@/components/graph/relationship-graph"
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
 import { formatDate, parseJson } from "@/lib/utils"
+import { enabledBadgeClass, disabledBadgeClass, breakerStateBadgeClass } from "@/lib/status"
 import { ArrowLeft, AlertCircle, Trash2, RefreshCw, Pencil } from "lucide-react"
 import { useState } from "react"
 
@@ -59,11 +61,7 @@ export function ConnectorDetailPage() {
           <Badge variant="outline" className="uppercase">{connector.connector_type}</Badge>
           <Badge
             variant="outline"
-            className={
-              connector.enabled
-                ? "border-emerald-200 text-emerald-700"
-                : "border-muted-foreground/30 text-muted-foreground"
-            }
+            className={connector.enabled ? enabledBadgeClass : disabledBadgeClass}
           >
             {connector.enabled ? "Enabled" : "Disabled"}
           </Badge>
@@ -95,6 +93,7 @@ export function ConnectorDetailPage() {
       <Tabs defaultValue="config">
         <TabsList>
           <TabsTrigger value="config">Configuration</TabsTrigger>
+          <TabsTrigger value="relationships">Relationships</TabsTrigger>
           <TabsTrigger value="circuit-breaker">Circuit Breaker</TabsTrigger>
         </TabsList>
 
@@ -107,6 +106,10 @@ export function ConnectorDetailPage() {
             label="Connector Configuration"
             maxHeight="32rem"
           />
+        </TabsContent>
+
+        <TabsContent value="relationships">
+          <RelationshipGraph kind="connector" id={connector.name} />
         </TabsContent>
 
         <TabsContent value="circuit-breaker">
@@ -135,16 +138,7 @@ export function ConnectorDetailPage() {
                   <CardContent>
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">State</span>
-                      <Badge
-                        variant="outline"
-                        className={
-                          state === "closed"
-                            ? "border-emerald-200 text-emerald-700"
-                            : state === "open"
-                              ? "border-red-200 text-red-700"
-                              : "border-amber-200 text-amber-700"
-                        }
-                      >
+                      <Badge variant="outline" className={breakerStateBadgeClass(state)}>
                         {state}
                       </Badge>
                     </div>

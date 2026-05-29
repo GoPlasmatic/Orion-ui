@@ -15,24 +15,13 @@ import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { TraceAnalytics } from "@/components/traces/trace-analytics"
 import { formatDate, formatDuration } from "@/lib/utils"
+import { traceStatusBadgeClass } from "@/lib/status"
 import { ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 
 const PAGE_SIZE = 20
-
-const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  completed: "default",
-  running: "outline",
-  pending: "secondary",
-  failed: "destructive",
-}
-
-const statusColor: Record<string, string> = {
-  completed: "bg-emerald-500",
-  running: "",
-  pending: "",
-  failed: "",
-}
 
 const columnHelper = createColumnHelper<Trace>()
 
@@ -42,10 +31,7 @@ const columns = [
     cell: (info) => {
       const val = info.getValue()
       return (
-        <Badge
-          variant={statusVariant[val] ?? "outline"}
-          className={statusColor[val] ?? ""}
-        >
+        <Badge variant="outline" className={traceStatusBadgeClass(val)}>
           {val}
         </Badge>
       )
@@ -135,6 +121,13 @@ export function TracesPage() {
     <div className="space-y-6">
       <PageHeader title="Traces" description="Execution history and monitoring" />
 
+      <Tabs defaultValue="list">
+        <TabsList>
+          <TabsTrigger value="list">List</TabsTrigger>
+          <TabsTrigger value="analytics">Analytics</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="list" className="space-y-6">
       <div className="flex items-center gap-3">
         <Select
           value={statusFilter}
@@ -239,6 +232,12 @@ export function TracesPage() {
           </Button>
         </div>
       </div>
+        </TabsContent>
+
+        <TabsContent value="analytics">
+          <TraceAnalytics />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

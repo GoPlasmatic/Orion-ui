@@ -20,6 +20,8 @@ import { StatusBadge } from "@/components/shared/status-badge"
 import { LifecycleActions } from "@/components/shared/lifecycle-actions"
 import { VersionHistory } from "@/components/shared/version-history"
 import { JsonViewer } from "@/components/shared/json-viewer"
+import { RelationshipGraph } from "@/components/graph/relationship-graph"
+import { stepResultBadgeClass } from "@/lib/status"
 import { ArrowLeft, AlertCircle, Play } from "lucide-react"
 import type { WorkflowTestResponse } from "@/api/types"
 
@@ -127,17 +129,22 @@ export function WorkflowDetailPage() {
       <Tabs defaultValue="visualization">
         <TabsList>
           <TabsTrigger value="visualization">Visualization</TabsTrigger>
+          <TabsTrigger value="relationships">Relationships</TabsTrigger>
           <TabsTrigger value="test">Dry Run</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
         </TabsList>
 
         <TabsContent value="visualization">
-          <div className="rounded-lg border" style={{ height: "600px" }}>
+          <div className="h-[calc(100dvh-18rem)] min-h-[600px] rounded-lg border">
             <WorkflowVisualizer
               workflows={[toVisualizerWorkflow(workflow)]}
             />
           </div>
+        </TabsContent>
+
+        <TabsContent value="relationships">
+          <RelationshipGraph kind="workflow" id={workflow.workflow_id} />
         </TabsContent>
 
         <TabsContent value="test">
@@ -198,10 +205,7 @@ export function WorkflowDetailPage() {
                             <div key={i} className="flex items-center justify-between rounded border px-3 py-2">
                               <div className="flex items-center gap-2">
                                 {result && (
-                                  <Badge
-                                    variant={result === "executed" ? "default" : result === "skipped" ? "secondary" : "destructive"}
-                                    className={result === "executed" ? "bg-emerald-500" : ""}
-                                  >
+                                  <Badge variant="outline" className={stepResultBadgeClass(result)}>
                                     {result}
                                   </Badge>
                                 )}
