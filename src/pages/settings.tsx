@@ -101,10 +101,10 @@ export function SettingsPage() {
               {backup.isPending ? "Creating..." : "Create Backup"}
             </Button>
             {backup.isSuccess && (
-              <p className="text-sm text-emerald-600">Backup created successfully.</p>
+              <p className="text-sm text-chart-2">Backup created successfully.</p>
             )}
             {backup.isError && (
-              <p className="text-sm text-red-600">
+              <p className="text-sm text-destructive">
                 Failed: {backup.error?.message}
               </p>
             )}

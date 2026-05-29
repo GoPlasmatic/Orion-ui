@@ -51,11 +51,11 @@ export function Sidebar() {
         className="flex h-14 items-center gap-2.5 border-b border-sidebar-border px-4 transition-colors hover:bg-sidebar-accent/50"
       >
         <img
-          src="/plasmatic-logo.png"
-          alt="Plasmatic"
+          src="/orion-logo.svg"
+          alt="Orion"
           className="h-7 w-7"
         />
-        <span className="text-lg font-semibold tracking-tight text-sidebar-foreground">
+        <span className="font-display text-lg font-bold tracking-tight text-sidebar-foreground">
           Orion
         </span>
       </NavLink>

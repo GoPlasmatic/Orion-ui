@@ -20,7 +20,6 @@ import { StatusBadge } from "@/components/shared/status-badge"
 import { LifecycleActions } from "@/components/shared/lifecycle-actions"
 import { VersionHistory } from "@/components/shared/version-history"
 import { VersionCompare } from "@/components/shared/version-compare"
-import { RolloutControl } from "@/components/shared/rollout-control"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { RelationshipGraph } from "@/components/graph/relationship-graph"
 import { stepResultBadgeClass } from "@/lib/status"
@@ -108,13 +107,6 @@ export function WorkflowDetailPage() {
                 ))}
               </div>
             )}
-            {workflow.status !== "active" &&
-              workflow.rollout_percentage !== undefined &&
-              workflow.rollout_percentage !== null && (
-                <span className="text-sm text-muted-foreground">
-                  Rollout: {workflow.rollout_percentage}%
-                </span>
-              )}
             <span className="text-sm text-muted-foreground">
               {workflow.tasks?.length ?? 0} tasks
             </span>
@@ -130,26 +122,18 @@ export function WorkflowDetailPage() {
         />
       </div>
 
-      {workflow.status === "active" && (
-        <RolloutControl workflowId={workflow.workflow_id} current={workflow.rollout_percentage} />
-      )}
+      {/* Diagram is the primary content of the page. */}
+      <div className="h-[calc(100dvh-19rem)] min-h-[520px] overflow-hidden rounded-lg border">
+        <WorkflowVisualizer workflows={[toVisualizerWorkflow(workflow)]} />
+      </div>
 
-      <Tabs defaultValue="visualization">
+      <Tabs defaultValue="relationships">
         <TabsList>
-          <TabsTrigger value="visualization">Visualization</TabsTrigger>
           <TabsTrigger value="relationships">Relationships</TabsTrigger>
           <TabsTrigger value="test">Dry Run</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="visualization">
-          <div className="h-[calc(100dvh-18rem)] min-h-[600px] rounded-lg border">
-            <WorkflowVisualizer
-              workflows={[toVisualizerWorkflow(workflow)]}
-            />
-          </div>
-        </TabsContent>
 
         <TabsContent value="relationships">
           <RelationshipGraph kind="workflow" id={workflow.workflow_id} />
@@ -179,7 +163,7 @@ export function WorkflowDetailPage() {
                 </Button>
 
                 {testError && (
-                  <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                     {testError}
                   </div>
                 )}
@@ -194,7 +178,7 @@ export function WorkflowDetailPage() {
                 {testResult ? (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <Badge variant={testResult.matched ? "default" : "secondary"} className={testResult.matched ? "bg-emerald-500" : ""}>
+                      <Badge variant={testResult.matched ? "default" : "secondary"} className={testResult.matched ? "bg-chart-2 text-white" : ""}>
                         {testResult.matched ? "Matched" : "No Match"}
                       </Badge>
                       {testResult.errors.length > 0 && (

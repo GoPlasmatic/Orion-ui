@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Link } from "react-router"
 import { dataApi } from "@/api/data"
 import { useChannels } from "@/hooks/use-channels"
 import type { ProcessResponse, ProfileResult } from "@/api/types"
@@ -9,7 +10,23 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { PageHeader } from "@/components/shared/page-header"
 import { JsonViewer } from "@/components/shared/json-viewer"
-import { Send } from "lucide-react"
+import { formatDate } from "@/lib/utils"
+import { ExternalLink, Send } from "lucide-react"
+
+const SAMPLE_PAYLOAD = '{\n  "example": "value"\n}'
+const isBlankPayload = (p: string) => {
+  const compact = p.replace(/\s/g, "")
+  return compact === "" || compact === "{}"
+}
+
+interface HistoryEntry {
+  channel: string
+  payload: string
+  sync: boolean
+  status?: string
+  traceId?: string
+  at: string
+}
 
 function fmtMs(ms: number | undefined): string {
   if (ms === undefined) return "--"
@@ -89,11 +106,25 @@ export function ConsolePage() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ProcessResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [history, setHistory] = useState<HistoryEntry[]>([])
 
   const { data: channels } = useChannels({ limit: 200 })
   const channelList = channels?.data ?? []
 
   const profileResult = result?._orion?.profile
+  const traceId = result?.id
+
+  // Pre-fill a starter payload when a channel is picked and the editor is empty.
+  const onChannelChange = (value: string) => {
+    setChannel(value)
+    if (value && isBlankPayload(payload)) setPayload(SAMPLE_PAYLOAD)
+  }
+
+  const restore = (h: HistoryEntry) => {
+    setChannel(h.channel)
+    setPayload(h.payload)
+    setSync(h.sync)
+  }
 
   const handleSend = async () => {
     setError(null)
@@ -117,7 +148,21 @@ export function ConsolePage() {
       const res = sync
         ? await dataApi.processSync(channel, { data }, profile)
         : await dataApi.processAsync(channel, { data })
-      setResult(res as ProcessResponse)
+      const typed = res as ProcessResponse
+      setResult(typed)
+      setHistory((prev) =>
+        [
+          {
+            channel,
+            payload,
+            sync,
+            status: typed.status,
+            traceId: typed.id,
+            at: new Date().toISOString(),
+          },
+          ...prev,
+        ].slice(0, 8)
+      )
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed")
     } finally {
@@ -137,7 +182,7 @@ export function ConsolePage() {
           <CardContent className="space-y-4">
             <div>
               <label className="mb-1 block text-sm font-medium">Channel</label>
-              <Select value={channel} onChange={(e) => setChannel(e.target.value)}>
+              <Select value={channel} onChange={(e) => onChannelChange(e.target.value)}>
                 <option value="">Select a channel...</option>
                 {channelList.map((c) => (
                   <option key={c.channel_id} value={c.name}>
@@ -148,7 +193,16 @@ export function ConsolePage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium">JSON Payload</label>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="block text-sm font-medium">JSON Payload</label>
+                <button
+                  type="button"
+                  onClick={() => setPayload(SAMPLE_PAYLOAD)}
+                  className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  Insert sample
+                </button>
+              </div>
               <Textarea
                 value={payload}
                 onChange={(e) => setPayload(e.target.value)}
@@ -194,7 +248,7 @@ export function ConsolePage() {
             )}
 
             {error && (
-              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                 {error}
               </div>
             )}
@@ -204,7 +258,16 @@ export function ConsolePage() {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Response</CardTitle>
+              <CardTitle className="flex items-center justify-between">
+                Response
+                {traceId && (
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to={`/traces/${traceId}`}>
+                      <ExternalLink className="h-3.5 w-3.5" /> Open as trace
+                    </Link>
+                  </Button>
+                )}
+              </CardTitle>
             </CardHeader>
             <CardContent>
               {result ? (
@@ -218,6 +281,48 @@ export function ConsolePage() {
           </Card>
 
           {profileResult && <ProfilePanel profile={profileResult} />}
+
+          {history.length > 0 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Recent requests</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1">
+                {history.map((h, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => restore(h)}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    >
+                      <Badge variant="outline" className="shrink-0 text-xs">
+                        {h.sync ? "Sync" : "Async"}
+                      </Badge>
+                      <span className="truncate font-medium">{h.channel}</span>
+                      {h.status && (
+                        <span className="shrink-0 text-xs text-muted-foreground">{h.status}</span>
+                      )}
+                      <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                        {formatDate(h.at)}
+                      </span>
+                    </button>
+                    {h.traceId && (
+                      <Link
+                        to={`/traces/${h.traceId}`}
+                        className="shrink-0 text-muted-foreground hover:text-foreground"
+                        aria-label="Open trace"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </Link>
+                    )}
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>
