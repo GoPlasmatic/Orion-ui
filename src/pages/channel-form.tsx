@@ -13,10 +13,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PageHeader } from "@/components/shared/page-header"
+import { ChannelConfigEditor } from "@/components/shared/channel-config-editor"
 import { ArrowLeft, Save } from "lucide-react"
 
 const CHANNEL_TYPES: ChannelType[] = ["sync", "async"]
@@ -38,7 +38,7 @@ function ChannelForm({ existing }: { existing?: Channel }) {
   const [consumerGroup, setConsumerGroup] = useState(existing?.consumer_group ?? "")
   const [workflowId, setWorkflowId] = useState(existing?.workflow_id ?? "")
   const [priority, setPriority] = useState(String(existing?.priority ?? 0))
-  const [configText, setConfigText] = useState(JSON.stringify(existing?.config ?? {}, null, 2))
+  const [config, setConfig] = useState<ChannelConfig>(existing?.config ?? {})
   const [error, setError] = useState<string | null>(null)
 
   const backTo = existing ? `/channels/${existing.channel_id}` : "/channels"
@@ -46,18 +46,6 @@ function ChannelForm({ existing }: { existing?: Channel }) {
   const handleSubmit = () => {
     setError(null)
 
-    let config: ChannelConfig
-    try {
-      const parsed = JSON.parse(configText)
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        setError("Config must be a JSON object")
-        return
-      }
-      config = parsed
-    } catch {
-      setError("Invalid JSON in config")
-      return
-    }
     if (!name.trim()) {
       setError("Name is required")
       return
@@ -187,16 +175,7 @@ function ChannelForm({ existing }: { existing?: Channel }) {
             <Input value={workflowId} onChange={(e) => setWorkflowId(e.target.value)} />
           </div>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium">Config (JSON)</label>
-            <Textarea
-              value={configText}
-              onChange={(e) => setConfigText(e.target.value)}
-              rows={12}
-              className="font-mono text-sm"
-              placeholder='{ "rate_limit": { "requests_per_second": 100 }, "tracing": { "mode": "async" } }'
-            />
-          </div>
+          <ChannelConfigEditor value={config} onChange={setConfig} />
 
           {error && (
             <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

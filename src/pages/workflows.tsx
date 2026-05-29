@@ -16,8 +16,9 @@ import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
 import { StatusBadge } from "@/components/shared/status-badge"
+import { WorkflowImportWizard } from "@/components/shared/workflow-import-wizard"
 import { formatDate } from "@/lib/utils"
-import { ChevronLeft, ChevronRight } from "lucide-react"
+import { ChevronLeft, ChevronRight, Upload } from "lucide-react"
 
 const PAGE_SIZE = 20
 const columnHelper = createColumnHelper<Workflow>()
@@ -77,6 +78,7 @@ export function WorkflowsPage() {
   const [offset, setOffset] = useState(0)
   const [statusFilter, setStatusFilter] = useState<EntityStatus | "">("")
   const [tagFilter, setTagFilter] = useState("")
+  const [showImport, setShowImport] = useState(false)
 
   const { data, isLoading } = useWorkflows({
     limit: PAGE_SIZE,
@@ -97,7 +99,14 @@ export function WorkflowsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Workflows" description="View workflow pipelines and task definitions" />
+      <div className="flex items-start justify-between">
+        <PageHeader title="Workflows" description="View workflow pipelines and task definitions" />
+        <Button onClick={() => setShowImport(true)}>
+          <Upload className="h-4 w-4" /> Import
+        </Button>
+      </div>
+
+      <WorkflowImportWizard open={showImport} onClose={() => setShowImport(false)} />
 
       <div className="flex items-center gap-3">
         <Select

@@ -19,6 +19,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { LifecycleActions } from "@/components/shared/lifecycle-actions"
 import { VersionHistory } from "@/components/shared/version-history"
+import { VersionCompare } from "@/components/shared/version-compare"
+import { RolloutControl } from "@/components/shared/rollout-control"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { RelationshipGraph } from "@/components/graph/relationship-graph"
 import { stepResultBadgeClass } from "@/lib/status"
@@ -106,11 +108,13 @@ export function WorkflowDetailPage() {
                 ))}
               </div>
             )}
-            {workflow.rollout_percentage !== undefined && workflow.rollout_percentage !== null && (
-              <span className="text-sm text-muted-foreground">
-                Rollout: {workflow.rollout_percentage}%
-              </span>
-            )}
+            {workflow.status !== "active" &&
+              workflow.rollout_percentage !== undefined &&
+              workflow.rollout_percentage !== null && (
+                <span className="text-sm text-muted-foreground">
+                  Rollout: {workflow.rollout_percentage}%
+                </span>
+              )}
             <span className="text-sm text-muted-foreground">
               {workflow.tasks?.length ?? 0} tasks
             </span>
@@ -125,6 +129,10 @@ export function WorkflowDetailPage() {
           onDelete={() => deleteWorkflow.mutate(workflow.workflow_id, { onSuccess: () => navigate("/workflows") })}
         />
       </div>
+
+      {workflow.status === "active" && (
+        <RolloutControl workflowId={workflow.workflow_id} current={workflow.rollout_percentage} />
+      )}
 
       <Tabs defaultValue="visualization">
         <TabsList>
@@ -240,7 +248,13 @@ export function WorkflowDetailPage() {
         </TabsContent>
 
         <TabsContent value="versions">
-          <VersionHistory versions={versions} isLoading={versionsLoading} />
+          <div className="space-y-6">
+            <VersionHistory versions={versions} isLoading={versionsLoading} />
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold">Compare versions</h3>
+              <VersionCompare versions={versions} isLoading={versionsLoading} />
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="json">

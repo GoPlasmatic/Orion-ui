@@ -6,11 +6,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PageHeader } from "@/components/shared/page-header"
+import { ConnectorConfigEditor } from "@/components/shared/connector-config-editor"
 import { parseJson } from "@/lib/utils"
 import { ArrowLeft, Save } from "lucide-react"
+
+function initialConfig(existing?: Connector): Record<string, unknown> {
+  if (!existing) return {}
+  const parsed = parseJson(existing.config_json)
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : {}
+}
 
 const CONNECTOR_TYPES: ConnectorType[] = ["http", "kafka", "db", "cache", "storage"]
 
@@ -23,27 +32,13 @@ function ConnectorForm({ existing }: { existing?: Connector }) {
   const [name, setName] = useState(existing?.name ?? "")
   const [type, setType] = useState<ConnectorType>(existing?.connector_type ?? "http")
   const [enabled, setEnabled] = useState(existing?.enabled ?? true)
-  const [configText, setConfigText] = useState(
-    existing ? JSON.stringify(parseJson(existing.config_json), null, 2) : "{\n  \n}"
-  )
+  const [config, setConfig] = useState<Record<string, unknown>>(() => initialConfig(existing))
   const [error, setError] = useState<string | null>(null)
 
   const backTo = existing ? `/connectors/${existing.id}` : "/connectors"
 
   const handleSubmit = () => {
     setError(null)
-    let config: Record<string, unknown>
-    try {
-      const parsed = JSON.parse(configText)
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        setError("Config must be a JSON object")
-        return
-      }
-      config = parsed
-    } catch {
-      setError("Invalid JSON in config")
-      return
-    }
     if (!name.trim()) {
       setError("Name is required")
       return
@@ -103,32 +98,13 @@ function ConnectorForm({ existing }: { existing?: Connector }) {
           </div>
 
           {isEdit && (
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(e) => setEnabled(e.target.checked)}
-                className="rounded"
-              />
+            <div className="flex items-center gap-2 text-sm">
+              <Switch checked={enabled} onCheckedChange={setEnabled} aria-label="Enabled" />
               Enabled
-            </label>
+            </div>
           )}
 
-          <div>
-            <label className="mb-1 block text-sm font-medium">Config (JSON)</label>
-            <Textarea
-              value={configText}
-              onChange={(e) => setConfigText(e.target.value)}
-              rows={14}
-              className="font-mono text-sm"
-            />
-            {isEdit && (
-              <p className="mt-1 text-xs text-amber-600">
-                Secret fields are shown masked. Replace them with real values before saving,
-                or the mask will overwrite the stored secret.
-              </p>
-            )}
-          </div>
+          <ConnectorConfigEditor connectorType={type} value={config} onChange={setConfig} />
 
           {error && (
             <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

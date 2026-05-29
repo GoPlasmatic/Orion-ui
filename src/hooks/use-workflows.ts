@@ -67,6 +67,26 @@ export function useTestWorkflow() {
   })
 }
 
+export function useValidateWorkflow() {
+  return useMutation({
+    mutationFn: (req: unknown) => workflowsApi.validate(req),
+  })
+}
+
+export function useImportWorkflows() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ items, dryRun }: { items: unknown[]; dryRun: boolean }) =>
+      workflowsApi.import(items, dryRun),
+    onSuccess: (result, { dryRun }) => {
+      if (dryRun) return
+      queryClient.invalidateQueries({ queryKey: ["workflows"] })
+      toast.success(`Imported ${result.imported} workflow${result.imported !== 1 ? "s" : ""}`)
+    },
+    onError: (e) => toast.error("Failed to import workflows", { description: errorDescription(e) }),
+  })
+}
+
 export function useCreateWorkflowVersion() {
   const queryClient = useQueryClient()
   return useMutation({

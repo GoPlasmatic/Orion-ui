@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Dialog, DialogHeader, DialogTitle, DialogBody, DialogFooter } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import type { ImportResult } from "@/api/types"
@@ -43,12 +43,11 @@ export function ImportDialog({ title, onImport, onClose }: ImportDialogProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <Card className="flex max-h-[90vh] w-full max-w-2xl flex-col">
-        <CardHeader>
-          <CardTitle>{title}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 overflow-y-auto">
+    <Dialog open onClose={onClose} aria-label={title}>
+      <DialogHeader>
+        <DialogTitle>{title}</DialogTitle>
+      </DialogHeader>
+      <DialogBody>
           <p className="text-sm text-muted-foreground">
             Paste a JSON array of items. Validate runs a dry-run (no database writes,
             so name conflicts are not detected until you import).
@@ -97,19 +96,18 @@ export function ImportDialog({ title, onImport, onClose }: ImportDialogProps) {
               )}
             </div>
           )}
-        </CardContent>
-        <CardFooter className="justify-end gap-2">
-          <Button variant="outline" onClick={onClose} disabled={busy}>
-            Close
-          </Button>
-          <Button variant="outline" onClick={() => run(true)} disabled={busy}>
-            Validate
-          </Button>
-          <Button onClick={() => run(false)} disabled={busy}>
-            {busy ? "Working..." : "Import"}
-          </Button>
-        </CardFooter>
-      </Card>
-    </div>
+      </DialogBody>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose} disabled={busy}>
+          Close
+        </Button>
+        <Button variant="outline" onClick={() => run(true)} disabled={busy}>
+          Validate
+        </Button>
+        <Button onClick={() => run(false)} disabled={busy}>
+          {busy ? "Working..." : "Import"}
+        </Button>
+      </DialogFooter>
+    </Dialog>
   )
 }
