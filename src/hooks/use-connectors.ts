@@ -10,10 +10,11 @@ import type {
 
 const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
 
-export function useConnectors(params: ListConnectorsParams = {}) {
+export function useConnectors(params: ListConnectorsParams = {}, enabled = true) {
   return useQuery({
     queryKey: ["connectors", params],
     queryFn: () => connectorsApi.list(params),
+    enabled,
   })
 }
 

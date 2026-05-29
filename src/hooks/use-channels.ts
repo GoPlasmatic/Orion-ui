@@ -10,10 +10,11 @@ import type {
 
 const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
 
-export function useChannels(params: ListChannelsParams = {}) {
+export function useChannels(params: ListChannelsParams = {}, enabled = true) {
   return useQuery({
     queryKey: ["channels", params],
     queryFn: () => channelsApi.list(params),
+    enabled,
   })
 }
 

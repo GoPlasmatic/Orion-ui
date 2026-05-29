@@ -46,10 +46,10 @@ function diffLines(a: string, b: string): DiffLine[] {
 
 /** Stable JSON view of a version, excluding volatile/status fields that aren't part of the definition. */
 function definitionJson(wf: Workflow): string {
-  const { status: _s, created_at: _c, updated_at: _u, ...rest } = wf
-  void _s
-  void _c
-  void _u
+  const rest: Partial<Workflow> = { ...wf }
+  delete rest.status
+  delete rest.created_at
+  delete rest.updated_at
   return JSON.stringify(rest, null, 2)
 }
 

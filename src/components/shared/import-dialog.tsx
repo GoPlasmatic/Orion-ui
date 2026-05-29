@@ -89,7 +89,7 @@ export function ImportDialog({ title, onImport, onClose }: ImportDialogProps) {
               {result.errors.length > 0 && (
                 <ul className="space-y-1 text-xs">
                   {result.errors.map((e) => (
-                    <li key={e.index} className="font-mono text-red-600">
+                    <li key={e.index} className="font-mono text-destructive">
                       [{e.index}] {e.error}
                     </li>
                   ))}

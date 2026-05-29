@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { useChannels } from "@/hooks/use-channels"
 import { useWorkflows } from "@/hooks/use-workflows"
@@ -49,11 +49,11 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const { resolvedTheme, setTheme } = useTheme()
   const [query, setQuery] = useState("")
   const [active, setActive] = useState(0)
-  const listRef = useRef<HTMLDivElement>(null)
 
-  const { data: channels } = useChannels(open ? { limit: 200 } : {})
-  const { data: workflows } = useWorkflows(open ? { limit: 200 } : {})
-  const { data: connectors } = useConnectors(open ? { limit: 200 } : {})
+  // Only fetch the entity lists once the palette is opened.
+  const { data: channels } = useChannels({ limit: 200 }, open)
+  const { data: workflows } = useWorkflows({ limit: 200 }, open)
+  const { data: connectors } = useConnectors({ limit: 200 }, open)
 
   // Reset transient state whenever the palette opens.
   useEffect(() => {
@@ -158,12 +158,15 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   }
 
   // Group consecutive results by their group label for section headers.
-  const groups: { group: string; items: Command[] }[] = []
-  filtered.forEach((c) => {
-    const last = groups[groups.length - 1]
-    if (last && last.group === c.group) last.items.push(c)
-    else groups.push({ group: c.group, items: [c] })
-  })
+  const groups = useMemo(() => {
+    const acc: { group: string; items: Command[] }[] = []
+    filtered.forEach((c) => {
+      const last = acc[acc.length - 1]
+      if (last && last.group === c.group) last.items.push(c)
+      else acc.push({ group: c.group, items: [c] })
+    })
+    return acc
+  }, [filtered])
 
   let flatIndex = -1
 
@@ -180,7 +183,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
       </div>
-      <div ref={listRef} className="max-h-[60vh] overflow-y-auto p-2">
+      <div className="max-h-[60vh] overflow-y-auto p-2">
         {filtered.length === 0 ? (
           <p className="px-2 py-8 text-center text-sm text-muted-foreground">No results</p>
         ) : (

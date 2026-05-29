@@ -1,11 +1,12 @@
 import { useRef, useState } from "react"
 import type { ConnectorType } from "@/api/types"
+import { ConfigEditorShell } from "@/components/shared/config-editor-shell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { Braces, KeyRound, Plus, SlidersHorizontal, Trash2 } from "lucide-react"
+import { KeyRound, Plus, Trash2 } from "lucide-react"
 
 type ConfigObject = Record<string, unknown>
 
@@ -40,9 +41,6 @@ const isSecretKey = (key: string) => SECRET_KEY_RE.test(key)
  * accidentally clobber a stored secret.
  */
 export function ConnectorConfigEditor({ value, onChange, connectorType }: ConnectorConfigEditorProps) {
-  const [mode, setMode] = useState<"form" | "json">("form")
-  const [jsonText, setJsonText] = useState("")
-  const [jsonError, setJsonError] = useState<string | null>(null)
   const [newKey, setNewKey] = useState("")
   const [newType, setNewType] = useState<"string" | "number" | "boolean">("string")
 
@@ -51,27 +49,6 @@ export function ConnectorConfigEditor({ value, onChange, connectorType }: Connec
     const next = { ...value }
     delete next[key]
     onChange(next)
-  }
-
-  const openJson = () => {
-    setJsonText(JSON.stringify(value, null, 2))
-    setJsonError(null)
-    setMode("json")
-  }
-
-  const onJsonChange = (text: string) => {
-    setJsonText(text)
-    try {
-      const parsed = JSON.parse(text)
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        setJsonError("Config must be a JSON object")
-        return
-      }
-      setJsonError(null)
-      onChange(parsed as ConfigObject)
-    } catch {
-      setJsonError("Invalid JSON")
-    }
   }
 
   const addField = () => {
@@ -85,43 +62,16 @@ export function ConnectorConfigEditor({ value, onChange, connectorType }: Connec
   const entries = Object.entries(value)
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <label className="text-sm font-medium">
+    <ConfigEditorShell
+      value={value}
+      onChange={onChange}
+      label={
+        <>
           Configuration <span className="text-xs text-muted-foreground">({connectorType})</span>
-        </label>
-        <div className="flex gap-1 rounded-md border p-0.5">
-          <Button
-            type="button"
-            variant={mode === "form" ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setMode("form")}
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5" /> Form
-          </Button>
-          <Button
-            type="button"
-            variant={mode === "json" ? "secondary" : "ghost"}
-            size="sm"
-            onClick={openJson}
-          >
-            <Braces className="h-3.5 w-3.5" /> Advanced (JSON)
-          </Button>
-        </div>
-      </div>
-
-      {mode === "json" ? (
-        <div>
-          <Textarea
-            value={jsonText}
-            onChange={(e) => onJsonChange(e.target.value)}
-            rows={16}
-            className="font-mono text-sm"
-          />
-          {jsonError && <p className="mt-1 text-xs text-destructive">{jsonError}</p>}
-        </div>
-      ) : (
-        <div className="space-y-3">
+        </>
+      }
+    >
+      <div className="space-y-3">
           {entries.length === 0 && (
             <p className="rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
               No fields yet. Add the connector's settings below, or paste them via Advanced (JSON).
@@ -165,9 +115,8 @@ export function ConnectorConfigEditor({ value, onChange, connectorType }: Connec
               <Plus className="h-4 w-4" /> Add
             </Button>
           </div>
-        </div>
-      )}
-    </div>
+      </div>
+    </ConfigEditorShell>
   )
 }
 

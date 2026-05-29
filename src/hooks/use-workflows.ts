@@ -4,16 +4,16 @@ import { workflowsApi } from "@/api/workflows"
 import type {
   ListWorkflowsParams,
   StatusChangeRequest,
-  WorkflowRolloutRequest,
   WorkflowTestRequest,
 } from "@/api/types"
 
 const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
 
-export function useWorkflows(params: ListWorkflowsParams = {}) {
+export function useWorkflows(params: ListWorkflowsParams = {}, enabled = true) {
   return useQuery({
     queryKey: ["workflows", params],
     queryFn: () => workflowsApi.list(params),
+    enabled,
   })
 }
 
@@ -44,19 +44,6 @@ export function useChangeWorkflowStatus() {
       toast.success(`Workflow ${req.status === "active" ? "activated" : req.status}`)
     },
     onError: (e) => toast.error("Failed to change workflow status", { description: errorDescription(e) }),
-  })
-}
-
-export function useSetWorkflowRollout() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, req }: { id: string; req: WorkflowRolloutRequest }) =>
-      workflowsApi.setRollout(id, req),
-    onSuccess: (_data, { id, req }) => {
-      queryClient.invalidateQueries({ queryKey: ["workflows", id] })
-      toast.success(`Rollout set to ${req.rollout_percentage}%`)
-    },
-    onError: (e) => toast.error("Failed to set rollout", { description: errorDescription(e) }),
   })
 }
 
