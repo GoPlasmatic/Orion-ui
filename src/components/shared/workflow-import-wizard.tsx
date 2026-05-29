@@ -6,7 +6,6 @@ import {
   useImportWorkflows,
   useTestWorkflow,
   useChangeWorkflowStatus,
-  useSetWorkflowRollout,
 } from "@/hooks/use-workflows"
 import type { JsonLogicValue, ValidationResponse, WorkflowTestResponse } from "@/api/types"
 import { useTheme } from "@/lib/use-theme"
@@ -14,8 +13,6 @@ import { Dialog, DialogHeader, DialogTitle, DialogBody, DialogFooter } from "@/c
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import { Slider } from "@/components/ui/slider"
-import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { stepResultBadgeClass } from "@/lib/status"
 import { AlertCircle, CheckCircle2, Play } from "lucide-react"
@@ -29,10 +26,10 @@ interface WorkflowImportWizardProps {
 }
 
 /**
- * Guided workflow import: paste → validate → import (as draft) → dry-run → activate
- * with a rollout %. The dry-run and activate steps target the definition's
- * `workflow_id` (the test/status endpoints are id-scoped, and `import` returns only
- * counts); if the pasted definition omits an id, those steps are skipped with a note.
+ * Guided workflow import: paste → validate → import (as draft) → dry-run → activate.
+ * The dry-run and activate steps target the definition's `workflow_id` (the
+ * test/status endpoints are id-scoped, and `import` returns only counts); if the
+ * pasted definition omits an id, those steps are skipped with a note.
  */
 export function WorkflowImportWizard({ open, onClose }: WorkflowImportWizardProps) {
   const { resolvedTheme } = useTheme()
@@ -40,7 +37,6 @@ export function WorkflowImportWizard({ open, onClose }: WorkflowImportWizardProp
   const importWorkflows = useImportWorkflows()
   const testWorkflow = useTestWorkflow()
   const changeStatus = useChangeWorkflowStatus()
-  const setRollout = useSetWorkflowRollout()
 
   const [step, setStep] = useState<StepIndex>(0)
   const [text, setText] = useState("")
@@ -52,7 +48,6 @@ export function WorkflowImportWizard({ open, onClose }: WorkflowImportWizardProp
   const [testResult, setTestResult] = useState<WorkflowTestResponse | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
 
-  const [rollout, setRolloutValue] = useState(100)
   const [activated, setActivated] = useState(false)
 
   const parsed = useMemo(() => {
@@ -84,7 +79,6 @@ export function WorkflowImportWizard({ open, onClose }: WorkflowImportWizardProp
     setTestResult(null)
     setTestError(null)
     setActivated(false)
-    setRolloutValue(100)
   }
 
   const close = () => {
@@ -150,12 +144,7 @@ export function WorkflowImportWizard({ open, onClose }: WorkflowImportWizardProp
     if (!workflowId) return
     changeStatus.mutate(
       { id: workflowId, req: { status: "active" } },
-      {
-        onSuccess: () => {
-          setRollout.mutate({ id: workflowId, req: { rollout_percentage: rollout } })
-          setActivated(true)
-        },
-      }
+      { onSuccess: () => setActivated(true) }
     )
   }
 
@@ -323,31 +312,15 @@ export function WorkflowImportWizard({ open, onClose }: WorkflowImportWizardProp
           <div className="space-y-4">
             {activated ? (
               <div className="flex items-center gap-2 rounded-md border border-chart-2/40 p-3 text-sm text-chart-2">
-                <CheckCircle2 className="h-4 w-4" /> Activated at {rollout}% rollout.
+                <CheckCircle2 className="h-4 w-4" /> Workflow activated.
               </div>
             ) : workflowId ? (
               <>
                 <p className="text-sm text-muted-foreground">
-                  Activate the workflow and choose how much matching traffic it should receive.
+                  Activate the imported workflow so it begins handling matching traffic.
                 </p>
-                <div className="flex items-center gap-4">
-                  <Slider value={rollout} onValueChange={setRolloutValue} className="flex-1" />
-                  <div className="flex items-center gap-1">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={rollout}
-                      onChange={(e) =>
-                        setRolloutValue(Math.max(0, Math.min(100, Number(e.target.value))))
-                      }
-                      className="w-20"
-                    />
-                    <span className="text-sm text-muted-foreground">%</span>
-                  </div>
-                </div>
                 <Button onClick={activate} disabled={changeStatus.isPending}>
-                  {changeStatus.isPending ? "Activating…" : `Activate at ${rollout}%`}
+                  {changeStatus.isPending ? "Activating…" : "Activate workflow"}
                 </Button>
               </>
             ) : (

@@ -54,14 +54,6 @@ const columns = [
     header: "Version",
     cell: (info) => <span className="text-muted-foreground">v{info.getValue()}</span>,
   }),
-  columnHelper.accessor("rollout_percentage", {
-    header: "Rollout",
-    cell: (info) => {
-      const val = info.getValue()
-      if (val === undefined || val === null) return <span className="text-muted-foreground">--</span>
-      return <span className="text-sm">{val}%</span>
-    },
-  }),
   columnHelper.accessor("tasks", {
     header: "Tasks",
     cell: (info) => <span className="text-muted-foreground">{info.getValue()?.length ?? 0}</span>,
