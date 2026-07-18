@@ -10,8 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@goplasmatic/dataflow-ui": "^2.1.5",
-    "@goplasmatic/datalogic-ui": "^4.0.21",
+    "@goplasmatic/dataflow-ui": "^3.0.2",
+    "@goplasmatic/datalogic-ui": "^5.1.0",
     "@tailwindcss/vite": "^4.2.2",
     "@tanstack/react-query": "^5.97.0",
     "@tanstack/react-table": "^8.21.3",
