@@ -3,10 +3,10 @@
 
   # Orion UI
 
-  **The admin dashboard for the [Orion](https://github.com/GoPlasmatic/Orion) rules engine.**
+  **The operations console for the [Orion](https://github.com/GoPlasmatic/Orion) services runtime.**
 
-  Manage rules, connectors, channels, and invocations from a single interface.
-  Visualize rule workflows, inspect audit trails, and monitor engine health — no CLI required.
+  Live dashboards, a system map of your channels and connectors, visual workflow
+  inspection, trace drill-downs, and full channel/connector management — no CLI required.
 
   [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
   [![React](https://img.shields.io/badge/react-19-blue.svg)](https://react.dev)
@@ -18,29 +18,42 @@
 
 ## Quick Start
 
-**1. Start the Orion backend** (if not already running):
+### Run with Docker (recommended)
+
+The UI ships as a production-ready container image (nginx, multi-arch amd64/arm64):
 
 ```bash
-brew install GoPlasmatic/tap/orion   # or: curl installer, cargo install
-orion-server
+docker run -p 8081:8080 \
+  -e ORION_URL=http://host.docker.internal:8080 \
+  ghcr.io/goplasmatic/orion-ui:latest
 ```
 
-**2. Install and run the UI:**
+Open `http://localhost:8081`. `ORION_URL` points at your Orion server; the bundled
+nginx reverse-proxies all `/api/` requests to it.
+
+### Run the full stack with Docker Compose
+
+With the [Orion](https://github.com/GoPlasmatic/Orion) repo checked out as a sibling
+directory, one command brings up the server and the UI together:
 
 ```bash
+docker compose --profile prod up    # server + production UI on :8081
+docker compose --profile dev up     # server + Vite dev server with HMR on :5173
+```
+
+### Run from source
+
+```bash
+# 1. Start the Orion backend (if not already running)
+brew install GoPlasmatic/tap/orion-server && orion-server
+
+# 2. Install and run the UI
 npm install
 npm run dev
 ```
 
-**3. Open the dashboard:**
-
-Visit `http://localhost:5173` — the dev server proxies all API requests to the Orion backend automatically.
-
-By default the backend is expected at `http://localhost:8080`. Override with:
-
-```bash
-ORION_URL=http://your-backend:8080 npm run dev
-```
+Visit `http://localhost:5173` — the dev server proxies API requests to the backend
+(default `http://localhost:8080`, override with `ORION_URL=http://your-backend:8080 npm run dev`).
 
 ---
 
@@ -48,38 +61,57 @@ ORION_URL=http://your-backend:8080 npm run dev
 
 | Feature | Description |
 |---------|-------------|
-| **Dashboard** | Engine status, health checks, active rule counts, and uptime at a glance |
-| **Rule Workflows** | Visual DAG of task pipelines with condition nodes, powered by React Flow |
-| **Invocations** | Paginated, sortable job list with status badges and computed durations |
-| **Audit Trails** | Drill into any invocation to see a step-by-step timeline of changes |
-| **Connectors** | Browse and inspect connector configurations |
-| **Channels** | Channel overview with associated rules |
-| **Data Processing** | Send test payloads directly from the UI |
+| **Operations** | Live KPIs at a glance — requests/min, error rate, average and p95 latency, and a "what needs attention" feed |
+| **System Map** | Topology view: trace any channel through its workflow, downstream channels, and connectors |
+| **Channels** | Full lifecycle management — create, edit, version, activate/archive, bulk import, structured config editor |
+| **Workflows** | Visual DAG of task pipelines (tree/flow/graph views), JSONLogic condition editing, dry-run testing, validation, version compare |
+| **Connectors** | Create and manage database, cache, HTTP, and messaging connectors |
+| **Circuit Breakers** | Monitor and reset per-connector circuit breakers |
+| **Traces** | Execution history with per-task detail and latency/error analytics |
+| **Audit Log** | Who changed what, when — across every admin operation |
+| **Data Console** | Send test requests to any channel with optional profiling |
+| **Polish** | Command palette (⌘K), light/dark themes, density modes, empty states, import wizards |
+
+## Pages
+
+| Route | Description |
+|-------|-------------|
+| `/` | Operations dashboard — live KPIs and attention feed |
+| `/system-map` | Channel → workflow → connector topology graph |
+| `/channels`, `/channels/new`, `/channels/:id`, `/channels/:id/edit` | Channel list, creation, detail, editing |
+| `/workflows`, `/workflows/:id` | Workflow list and visual DAG detail with dry-run |
+| `/connectors`, `/connectors/new`, `/connectors/:id`, `/connectors/:id/edit` | Connector management |
+| `/circuit-breakers` | Circuit breaker status and reset |
+| `/traces`, `/traces/:id` | Execution traces and per-task drill-down |
+| `/audit` | Audit log |
+| `/console` | Data console for test requests |
+| `/settings` | Theme and density preferences |
 
 ## How It Works
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                     Orion UI                         │
-│                                                      │
-│   ┌───────────┐  ┌────────────┐  ┌──────────────┐   │
-│   │ Dashboard │  │   Rules    │  │ Invocations  │   │
-│   │  Health   │  │  Workflow  │  │ Audit Trails │   │
-│   └─────┬─────┘  └─────┬──────┘  └──────┬───────┘   │
-│         │              │                │            │
-│         └──────────┬───┘────────────────┘            │
-│                    │                                 │
-│              TanStack Query                          │
-│              (cache + fetch)                         │
-│                    │                                 │
-└────────────────────┼─────────────────────────────────┘
-                     │  /api/v1/*
-                     ▼
-            ┌────────────────┐
-            │  Orion Server  │
-            │  (Rust, :8080) │
-            └────────────────┘
+┌────────────────────────────────────────────────────────┐
+│                       Orion UI                         │
+│                                                        │
+│  ┌────────────┐  ┌────────────┐  ┌─────────────────┐   │
+│  │ Operations │  │ System Map │  │ Channels /      │   │
+│  │ Dashboards │  │  Topology  │  │ Workflows /     │   │
+│  │  & Traces  │  │   Graph    │  │ Connectors CRUD │   │
+│  └──────┬─────┘  └─────┬──────┘  └────────┬────────┘   │
+│         └──────────────┼──────────────────┘            │
+│                 TanStack Query                         │
+│                 (cache + fetch)                        │
+└────────────────────────┼───────────────────────────────┘
+                         │  /api/v1/*
+                         ▼
+                ┌────────────────┐
+                │  Orion Server  │
+                │  (Rust, :8080) │
+                └────────────────┘
 ```
+
+In production the container serves the built SPA with nginx and reverse-proxies
+`/api/`, health, and metrics endpoints to the Orion server (`ORION_URL`).
 
 ## Scripts
 
@@ -99,22 +131,11 @@ src/
 ├── pages/          # Route-level page components
 ├── components/
 │   ├── ui/         # Reusable primitives (Button, Card, Badge, Table, …)
-│   ├── layout/     # App shell (sidebar, header)
-│   └── rules/      # Rule-specific components (workflow graph, nodes)
-└── lib/            # Utilities (cn, formatDate, truncate)
+│   ├── layout/     # App shell (sidebar, header, command palette)
+│   ├── graph/      # Topology and relationship graphs
+│   └── traces/     # Trace analytics and detail views
+└── lib/            # Utilities, theme/density providers, topology builders
 ```
-
-## Pages
-
-| Route | Description |
-|-------|-------------|
-| `/` | Dashboard — engine status, health, rule counts |
-| `/invocations` | Job list with sortable columns and pagination |
-| `/invocations/:id` | Job detail with audit trail timeline |
-| `/channels` | Channel overview |
-| `/connectors` | Connector list |
-| `/connectors/:id` | Connector detail and configuration |
-| `/data` | Data processing interface |
 
 ## Built With
 
@@ -125,9 +146,16 @@ src/
 | [TanStack Query](https://tanstack.com/query) | Server state, caching, and mutations |
 | [TanStack Table](https://tanstack.com/table) | Headless data tables with sorting and pagination |
 | [Tailwind CSS v4](https://tailwindcss.com) | Utility-first styling with CSS variable theming |
-| [React Flow](https://reactflow.dev) | Rule workflow DAG visualization |
+| [@goplasmatic/dataflow-ui](https://github.com/GoPlasmatic/dataflow-rs) | Workflow DAG visualization (tree/flow/graph) |
+| [@goplasmatic/datalogic-ui](https://github.com/GoPlasmatic/datalogic-rs) | JSONLogic condition editor |
+| [Recharts](https://recharts.org) | Trace analytics charts |
 | [Lucide React](https://lucide.dev) | Icons |
-| [CVA](https://cva.style) | Type-safe component variants |
+
+## Related
+
+- **[Orion](https://github.com/GoPlasmatic/Orion)** — the services runtime this console operates
+- **[Orion CLI](https://github.com/GoPlasmatic/Orion-cli)** — terminal + MCP-server companion
+- **[Orion Documentation](https://goplasmatic.github.io/Orion/)** — concepts, API reference, tutorials
 
 ## Contributing
 
