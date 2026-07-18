@@ -14,6 +14,46 @@
   [![Vite](https://img.shields.io/badge/vite-7-purple.svg)](https://vite.dev)
 </div>
 
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="media/ui-operations-dark.png">
+        <img src="media/ui-operations-light.png" alt="Operations dashboard — request rate, error rate, latency, outcomes by channel, and recent traces">
+      </picture>
+      <em>Operations dashboard</em>
+    </td>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="media/ui-system-map-dark.png">
+        <img src="media/ui-system-map-light.png" alt="System Map — a channel traced through its workflow and connectors as a topology graph">
+      </picture>
+      <em>System Map</em>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="media/ui-workflow-dag-dark.png">
+        <img src="media/ui-workflow-dag-light.png" alt="Workflow detail — task explorer with the selected task's JSONLogic rendered as a flow graph">
+      </picture>
+      <em>Workflow logic, visualized</em>
+    </td>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="media/ui-console-dark.png">
+        <img src="media/ui-console-light.png" alt="Data Console — send a test request to a channel and inspect the response, per-task timings, and trace">
+      </picture>
+      <em>Data Console</em>
+    </td>
+  </tr>
+</table>
+
+All screenshots are generated from a live instance by the
+[recording pipeline](https://github.com/GoPlasmatic/Orion/tree/main/docs/recordings)
+in the main repo — the ~50-second console walkthrough GIF there shows this UI taking
+a service from nothing to live without writing code.
+
 ---
 
 ## Quick Start
