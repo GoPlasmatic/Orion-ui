@@ -1,6 +1,7 @@
 import { DataLogicEditor } from "@goplasmatic/datalogic-ui"
-import type { ChannelConfig } from "@/api/types"
+import type { ChannelConfig, JsonLogicValue } from "@/api/types"
 import { useTheme } from "@/lib/use-theme"
+import { Button } from "@/components/ui/button"
 import { ConfigEditorShell } from "@/components/shared/config-editor-shell"
 import {
   ConfigSection,
@@ -10,6 +11,55 @@ import {
   ToggleField,
   StringListField,
 } from "@/components/shared/config-field"
+import { Plus, Trash2 } from "lucide-react"
+
+/**
+ * Editable JSONLogic block with add/remove affordances. Absent logic stays
+ * absent (no editor rendered) until the operator explicitly adds it, so unset
+ * config keys are not written back as empty expressions.
+ */
+function LogicField({
+  logic,
+  onChange,
+  addLabel,
+  starter,
+  theme,
+}: {
+  logic: JsonLogicValue | undefined
+  onChange: (next: JsonLogicValue | undefined) => void
+  addLabel: string
+  starter: JsonLogicValue
+  theme: "light" | "dark"
+}) {
+  if (logic === undefined || logic === null) {
+    return (
+      <Button type="button" variant="outline" size="sm" onClick={() => onChange(starter)}>
+        <Plus className="h-3.5 w-3.5" /> {addLabel}
+      </Button>
+    )
+  }
+  return (
+    <div className="space-y-2">
+      <div className="h-64 overflow-hidden rounded-md border">
+        <DataLogicEditor
+          value={logic}
+          editable
+          onChange={(expr) => onChange((expr ?? undefined) as JsonLogicValue | undefined)}
+          theme={theme}
+        />
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="text-muted-foreground hover:text-destructive"
+        onClick={() => onChange(undefined)}
+      >
+        <Trash2 className="h-3.5 w-3.5" /> Remove
+      </Button>
+    </div>
+  )
+}
 
 interface ChannelConfigEditorProps {
   value: ChannelConfig
@@ -72,6 +122,20 @@ export function ChannelConfigEditor({ value, onChange }: ChannelConfigEditorProp
                 label="Burst"
                 value={rateLimit.burst}
                 onChange={(v) => setSub("rate_limit", "burst", v)}
+              />
+            </div>
+            <div>
+              <p className="mb-1 text-sm font-medium">Key logic</p>
+              <p className="mb-2 text-xs text-muted-foreground">
+                JSONLogic over {"{client_ip, channel, headers}"} that derives the rate-limit
+                bucket key — e.g. per API key or per tenant. Unset limits per client IP.
+              </p>
+              <LogicField
+                logic={rateLimit.key_logic}
+                onChange={(v) => setSub("rate_limit", "key_logic", v)}
+                addLabel="Add key logic"
+                starter={{ var: "client_ip" }}
+                theme={resolvedTheme}
               />
             </div>
           </ConfigSection>
@@ -205,19 +269,15 @@ export function ChannelConfigEditor({ value, onChange }: ChannelConfigEditorProp
 
           <ConfigSection
             title="Validation logic"
-            description="Read-only view of the channel's JSONLogic validation rule. Edit via the Advanced (JSON) tab."
+            description="JSONLogic over {data, metadata} evaluated at the channel boundary; a falsy result rejects the request with 400."
           >
-            {value.validation_logic !== undefined && value.validation_logic !== null ? (
-              <div className="h-64 overflow-hidden rounded-md border">
-                <DataLogicEditor
-                  value={value.validation_logic}
-                  editable={false}
-                  theme={resolvedTheme}
-                />
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">No validation logic configured.</p>
-            )}
+            <LogicField
+              logic={value.validation_logic}
+              onChange={(v) => setTop("validation_logic", v)}
+              addLabel="Add validation logic"
+              starter={{ "!!": [{ var: "data" }] }}
+              theme={resolvedTheme}
+            />
           </ConfigSection>
       </div>
     </ConfigEditorShell>

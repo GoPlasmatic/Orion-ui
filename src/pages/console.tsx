@@ -2,9 +2,10 @@ import { useState } from "react"
 import { Link } from "react-router"
 import { dataApi } from "@/api/data"
 import { useChannels } from "@/hooks/use-channels"
-import type { ProcessResponse, ProfileResult } from "@/api/types"
+import type { Channel, ProcessResponse, ProfileResult } from "@/api/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -19,10 +20,20 @@ const isBlankPayload = (p: string) => {
   return compact === "" || compact === "{}"
 }
 
+const REST_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+// Verbs sent without a request body (fetch forbids GET/HEAD bodies).
+const BODYLESS = new Set(["GET", "HEAD"])
+
+/** REST-routed channels (route_pattern + rest/http) are invoked by method+path. */
+const isRestChannel = (c: Channel | undefined): c is Channel =>
+  !!c?.route_pattern && (c.protocol === "rest" || c.protocol === "http")
+
 interface HistoryEntry {
   channel: string
   payload: string
   sync: boolean
+  method?: string
+  path?: string
   status?: string
   traceId?: string
   at: string
@@ -103,6 +114,8 @@ export function ConsolePage() {
   const [payload, setPayload] = useState('{\n  \n}')
   const [sync, setSync] = useState(true)
   const [profile, setProfile] = useState(false)
+  const [method, setMethod] = useState("POST")
+  const [path, setPath] = useState("")
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ProcessResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -111,19 +124,33 @@ export function ConsolePage() {
   const { data: channels } = useChannels({ limit: 200 })
   const channelList = channels?.data ?? []
 
+  const selected = channelList.find((c) => c.name === channel)
+  const restMode = isRestChannel(selected)
+  const bodyless = restMode && BODYLESS.has(method)
+
   const profileResult = result?._orion?.profile
   const traceId = result?.id
 
-  // Pre-fill a starter payload when a channel is picked and the editor is empty.
+  // Pre-fill a starter payload when a channel is picked and the editor is empty;
+  // seed method/path from the channel's REST route when it has one.
   const onChannelChange = (value: string) => {
     setChannel(value)
     if (value && isBlankPayload(payload)) setPayload(SAMPLE_PAYLOAD)
+    const next = channelList.find((c) => c.name === value)
+    if (isRestChannel(next)) {
+      setPath(next.route_pattern ?? "")
+      const allowed = (next.methods ?? []).map((m) => m.toUpperCase())
+      setMethod(allowed.length > 0 ? allowed[0] : "POST")
+      setSync(true)
+    }
   }
 
   const restore = (h: HistoryEntry) => {
     setChannel(h.channel)
     setPayload(h.payload)
     setSync(h.sync)
+    if (h.method) setMethod(h.method)
+    if (h.path) setPath(h.path)
   }
 
   const handleSend = async () => {
@@ -135,19 +162,30 @@ export function ConsolePage() {
       return
     }
 
-    let data: Record<string, unknown>
-    try {
-      data = JSON.parse(payload)
-    } catch {
-      setError("Invalid JSON payload")
+    if (restMode && /[{}]/.test(path)) {
+      setError("Replace the {parameters} in the path with concrete values")
       return
+    }
+
+    let data: Record<string, unknown> | undefined
+    if (restMode && bodyless) {
+      data = undefined
+    } else {
+      try {
+        data = JSON.parse(payload)
+      } catch {
+        setError("Invalid JSON payload")
+        return
+      }
     }
 
     setLoading(true)
     try {
-      const res = sync
-        ? await dataApi.processSync(channel, { data }, profile)
-        : await dataApi.processAsync(channel, { data })
+      const res = restMode
+        ? await dataApi.processRest(method, path, data !== undefined ? { data } : undefined, profile)
+        : sync
+          ? await dataApi.processSync(channel, { data: data ?? {} }, profile)
+          : await dataApi.processAsync(channel, { data: data ?? {} })
       const typed = res as ProcessResponse
       setResult(typed)
       setHistory((prev) =>
@@ -155,7 +193,9 @@ export function ConsolePage() {
           {
             channel,
             payload,
-            sync,
+            sync: restMode ? true : sync,
+            method: restMode ? method : undefined,
+            path: restMode ? path : undefined,
             status: typed.status,
             traceId: typed.id,
             at: new Date().toISOString(),
@@ -192,38 +232,75 @@ export function ConsolePage() {
               </Select>
             </div>
 
-            <div>
-              <div className="mb-1 flex items-center justify-between">
-                <label className="block text-sm font-medium">JSON Payload</label>
-                <button
-                  type="button"
-                  onClick={() => setPayload(SAMPLE_PAYLOAD)}
-                  className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                >
-                  Insert sample
-                </button>
+            {restMode && (
+              <div className="flex gap-2">
+                <div className="w-32">
+                  <label className="mb-1 block text-sm font-medium">Method</label>
+                  <Select value={method} onChange={(e) => setMethod(e.target.value)}>
+                    {((selected?.methods?.length ?? 0) > 0
+                      ? selected!.methods!.map((m) => m.toUpperCase())
+                      : REST_METHODS
+                    ).map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="flex-1">
+                  <label className="mb-1 block text-sm font-medium">Path</label>
+                  <Input
+                    value={path}
+                    onChange={(e) => setPath(e.target.value)}
+                    className="font-mono"
+                    placeholder={selected?.route_pattern ?? "/orders/42"}
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Route pattern: <code>{selected?.route_pattern}</code> — replace{" "}
+                    {"{parameters}"} with concrete values.
+                  </p>
+                </div>
               </div>
-              <Textarea
-                value={payload}
-                onChange={(e) => setPayload(e.target.value)}
-                rows={12}
-                className="font-mono text-sm"
-                placeholder='{ "key": "value" }'
-              />
-            </div>
+            )}
+
+            {!bodyless && (
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <label className="block text-sm font-medium">JSON Payload</label>
+                  <button
+                    type="button"
+                    onClick={() => setPayload(SAMPLE_PAYLOAD)}
+                    className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  >
+                    Insert sample
+                  </button>
+                </div>
+                <Textarea
+                  value={payload}
+                  onChange={(e) => setPayload(e.target.value)}
+                  rows={12}
+                  className="font-mono text-sm"
+                  placeholder='{ "key": "value" }'
+                />
+              </div>
+            )}
 
             <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={sync}
-                  onChange={(e) => setSync(e.target.checked)}
-                  className="rounded"
-                />
-                Synchronous
-              </label>
-              <Badge variant="outline">{sync ? "Sync" : "Async"}</Badge>
-              {sync && (
+              {restMode ? (
+                <Badge variant="outline">REST · Sync</Badge>
+              ) : (
+                <>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={sync}
+                      onChange={(e) => setSync(e.target.checked)}
+                      className="rounded"
+                    />
+                    Synchronous
+                  </label>
+                  <Badge variant="outline">{sync ? "Sync" : "Async"}</Badge>
+                </>
+              )}
+              {(restMode || sync) && (
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
@@ -299,9 +376,9 @@ export function ConsolePage() {
                       className="flex min-w-0 flex-1 items-center gap-2 text-left"
                     >
                       <Badge variant="outline" className="shrink-0 text-xs">
-                        {h.sync ? "Sync" : "Async"}
+                        {h.method ?? (h.sync ? "Sync" : "Async")}
                       </Badge>
-                      <span className="truncate font-medium">{h.channel}</span>
+                      <span className="truncate font-medium">{h.path ?? h.channel}</span>
                       {h.status && (
                         <span className="shrink-0 text-xs text-muted-foreground">{h.status}</span>
                       )}

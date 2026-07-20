@@ -124,6 +124,7 @@ export function ConnectorsPage() {
           <option value="db">Database</option>
           <option value="cache">Cache</option>
           <option value="storage">Storage</option>
+          <option value="es">Elasticsearch</option>
         </Select>
       </div>
 

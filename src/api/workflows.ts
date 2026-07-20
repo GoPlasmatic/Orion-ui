@@ -1,10 +1,12 @@
 import { api, buildQuery } from "./client"
 import type {
+  CreateWorkflowRequest,
   DataResponse,
   ImportResult,
   ListWorkflowsParams,
   PaginatedResponse,
   StatusChangeRequest,
+  UpdateWorkflowRequest,
   ValidationResponse,
   Workflow,
   WorkflowRolloutRequest,
@@ -13,6 +15,12 @@ import type {
 } from "./types"
 
 export const workflowsApi = {
+  create: (req: CreateWorkflowRequest) =>
+    api.post<DataResponse<Workflow>>("admin/workflows", req).then((r) => r.data),
+
+  update: (id: string, req: UpdateWorkflowRequest) =>
+    api.put<DataResponse<Workflow>>(`admin/workflows/${id}`, req).then((r) => r.data),
+
   list: (params: ListWorkflowsParams = {}) =>
     api.get<PaginatedResponse<Workflow>>(
       `admin/workflows${buildQuery(params as Record<string, string | number | undefined>)}`

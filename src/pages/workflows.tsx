@@ -1,6 +1,8 @@
 import { useState } from "react"
-import { useNavigate } from "react-router"
+import { Link, useNavigate } from "react-router"
+import { toast } from "sonner"
 import { useWorkflows } from "@/hooks/use-workflows"
+import { workflowsApi } from "@/api/workflows"
 import {
   useReactTable,
   getCoreRowModel,
@@ -19,7 +21,7 @@ import { StatusBadge } from "@/components/shared/status-badge"
 import { WorkflowImportWizard } from "@/components/shared/workflow-import-wizard"
 import { EmptyState } from "@/components/shared/empty-state"
 import { formatDate } from "@/lib/utils"
-import { ChevronLeft, ChevronRight, GitBranch, Upload } from "lucide-react"
+import { ChevronLeft, ChevronRight, Download, GitBranch, Plus, Upload } from "lucide-react"
 
 const PAGE_SIZE = 20
 const columnHelper = createColumnHelper<Workflow>()
@@ -72,6 +74,7 @@ export function WorkflowsPage() {
   const [statusFilter, setStatusFilter] = useState<EntityStatus | "">("")
   const [tagFilter, setTagFilter] = useState("")
   const [showImport, setShowImport] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const { data, isLoading } = useWorkflows({
     limit: PAGE_SIZE,
@@ -79,6 +82,30 @@ export function WorkflowsPage() {
     status: statusFilter || undefined,
     tag: tagFilter || undefined,
   })
+
+  // Server-side export honouring the active filters, downloaded as a JSON file
+  // in the same array format the import wizard accepts.
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const workflows = await workflowsApi.export({
+        status: statusFilter || undefined,
+        tag: tagFilter || undefined,
+      })
+      const blob = new Blob([JSON.stringify(workflows, null, 2)], { type: "application/json" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `orion-workflows-${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success(`Exported ${workflows.length} workflow${workflows.length !== 1 ? "s" : ""}`)
+    } catch (e) {
+      toast.error("Export failed", { description: e instanceof Error ? e.message : undefined })
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const table = useReactTable({
     data: data?.data ?? [],
@@ -93,10 +120,20 @@ export function WorkflowsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
-        <PageHeader title="Workflows" description="View workflow pipelines and task definitions" />
-        <Button onClick={() => setShowImport(true)}>
-          <Upload className="h-4 w-4" /> Import
-        </Button>
+        <PageHeader title="Workflows" description="Author, import, and manage workflow pipelines" />
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={handleExport} disabled={exporting}>
+            <Download className="h-4 w-4" /> {exporting ? "Exporting..." : "Export"}
+          </Button>
+          <Button variant="outline" onClick={() => setShowImport(true)}>
+            <Upload className="h-4 w-4" /> Import
+          </Button>
+          <Button asChild>
+            <Link to="/workflows/new">
+              <Plus className="h-4 w-4" /> New Workflow
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <WorkflowImportWizard open={showImport} onClose={() => setShowImport(false)} />
@@ -155,9 +192,16 @@ export function WorkflowsPage() {
                     title="No workflows yet"
                     description="Workflows are task pipelines, often AI-generated and imported here for review, validation, dry-run, and safe rollout."
                     action={
-                      <Button onClick={() => setShowImport(true)}>
-                        <Upload className="h-4 w-4" /> Import workflow
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button variant="outline" onClick={() => setShowImport(true)}>
+                          <Upload className="h-4 w-4" /> Import workflow
+                        </Button>
+                        <Button asChild>
+                          <Link to="/workflows/new">
+                            <Plus className="h-4 w-4" /> New workflow
+                          </Link>
+                        </Button>
+                      </div>
                     }
                   />
                 </TableCell>

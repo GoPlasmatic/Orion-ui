@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useAuditLogs } from "@/hooks/use-audit"
 import {
   useReactTable,
@@ -52,27 +52,45 @@ const columns = [
   }),
 ]
 
+// The server's audit endpoint only paginates (no action / resource-type
+// filters), so filtering happens client-side: with a filter active we fetch the
+// most recent window at the server's max page size and filter + paginate locally.
+const FILTER_FETCH_LIMIT = 1000
+
 export function AuditPage() {
   const [offset, setOffset] = useState(0)
   const [actionFilter, setActionFilter] = useState("")
   const [resourceTypeFilter, setResourceTypeFilter] = useState("")
 
-  const { data, isLoading } = useAuditLogs({
-    limit: PAGE_SIZE,
-    offset,
-    action: actionFilter || undefined,
-    resource_type: resourceTypeFilter || undefined,
-  })
+  const filtering = !!(actionFilter || resourceTypeFilter)
+
+  const { data, isLoading } = useAuditLogs(
+    filtering ? { limit: FILTER_FETCH_LIMIT, offset: 0 } : { limit: PAGE_SIZE, offset }
+  )
+
+  const filtered = useMemo(() => {
+    const rows = data?.data ?? []
+    if (!filtering) return rows
+    return rows.filter(
+      (log) =>
+        (!actionFilter || log.action === actionFilter) &&
+        (!resourceTypeFilter || log.resource_type === resourceTypeFilter)
+    )
+  }, [data, filtering, actionFilter, resourceTypeFilter])
+
+  const pageRows = filtering ? filtered.slice(offset, offset + PAGE_SIZE) : filtered
 
   const table = useReactTable({
-    data: data?.data ?? [],
+    data: pageRows,
     columns,
     getCoreRowModel: getCoreRowModel(),
   })
 
-  const total = data?.total ?? 0
+  const total = filtering ? filtered.length : (data?.total ?? 0)
   const hasNext = offset + PAGE_SIZE < total
   const hasPrev = offset > 0
+  // True when the filtered view is built from a truncated window of the log.
+  const windowTruncated = filtering && (data?.total ?? 0) > FILTER_FETCH_LIMIT
 
   return (
     <div className="space-y-6">
@@ -103,7 +121,13 @@ export function AuditPage() {
           <option value="channel">Channel</option>
           <option value="workflow">Workflow</option>
           <option value="connector">Connector</option>
+          <option value="backup">Backup</option>
         </Select>
+        {windowTruncated && (
+          <p className="text-xs text-muted-foreground">
+            Filtering the most recent {FILTER_FETCH_LIMIT} entries.
+          </p>
+        )}
       </div>
 
       <div className="rounded-md border">

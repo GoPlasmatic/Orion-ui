@@ -75,4 +75,12 @@ export const api = {
   patch: <T>(path: string, body: unknown, opts?: RequestOptions) =>
     request<T>(path, { method: "PATCH", body: JSON.stringify(body), headers: opts?.headers }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  // Arbitrary-method escape hatch for the data-plane catch-all (REST route
+  // patterns accept any verb). Body is omitted when undefined (GET/DELETE).
+  send: <T>(method: string, path: string, body?: unknown, opts?: RequestOptions) =>
+    request<T>(path, {
+      method,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      headers: opts?.headers,
+    }),
 }

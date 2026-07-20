@@ -16,6 +16,7 @@ import {
   Activity,
   ZapOff,
   FileText,
+  FunctionSquare,
   Terminal,
   Settings,
   Plus,
@@ -75,6 +76,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       { id: "nav-channels", label: "Channels", group: "Go to", icon: Radio, run: () => go("/channels") },
       { id: "nav-workflows", label: "Workflows", group: "Go to", icon: GitBranch, run: () => go("/workflows") },
       { id: "nav-connectors", label: "Connectors", group: "Go to", icon: Plug, run: () => go("/connectors") },
+      { id: "nav-functions", label: "Functions", group: "Go to", icon: FunctionSquare, run: () => go("/functions") },
       { id: "nav-traces", label: "Traces", group: "Go to", icon: Activity, run: () => go("/traces") },
       { id: "nav-breakers", label: "Circuit Breakers", group: "Go to", icon: ZapOff, run: () => go("/circuit-breakers") },
       { id: "nav-audit", label: "Audit Log", group: "Go to", icon: FileText, run: () => go("/audit") },
@@ -84,6 +86,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
     const actions: Command[] = [
       { id: "act-new-channel", label: "Create channel", group: "Actions", icon: Plus, run: () => go("/channels/new") },
+      { id: "act-new-workflow", label: "Create workflow", group: "Actions", icon: Plus, run: () => go("/workflows/new") },
       { id: "act-new-connector", label: "Create connector", group: "Actions", icon: Plus, run: () => go("/connectors/new") },
       { id: "act-import-workflow", label: "Import workflow", group: "Actions", icon: Upload, run: () => go("/workflows") },
       {

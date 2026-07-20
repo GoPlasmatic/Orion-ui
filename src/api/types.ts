@@ -23,6 +23,8 @@ export interface DataResponse<T> {
 
 export interface StatusChangeRequest {
   status: EntityStatus
+  // Accepted on workflow activation only; defaults to 100 server-side.
+  rollout_percentage?: number
 }
 
 // Channel types
@@ -181,6 +183,27 @@ export interface ListWorkflowsParams {
   tag?: string
 }
 
+export interface CreateWorkflowRequest {
+  workflow_id?: string
+  name: string
+  description?: string
+  priority?: number
+  condition?: JsonLogicValue
+  tasks: unknown[]
+  tags?: string[]
+  continue_on_error?: boolean
+}
+
+export interface UpdateWorkflowRequest {
+  name?: string
+  description?: string
+  priority?: number
+  condition?: JsonLogicValue
+  tasks?: unknown[]
+  tags?: string[]
+  continue_on_error?: boolean
+}
+
 export interface WorkflowTestRequest {
   data: Record<string, unknown>
   metadata?: Record<string, unknown>
@@ -262,7 +285,19 @@ export interface ImportResult {
 }
 
 // Connector types
-export type ConnectorType = "http" | "kafka" | "db" | "cache" | "storage"
+export type ConnectorType = "http" | "kafka" | "db" | "cache" | "storage" | "es"
+
+// Per-operation gates on db/es connectors (v0.3). All default true server-side;
+// `read` gates data_query/db_read/mongo_read, the write flags gate the matching
+// data_write operations, and `raw_write` gates the db_write raw-SQL escape hatch.
+export interface OperationGates {
+  read?: boolean
+  insert?: boolean
+  update?: boolean
+  delete?: boolean
+  upsert?: boolean
+  raw_write?: boolean
+}
 
 export interface Connector {
   id: string
@@ -386,11 +421,42 @@ export interface AuditLog {
   created_at: string
 }
 
+// The server's audit-logs endpoint supports pagination only; action /
+// resource-type filtering is done client-side (see pages/audit.tsx).
 export interface ListAuditLogsParams {
   limit?: number
   offset?: number
-  action?: string
-  resource_type?: string
+}
+
+// Backups (SQLite only). POST returns the created file; GET lists the backup dir.
+export interface BackupCreated {
+  filename: string
+  path: string
+  size_bytes: number
+  created_at: string
+}
+
+export interface BackupFile {
+  filename: string
+  size_bytes: number
+  modified_at: string
+}
+
+// Workflow function registry (GET admin/functions) — per-function input schemas.
+export type FunctionFieldKind = "string" | "number" | "bool" | "object" | "array" | "any"
+
+export interface FunctionFieldSchema {
+  name: string
+  description: string
+  kind: FunctionFieldKind
+  required: boolean
+}
+
+export interface FunctionSchema {
+  name: string
+  description: string
+  category: string
+  input_fields: FunctionFieldSchema[]
 }
 
 // Data types

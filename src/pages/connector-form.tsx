@@ -21,7 +21,7 @@ function initialConfig(existing?: Connector): Record<string, unknown> {
     : {}
 }
 
-const CONNECTOR_TYPES: ConnectorType[] = ["http", "kafka", "db", "cache", "storage"]
+const CONNECTOR_TYPES: ConnectorType[] = ["http", "kafka", "db", "cache", "storage", "es"]
 
 function ConnectorForm({ existing }: { existing?: Connector }) {
   const isEdit = !!existing

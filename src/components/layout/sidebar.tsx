@@ -9,6 +9,7 @@ import {
   Activity,
   ZapOff,
   FileText,
+  FunctionSquare,
   Terminal,
   Settings,
 } from "lucide-react"
@@ -24,6 +25,7 @@ const navSections = [
       { to: "/channels", icon: Radio, label: "Channels" },
       { to: "/workflows", icon: GitBranch, label: "Workflows" },
       { to: "/connectors", icon: Plug, label: "Connectors" },
+      { to: "/functions", icon: FunctionSquare, label: "Functions" },
     ],
   },
   {

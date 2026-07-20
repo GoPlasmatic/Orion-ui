@@ -6,6 +6,7 @@ import {
   useChangeWorkflowStatus,
   useCreateWorkflowVersion,
   useDeleteWorkflow,
+  useSetWorkflowRollout,
   useTestWorkflow,
 } from "@/hooks/use-workflows"
 import { WorkflowVisualizer } from "@goplasmatic/dataflow-ui"
@@ -14,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { StatusBadge } from "@/components/shared/status-badge"
@@ -23,7 +25,7 @@ import { VersionCompare } from "@/components/shared/version-compare"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { RelationshipGraph } from "@/components/graph/relationship-graph"
 import { stepResultBadgeClass } from "@/lib/status"
-import { ArrowLeft, AlertCircle, Play } from "lucide-react"
+import { ArrowLeft, AlertCircle, Pencil, Percent, Play } from "lucide-react"
 import type { WorkflowTestResponse } from "@/api/types"
 
 export function WorkflowDetailPage() {
@@ -34,11 +36,13 @@ export function WorkflowDetailPage() {
   const changeStatus = useChangeWorkflowStatus()
   const createVersion = useCreateWorkflowVersion()
   const deleteWorkflow = useDeleteWorkflow()
+  const setRollout = useSetWorkflowRollout()
   const testWorkflow = useTestWorkflow()
 
   const [testPayload, setTestPayload] = useState('{\n  \n}')
   const [testResult, setTestResult] = useState<WorkflowTestResponse | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
+  const [rolloutDraft, setRolloutDraft] = useState<number | null>(null)
 
   if (isLoading) {
     return (
@@ -110,17 +114,77 @@ export function WorkflowDetailPage() {
             <span className="text-sm text-muted-foreground">
               {workflow.tasks?.length ?? 0} tasks
             </span>
+            {workflow.status === "active" && (
+              <Badge variant="outline" className="text-xs">
+                <Percent className="mr-1 h-3 w-3" />
+                {workflow.rollout_percentage ?? 100}% rollout
+              </Badge>
+            )}
           </div>
         </div>
-        <LifecycleActions
-          status={workflow.status}
-          isPending={isPending}
-          onActivate={() => changeStatus.mutate({ id: workflow.workflow_id, req: { status: "active" } })}
-          onArchive={() => changeStatus.mutate({ id: workflow.workflow_id, req: { status: "archived" } })}
-          onNewVersion={() => createVersion.mutate(workflow.workflow_id)}
-          onDelete={() => deleteWorkflow.mutate(workflow.workflow_id, { onSuccess: () => navigate("/workflows") })}
-        />
+        <div className="flex items-center gap-2">
+          {workflow.status === "draft" && (
+            <Button size="sm" variant="outline" asChild>
+              <Link to={`/workflows/${workflow.workflow_id}/edit`}>
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </Link>
+            </Button>
+          )}
+          <LifecycleActions
+            status={workflow.status}
+            isPending={isPending}
+            onActivate={() => changeStatus.mutate({ id: workflow.workflow_id, req: { status: "active" } })}
+            onArchive={() => changeStatus.mutate({ id: workflow.workflow_id, req: { status: "archived" } })}
+            onNewVersion={() => createVersion.mutate(workflow.workflow_id)}
+            onDelete={() => deleteWorkflow.mutate(workflow.workflow_id, { onSuccess: () => navigate("/workflows") })}
+          />
+        </div>
       </div>
+
+      {workflow.status === "active" && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-4 py-4">
+            <div className="min-w-40">
+              <p className="text-sm font-medium">Canary rollout</p>
+              <p className="text-xs text-muted-foreground">
+                Share of matching traffic this workflow handles.
+              </p>
+            </div>
+            <div className="flex min-w-64 flex-1 items-center gap-3">
+              <Slider
+                value={rolloutDraft ?? workflow.rollout_percentage ?? 100}
+                onValueChange={setRolloutDraft}
+                min={0}
+                max={100}
+                step={5}
+                aria-label="Rollout percentage"
+              />
+              <span className="w-12 text-right font-mono text-sm">
+                {rolloutDraft ?? workflow.rollout_percentage ?? 100}%
+              </span>
+            </div>
+            <Button
+              size="sm"
+              disabled={
+                setRollout.isPending ||
+                rolloutDraft === null ||
+                rolloutDraft === (workflow.rollout_percentage ?? 100)
+              }
+              onClick={() =>
+                setRollout.mutate(
+                  {
+                    id: workflow.workflow_id,
+                    req: { rollout_percentage: rolloutDraft ?? 100 },
+                  },
+                  { onSuccess: () => setRolloutDraft(null) }
+                )
+              }
+            >
+              {setRollout.isPending ? "Applying..." : "Apply"}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Diagram is the primary content of the page. */}
       <div className="h-[calc(100dvh-19rem)] min-h-[520px] overflow-hidden rounded-lg border">

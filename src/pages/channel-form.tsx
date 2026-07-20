@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Textarea } from "@/components/ui/textarea"
 import { PageHeader } from "@/components/shared/page-header"
 import { ChannelConfigEditor } from "@/components/shared/channel-config-editor"
 import { ArrowLeft, Save } from "lucide-react"
@@ -39,6 +40,11 @@ function ChannelForm({ existing }: { existing?: Channel }) {
   const [workflowId, setWorkflowId] = useState(existing?.workflow_id ?? "")
   const [priority, setPriority] = useState(String(existing?.priority ?? 0))
   const [config, setConfig] = useState<ChannelConfig>(existing?.config ?? {})
+  const [transportConfig, setTransportConfig] = useState(() => {
+    const tc = existing?.transport_config
+    return tc && Object.keys(tc).length > 0 ? JSON.stringify(tc, null, 2) : ""
+  })
+  const [transportError, setTransportError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const backTo = existing ? `/channels/${existing.channel_id}` : "/channels"
@@ -56,6 +62,21 @@ function ChannelForm({ existing }: { existing?: Channel }) {
       .map((m) => m.trim().toUpperCase())
       .filter(Boolean)
 
+    let transport: Record<string, unknown> | undefined
+    if (transportConfig.trim()) {
+      try {
+        const parsed = JSON.parse(transportConfig)
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+          setError("Transport config must be a JSON object")
+          return
+        }
+        transport = parsed as Record<string, unknown>
+      } catch {
+        setError("Transport config is not valid JSON")
+        return
+      }
+    }
+
     const common = {
       name,
       description: description || undefined,
@@ -63,6 +84,7 @@ function ChannelForm({ existing }: { existing?: Channel }) {
       route_pattern: routePattern || undefined,
       topic: topic || undefined,
       consumer_group: consumerGroup || undefined,
+      transport_config: transport,
       workflow_id: workflowId || undefined,
       config,
       priority: Number(priority) || 0,
@@ -159,16 +181,48 @@ function ChannelForm({ existing }: { existing?: Channel }) {
             <Input value={routePattern} onChange={(e) => setRoutePattern(e.target.value)} placeholder="/api/v1/orders" />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium">Topic</label>
-              <Input value={topic} onChange={(e) => setTopic(e.target.value)} />
+          {protocol === "kafka" && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Topic</label>
+                <Input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="orders-in" />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Consumer Group</label>
+                <Input value={consumerGroup} onChange={(e) => setConsumerGroup(e.target.value)} placeholder="orion" />
+              </div>
             </div>
+          )}
+
+          {(protocol === "kafka" || transportConfig.trim() !== "") && (
             <div>
-              <label className="mb-1 block text-sm font-medium">Consumer Group</label>
-              <Input value={consumerGroup} onChange={(e) => setConsumerGroup(e.target.value)} />
+              <label className="mb-1 block text-sm font-medium">Transport Config</label>
+              <p className="mb-1 text-xs text-muted-foreground">
+                Protocol-specific transport settings as JSON
+                {protocol === "kafka" ? " (e.g. brokers, offsets, security)" : ""}. Leave empty to keep unset.
+              </p>
+              <Textarea
+                value={transportConfig}
+                onChange={(e) => {
+                  setTransportConfig(e.target.value)
+                  if (!e.target.value.trim()) {
+                    setTransportError(null)
+                    return
+                  }
+                  try {
+                    JSON.parse(e.target.value)
+                    setTransportError(null)
+                  } catch {
+                    setTransportError("Invalid JSON")
+                  }
+                }}
+                rows={5}
+                className="font-mono text-xs"
+                placeholder='{ "brokers": ["kafka:9092"] }'
+              />
+              {transportError && <p className="mt-1 text-xs text-destructive">{transportError}</p>}
             </div>
-          </div>
+          )}
 
           <div>
             <label className="mb-1 block text-sm font-medium">Linked Workflow ID</label>

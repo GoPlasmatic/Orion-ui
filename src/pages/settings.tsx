@@ -1,10 +1,12 @@
 import { useEngineStatus, useEngineReload } from "@/hooks/use-engine"
 import { useReloadConnectors } from "@/hooks/use-connectors"
-import { useBackup } from "@/hooks/use-backup"
+import { useBackups, useCreateBackup } from "@/hooks/use-backup"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { PageHeader } from "@/components/shared/page-header"
-import { RefreshCw, Download, Database, Plug } from "lucide-react"
+import { formatDate } from "@/lib/utils"
+import { RefreshCw, Archive, Database, Plug } from "lucide-react"
 
 function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
@@ -15,11 +17,18 @@ function formatUptime(seconds: number): string {
   return `${m}m`
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 export function SettingsPage() {
   const { data: engine } = useEngineStatus()
   const reload = useEngineReload()
   const reloadConnectors = useReloadConnectors()
-  const backup = useBackup()
+  const { data: backups, isLoading: backupsLoading, error: backupsError } = useBackups()
+  const createBackup = useCreateBackup()
 
   return (
     <div className="space-y-6">
@@ -78,35 +87,49 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Backup */}
+        {/* Backups */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Database className="h-4 w-4" /> Backup
+              <Archive className="h-4 w-4" /> Backups
             </CardTitle>
             <CardDescription>
-              Export a database backup.
+              Snapshot the database into the server's backup directory (SQLite only).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Download a snapshot of all channels, workflows, and connectors.
-            </p>
             <Button
               variant="outline"
-              onClick={() => backup.mutate()}
-              disabled={backup.isPending}
+              onClick={() => createBackup.mutate()}
+              disabled={createBackup.isPending}
             >
-              <Download className="h-4 w-4" />
-              {backup.isPending ? "Creating..." : "Create Backup"}
+              <Archive className="h-4 w-4" />
+              {createBackup.isPending ? "Creating..." : "Create Backup"}
             </Button>
-            {backup.isSuccess && (
-              <p className="text-sm text-chart-2">Backup created successfully.</p>
-            )}
-            {backup.isError && (
-              <p className="text-sm text-destructive">
-                Failed: {backup.error?.message}
+
+            {backupsLoading ? (
+              <Skeleton className="h-16 w-full" />
+            ) : backupsError ? (
+              <p className="text-sm text-muted-foreground">
+                Backups unavailable: {backupsError instanceof Error ? backupsError.message : "error"}
               </p>
+            ) : (backups?.length ?? 0) === 0 ? (
+              <p className="text-sm text-muted-foreground">No backups yet.</p>
+            ) : (
+              <div className="max-h-48 space-y-1 overflow-y-auto">
+                {backups!.map((b) => (
+                  <div
+                    key={b.filename}
+                    className="flex items-center justify-between rounded-md border px-3 py-1.5 text-sm"
+                  >
+                    <span className="truncate font-mono text-xs">{b.filename}</span>
+                    <span className="ml-3 shrink-0 text-xs text-muted-foreground">
+                      {formatBytes(b.size_bytes)}
+                      {b.modified_at ? ` · ${formatDate(b.modified_at)}` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
             )}
           </CardContent>
         </Card>

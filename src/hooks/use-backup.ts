@@ -1,14 +1,24 @@
-import { useMutation } from "@tanstack/react-query"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { backupApi } from "@/api/backup"
 
-export function useBackup() {
-  return useMutation({
-    mutationFn: () => backupApi.create(),
+const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
+
+export function useBackups() {
+  return useQuery({
+    queryKey: ["backups"],
+    queryFn: () => backupApi.list(),
   })
 }
 
-export function useRestore() {
+export function useCreateBackup() {
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: FormData) => backupApi.restore(data),
+    mutationFn: () => backupApi.create(),
+    onSuccess: (backup) => {
+      queryClient.invalidateQueries({ queryKey: ["backups"] })
+      toast.success("Backup created", { description: backup.filename })
+    },
+    onError: (e) => toast.error("Failed to create backup", { description: errorDescription(e) }),
   })
 }

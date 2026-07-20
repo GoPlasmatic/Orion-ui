@@ -12,6 +12,8 @@ import { ChannelDetailPage } from "@/pages/channel-detail"
 import { ChannelFormPage } from "@/pages/channel-form"
 import { WorkflowsPage } from "@/pages/workflows"
 import { WorkflowDetailPage } from "@/pages/workflow-detail"
+import { WorkflowFormPage } from "@/pages/workflow-form"
+import { FunctionsPage } from "@/pages/functions"
 import { ConnectorsPage } from "@/pages/connectors"
 import { ConnectorDetailPage } from "@/pages/connector-detail"
 import { ConnectorFormPage } from "@/pages/connector-form"
@@ -53,7 +55,10 @@ export default function App() {
               <Route path="channels/:id" element={<ChannelDetailPage />} />
               <Route path="channels/:id/edit" element={<ChannelFormPage />} />
               <Route path="workflows" element={<WorkflowsPage />} />
+              <Route path="workflows/new" element={<WorkflowFormPage />} />
               <Route path="workflows/:id" element={<WorkflowDetailPage />} />
+              <Route path="workflows/:id/edit" element={<WorkflowFormPage />} />
+              <Route path="functions" element={<FunctionsPage />} />
               <Route path="connectors" element={<ConnectorsPage />} />
               <Route path="connectors/new" element={<ConnectorFormPage />} />
               <Route path="connectors/:id" element={<ConnectorDetailPage />} />

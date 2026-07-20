@@ -1,12 +1,12 @@
 import { useRef, useState } from "react"
-import type { ConnectorType } from "@/api/types"
+import type { ConnectorType, OperationGates } from "@/api/types"
 import { ConfigEditorShell } from "@/components/shared/config-editor-shell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { KeyRound, Plus, Trash2 } from "lucide-react"
+import { KeyRound, Plus, ShieldCheck, Trash2 } from "lucide-react"
 
 type ConfigObject = Record<string, unknown>
 
@@ -28,6 +28,19 @@ function isMaskedSecret(v: unknown): v is string {
 }
 
 const isSecretKey = (key: string) => SECRET_KEY_RE.test(key)
+
+// db/es connectors carry per-operation gates (v0.3); rendered as dedicated
+// toggles instead of the generic nested-JSON control.
+const GATED_TYPES: ConnectorType[] = ["db", "es"]
+
+const OPERATION_GATES: Array<{ key: keyof OperationGates; label: string; hint: string }> = [
+  { key: "read", label: "Read", hint: "data_query / db_read / mongo_read" },
+  { key: "insert", label: "Insert", hint: "data_write insert" },
+  { key: "update", label: "Update", hint: "data_write update" },
+  { key: "delete", label: "Delete", hint: "data_write delete" },
+  { key: "upsert", label: "Upsert", hint: "data_write upsert" },
+  { key: "raw_write", label: "Raw write", hint: "db_write raw SQL" },
+]
 
 /**
  * Structured editor for a connector's config. The shape varies per connector type
@@ -59,7 +72,9 @@ export function ConnectorConfigEditor({ value, onChange, connectorType }: Connec
     setNewKey("")
   }
 
-  const entries = Object.entries(value)
+  const gated = GATED_TYPES.includes(connectorType)
+  // `operations` gets dedicated toggles on gated types; keep it out of the generic rows.
+  const entries = Object.entries(value).filter(([k]) => !(gated && k === "operations"))
 
   return (
     <ConfigEditorShell
@@ -72,6 +87,13 @@ export function ConnectorConfigEditor({ value, onChange, connectorType }: Connec
       }
     >
       <div className="space-y-3">
+          {gated && (
+            <OperationGatesEditor
+              gates={(value.operations ?? {}) as OperationGates}
+              onChange={(next) => setKey("operations", next)}
+            />
+          )}
+
           {entries.length === 0 && (
             <p className="rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
               No fields yet. Add the connector's settings below, or paste them via Advanced (JSON).
@@ -229,6 +251,45 @@ function SecretField({ masked, onReplace }: { masked: string; onReplace: (value:
       >
         Keep existing secret (leave unchanged)
       </button>
+    </div>
+  )
+}
+
+/**
+ * Per-operation gates for db/es connectors. Unset gates default to allowed
+ * server-side; toggling one off writes an explicit `false` into
+ * `config.operations` (e.g. delete: false makes the connector delete-proof).
+ */
+function OperationGatesEditor({
+  gates,
+  onChange,
+}: {
+  gates: OperationGates
+  onChange: (next: OperationGates) => void
+}) {
+  return (
+    <div className="space-y-3 rounded-md border p-3">
+      <div className="flex items-center gap-1.5">
+        <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-sm font-medium">Operation gates</span>
+        <span className="text-xs text-muted-foreground">— all allowed unless switched off</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {OPERATION_GATES.map(({ key, label, hint }) => (
+          <label
+            key={key}
+            className="flex cursor-pointer items-center justify-between gap-2 rounded-md border px-2.5 py-2"
+            title={hint}
+          >
+            <span className="text-sm">{label}</span>
+            <Switch
+              checked={gates[key] ?? true}
+              onCheckedChange={(checked) => onChange({ ...gates, [key]: checked })}
+              aria-label={`Allow ${label.toLowerCase()}`}
+            />
+          </label>
+        ))}
+      </div>
     </div>
   )
 }

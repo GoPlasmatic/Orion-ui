@@ -6,7 +6,7 @@
   **The operations console for the [Orion](https://github.com/GoPlasmatic/Orion) services runtime.**
 
   Live dashboards, a system map of your channels and connectors, visual workflow
-  inspection, trace drill-downs, and full channel/connector management — no CLI required.
+  authoring, trace drill-downs, and full channel/workflow/connector management — no CLI required.
 
   [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
   [![React](https://img.shields.io/badge/react-19-blue.svg)](https://react.dev)
@@ -103,13 +103,15 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 |---------|-------------|
 | **Operations** | Live KPIs at a glance — requests/min, error rate, average and p95 latency, and a "what needs attention" feed |
 | **System Map** | Topology view: trace any channel through its workflow, downstream channels, and connectors |
-| **Channels** | Full lifecycle management — create, edit, version, activate/archive, bulk import, structured config editor |
-| **Workflows** | Visual DAG of task pipelines (tree/flow/graph views), JSONLogic condition editing, dry-run testing, validation, version compare |
-| **Connectors** | Create and manage database, cache, HTTP, and messaging connectors |
+| **Channels** | Full lifecycle management — create, edit, version, activate/archive, bulk import, structured config editor (rate limits with key logic, cache, dedup, CORS, validation logic, tracing, Kafka transport) |
+| **Workflows** | Full authoring — create/edit drafts with a visual JSONLogic condition editor, server-side validation, dry-run testing, import/export, version compare, and canary rollout controls; visual DAG (tree/flow/graph views) |
+| **Connectors** | Create and manage HTTP, database, Kafka, cache, storage, and Elasticsearch connectors — including per-operation gates on db/es (make a connector delete-proof with one toggle) |
+| **Functions** | Searchable reference of every workflow function and its input schema, straight from the server registry |
 | **Circuit Breakers** | Monitor and reset per-connector circuit breakers |
 | **Traces** | Execution history with per-task detail and latency/error analytics |
 | **Audit Log** | Who changed what, when — across every admin operation |
-| **Data Console** | Send test requests to any channel with optional profiling |
+| **Data Console** | Send test requests to any channel — including REST-routed channels by method and path — with optional profiling |
+| **Backups** | Create and list database backups from Settings (SQLite) |
 | **Polish** | Command palette (⌘K), light/dark themes, density modes, empty states, import wizards |
 
 ## Pages
@@ -119,13 +121,14 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 | `/` | Operations dashboard — live KPIs and attention feed |
 | `/system-map` | Channel → workflow → connector topology graph |
 | `/channels`, `/channels/new`, `/channels/:id`, `/channels/:id/edit` | Channel list, creation, detail, editing |
-| `/workflows`, `/workflows/:id` | Workflow list and visual DAG detail with dry-run |
+| `/workflows`, `/workflows/new`, `/workflows/:id`, `/workflows/:id/edit` | Workflow list, authoring, visual DAG detail with dry-run and rollout |
+| `/functions` | Workflow function reference (input schemas) |
 | `/connectors`, `/connectors/new`, `/connectors/:id`, `/connectors/:id/edit` | Connector management |
 | `/circuit-breakers` | Circuit breaker status and reset |
 | `/traces`, `/traces/:id` | Execution traces and per-task drill-down |
 | `/audit` | Audit log |
-| `/console` | Data console for test requests |
-| `/settings` | Theme and density preferences |
+| `/console` | Data console for test requests (channel or REST method + path) |
+| `/settings` | Engine reload, backups, and API docs |
 
 ## How It Works
 

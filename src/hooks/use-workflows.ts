@@ -2,12 +2,53 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { workflowsApi } from "@/api/workflows"
 import type {
+  CreateWorkflowRequest,
   ListWorkflowsParams,
   StatusChangeRequest,
+  UpdateWorkflowRequest,
+  WorkflowRolloutRequest,
   WorkflowTestRequest,
 } from "@/api/types"
 
 const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
+
+export function useCreateWorkflow() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (req: CreateWorkflowRequest) => workflowsApi.create(req),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workflows"] })
+      toast.success("Workflow created as draft")
+    },
+    onError: (e) => toast.error("Failed to create workflow", { description: errorDescription(e) }),
+  })
+}
+
+export function useUpdateWorkflow() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, req }: { id: string; req: UpdateWorkflowRequest }) =>
+      workflowsApi.update(id, req),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workflows"] })
+      toast.success("Workflow updated")
+    },
+    onError: (e) => toast.error("Failed to update workflow", { description: errorDescription(e) }),
+  })
+}
+
+export function useSetWorkflowRollout() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, req }: { id: string; req: WorkflowRolloutRequest }) =>
+      workflowsApi.setRollout(id, req),
+    onSuccess: (_data, { req }) => {
+      queryClient.invalidateQueries({ queryKey: ["workflows"] })
+      toast.success(`Rollout set to ${req.rollout_percentage}%`)
+    },
+    onError: (e) => toast.error("Failed to update rollout", { description: errorDescription(e) }),
+  })
+}
 
 export function useWorkflows(params: ListWorkflowsParams = {}, enabled = true) {
   return useQuery({
