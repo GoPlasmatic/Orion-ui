@@ -222,7 +222,11 @@ export function ConsolePage() {
           <CardContent className="space-y-4">
             <div>
               <label className="mb-1 block text-sm font-medium">Channel</label>
-              <Select value={channel} onChange={(e) => onChannelChange(e.target.value)}>
+              <Select
+                value={channel}
+                onChange={(e) => onChannelChange(e.target.value)}
+                aria-label="Channel"
+              >
                 <option value="">Select a channel...</option>
                 {channelList.map((c) => (
                   <option key={c.channel_id} value={c.name}>

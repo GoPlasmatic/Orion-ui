@@ -164,6 +164,9 @@ In production the container serves the built SPA with nginx and reverse-proxies
 | `npm run build` | Type-check with `tsc` then bundle |
 | `npm run lint` | Run ESLint |
 | `npm run preview` | Serve the production build locally |
+| `npm test` | Unit tests, including the API ↔ OpenAPI contract check |
+| `npm run test:e2e` | Playwright smoke flow against a live orion-server |
+| `npm run generate:api` | Regenerate API types from the vendored OpenAPI spec |
 
 ## Project Structure
 

@@ -41,3 +41,11 @@ Thumbs.db
 
 # Vite
 vite.config.ts.timestamp-*
+
+# Tests
+playwright-report
+test-results
+.contract-check.d.ts
+
+# Planning docs (kept out of the public repo)
+improvements.md

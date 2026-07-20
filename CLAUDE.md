@@ -9,9 +9,24 @@ npm run dev          # Start Vite dev server (proxies /api, /health, /healthz, /
 npm run build        # TypeScript check + Vite production build
 npm run lint         # ESLint
 npm run preview      # Preview production build locally
+
+npm test             # Vitest unit tests, incl. the API ↔ OpenAPI contract test
+npm run test:e2e     # Playwright smoke flow (needs a live orion-server on :8080; skips locally if absent)
+npm run generate:api # Regenerate src/api/schema.d.ts from contracts/openapi.json
+npm run check:contract # Fail if schema.d.ts is stale relative to the vendored spec
 ```
 
-No test framework is configured.
+## Server contract
+
+`contracts/openapi.json` is the vendored copy of the server's OpenAPI 3.1 spec (source:
+`Orion/docs/openapi.json`, also served live at `/api/v1/openapi.json`) and pins the server
+version this UI targets. `src/api/schema.d.ts` is generated from it (do not hand-edit).
+
+When the server API changes: copy the new spec into `contracts/`, run `npm run generate:api`,
+then `npm test` — `src/api/contract.test.ts` asserts every request the API layer can issue
+exists in the spec with the same method and only declared query params, and its completeness
+check forces new API functions to be added to the test manifest. CI runs both plus the
+Playwright smoke flow against a real server container (`ghcr.io/goplasmatic/orion`).
 
 ## Architecture
 

@@ -130,7 +130,12 @@ function ChannelForm({ existing }: { existing?: Channel }) {
         <CardContent className="space-y-4">
           <div>
             <label className="mb-1 block text-sm font-medium">Name</label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="orders" />
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="orders"
+              aria-label="Channel name"
+            />
           </div>
 
           <div>
@@ -168,7 +173,12 @@ function ChannelForm({ existing }: { existing?: Channel }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="mb-1 block text-sm font-medium">Methods</label>
-              <Input value={methods} onChange={(e) => setMethods(e.target.value)} placeholder="GET, POST" />
+              <Input
+                value={methods}
+                onChange={(e) => setMethods(e.target.value)}
+                placeholder="GET, POST"
+                aria-label="HTTP methods"
+              />
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Priority</label>
@@ -178,7 +188,12 @@ function ChannelForm({ existing }: { existing?: Channel }) {
 
           <div>
             <label className="mb-1 block text-sm font-medium">Route Pattern</label>
-            <Input value={routePattern} onChange={(e) => setRoutePattern(e.target.value)} placeholder="/api/v1/orders" />
+            <Input
+              value={routePattern}
+              onChange={(e) => setRoutePattern(e.target.value)}
+              placeholder="/api/v1/orders"
+              aria-label="Route pattern"
+            />
           </div>
 
           {protocol === "kafka" && (
@@ -226,7 +241,11 @@ function ChannelForm({ existing }: { existing?: Channel }) {
 
           <div>
             <label className="mb-1 block text-sm font-medium">Linked Workflow ID</label>
-            <Input value={workflowId} onChange={(e) => setWorkflowId(e.target.value)} />
+            <Input
+              value={workflowId}
+              onChange={(e) => setWorkflowId(e.target.value)}
+              aria-label="Linked workflow ID"
+            />
           </div>
 
           <ChannelConfigEditor value={config} onChange={setConfig} />

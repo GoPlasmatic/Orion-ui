@@ -296,7 +296,12 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
         <CardContent className="space-y-4">
           <div>
             <label className="mb-1 block text-sm font-medium">Name</label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="process-orders" />
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="process-orders"
+              aria-label="Workflow name"
+            />
           </div>
 
           <div>
@@ -349,6 +354,7 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
               onChange={(e) => setTasksText(e.target.value)}
               rows={14}
               className="font-mono text-sm"
+              aria-label="Tasks JSON"
             />
             {tasksError && <p className="mt-1 text-xs text-destructive">{tasksError}</p>}
           </div>
