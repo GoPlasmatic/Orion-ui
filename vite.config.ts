@@ -1,7 +1,7 @@
 import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
-import path from "path"
+import path from "node:path"
 
 const orionTarget = process.env.ORION_URL ?? "http://localhost:8080"
 
@@ -9,16 +9,25 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          "react-vendor": ["react", "react-dom", "react-router"],
-          "react-flow": ["@xyflow/react"],
-          "tanstack": ["@tanstack/react-query", "@tanstack/react-table"],
+        // Rolldown (Vite 8) replaced the `manualChunks` object form with named
+        // groups. React keeps the highest priority so it stays in react-vendor
+        // rather than being pulled into a consumer's chunk as a dependency.
+        codeSplitting: {
+          groups: [
+            {
+              name: "react-vendor",
+              test: /node_modules[\\/](react|react-dom|react-router)[\\/]/,
+              priority: 3,
+            },
+            { name: "react-flow", test: /node_modules[\\/]@xyflow[\\/]/, priority: 2 },
+            { name: "tanstack", test: /node_modules[\\/]@tanstack[\\/]/, priority: 1 },
+          ],
         },
       },
     },

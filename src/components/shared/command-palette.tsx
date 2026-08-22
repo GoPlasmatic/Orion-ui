@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { useChannels } from "@/hooks/use-channels"
 import { useWorkflows } from "@/hooks/use-workflows"
@@ -48,23 +48,22 @@ interface CommandPaletteProps {
  * connectors (fetched only while open).
  */
 export function CommandPalette({ open, onClose }: CommandPaletteProps) {
+  // Mount only while open, so query/selection reset by remounting rather than by
+  // an effect that syncs state on the `open` edge.
+  if (!open) return null
+  return <CommandPaletteBody onClose={onClose} />
+}
+
+function CommandPaletteBody({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate()
   const { resolvedTheme, setTheme } = useTheme()
   const [query, setQuery] = useState("")
   const [active, setActive] = useState(0)
 
-  // Only fetch the entity lists once the palette is opened.
-  const { data: channels } = useChannels({ limit: 200 }, open)
-  const { data: workflows } = useWorkflows({ limit: 200 }, open)
-  const { data: connectors } = useConnectors({ limit: 200 }, open)
-
-  // Reset transient state whenever the palette opens.
-  useEffect(() => {
-    if (open) {
-      setQuery("")
-      setActive(0)
-    }
-  }, [open])
+  // The entity lists are fetched only while the palette is mounted.
+  const { data: channels } = useChannels({ limit: 200 })
+  const { data: workflows } = useWorkflows({ limit: 200 })
+  const { data: connectors } = useConnectors({ limit: 200 })
 
   const go = (to: string) => {
     navigate(to)
@@ -146,21 +145,20 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     )
   }, [commands, query])
 
-  // Keep the active index in range as the filtered set shrinks.
-  useEffect(() => {
-    setActive((a) => Math.min(a, Math.max(0, filtered.length - 1)))
-  }, [filtered.length])
+  // Clamp during render rather than syncing in an effect: the filtered set shrinks
+  // as the query narrows, which can leave the stored index past the last row.
+  const activeIndex = Math.min(active, Math.max(0, filtered.length - 1))
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault()
-      setActive((a) => Math.min(a + 1, filtered.length - 1))
+      setActive(Math.min(activeIndex + 1, filtered.length - 1))
     } else if (e.key === "ArrowUp") {
       e.preventDefault()
-      setActive((a) => Math.max(a - 1, 0))
+      setActive(Math.max(activeIndex - 1, 0))
     } else if (e.key === "Enter") {
       e.preventDefault()
-      filtered[active]?.run()
+      filtered[activeIndex]?.run()
     }
   }
 
@@ -178,7 +176,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   let flatIndex = -1
 
   return (
-    <Dialog open={open} onClose={onClose} className="max-w-xl" aria-label="Command palette">
+    <Dialog open onClose={onClose} className="max-w-xl" aria-label="Command palette">
       <div className="flex items-center gap-2 border-b px-4">
         <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
         <input
@@ -210,7 +208,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                     onMouseMove={() => setActive(idx)}
                     className={cn(
                       "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-sm",
-                      idx === active ? "bg-accent text-accent-foreground" : "text-foreground"
+                      idx === activeIndex ? "bg-accent text-accent-foreground" : "text-foreground"
                     )}
                   >
                     <c.icon className="h-4 w-4 shrink-0 text-muted-foreground" />

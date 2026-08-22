@@ -3,12 +3,8 @@ import { Link, useNavigate } from "react-router"
 import { toast } from "sonner"
 import { useWorkflows } from "@/hooks/use-workflows"
 import { workflowsApi } from "@/api/workflows"
-import {
-  useReactTable,
-  getCoreRowModel,
-  flexRender,
-  createColumnHelper,
-} from "@tanstack/react-table"
+import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
+import { listTableFeatures } from "@/lib/table"
 import type { Workflow, EntityStatus } from "@/api/types"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
@@ -26,9 +22,9 @@ import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
 import { formatDate, downloadJson } from "@/lib/utils"
 import { Download, GitBranch, Plus, Upload } from "lucide-react"
 
-const columnHelper = createColumnHelper<Workflow>()
+const columnHelper = createColumnHelper<typeof listTableFeatures, Workflow>()
 
-const columns = [
+const columns = columnHelper.columns([
   columnHelper.accessor("name", {
     header: "Name",
     cell: (info) => <span className="font-medium">{info.getValue()}</span>,
@@ -68,7 +64,7 @@ const columns = [
       <span className="text-muted-foreground">{formatDate(info.getValue())}</span>
     ),
   }),
-]
+])
 
 export function WorkflowsPage() {
   const navigate = useNavigate()
@@ -103,10 +99,10 @@ export function WorkflowsPage() {
     }
   }
 
-  const table = useReactTable({
+  const table = useTable({
+    features: listTableFeatures,
     data: data?.data ?? [],
     columns,
-    getCoreRowModel: getCoreRowModel(),
   })
 
 
@@ -207,7 +203,7 @@ export function WorkflowsPage() {
                   className="cursor-pointer hover:bg-muted/50"
                   onClick={() => navigate(`/workflows/${row.original.workflow_id}`)}
                 >
-                  {row.getVisibleCells().map((cell) => (
+                  {row.getAllCells().map((cell) => (
                     <TableCell key={cell.id}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>

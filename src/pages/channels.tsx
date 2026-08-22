@@ -3,12 +3,8 @@ import { useNavigate } from "react-router"
 import { useChannels, useImportChannels } from "@/hooks/use-channels"
 import { ImportDialog } from "@/components/shared/import-dialog"
 import type { CreateChannelRequest } from "@/api/types"
-import {
-  useReactTable,
-  getCoreRowModel,
-  flexRender,
-  createColumnHelper,
-} from "@tanstack/react-table"
+import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
+import { listTableFeatures } from "@/lib/table"
 import type { Channel, EntityStatus, ChannelProtocol } from "@/api/types"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
@@ -26,9 +22,9 @@ import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
 import { formatDate, downloadJson } from "@/lib/utils"
 import { Download, Plus, Radio, Upload } from "lucide-react"
 
-const columnHelper = createColumnHelper<Channel>()
+const columnHelper = createColumnHelper<typeof listTableFeatures, Channel>()
 
-const columns = [
+const columns = columnHelper.columns([
   columnHelper.accessor("name", {
     header: "Name",
     cell: (info) => <span className="font-medium">{info.getValue()}</span>,
@@ -65,7 +61,7 @@ const columns = [
       <span className="text-muted-foreground">{formatDate(info.getValue())}</span>
     ),
   }),
-]
+])
 
 export function ChannelsPage() {
   const navigate = useNavigate()
@@ -100,10 +96,10 @@ export function ChannelsPage() {
     protocol: protocolFilter || undefined,
   })
 
-  const table = useReactTable({
+  const table = useTable({
+    features: listTableFeatures,
     data: data?.data ?? [],
     columns,
-    getCoreRowModel: getCoreRowModel(),
   })
 
 
@@ -212,7 +208,7 @@ export function ChannelsPage() {
                   className="cursor-pointer hover:bg-muted/50"
                   onClick={() => navigate(`/channels/${row.original.channel_id}`)}
                 >
-                  {row.getVisibleCells().map((cell) => (
+                  {row.getAllCells().map((cell) => (
                     <TableCell key={cell.id}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>

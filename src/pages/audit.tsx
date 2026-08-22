@@ -1,11 +1,7 @@
 import { useState } from "react"
 import { useAuditLogs } from "@/hooks/use-audit"
-import {
-  useReactTable,
-  getCoreRowModel,
-  flexRender,
-  createColumnHelper,
-} from "@tanstack/react-table"
+import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
+import { listTableFeatures } from "@/lib/table"
 import type { AuditLog } from "@/api/types"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
@@ -18,9 +14,9 @@ import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
 import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
 import { formatDate } from "@/lib/utils"
 
-const columnHelper = createColumnHelper<AuditLog>()
+const columnHelper = createColumnHelper<typeof listTableFeatures, AuditLog>()
 
-const columns = [
+const columns = columnHelper.columns([
   columnHelper.accessor("created_at", {
     header: "Time",
     cell: (info) => (
@@ -51,7 +47,7 @@ const columns = [
       <span className="text-muted-foreground">{info.getValue() ?? "--"}</span>
     ),
   }),
-]
+])
 
 /** `datetime-local` gives "YYYY-MM-DDTHH:mm"; the server wants RFC 3339. */
 const toRfc3339 = (local: string) => (local ? new Date(local).toISOString() : undefined)
@@ -78,10 +74,10 @@ export function AuditPage() {
     end_time: toRfc3339(endTime),
   })
 
-  const table = useReactTable({
+  const table = useTable({
+    features: listTableFeatures,
     data: data?.data ?? [],
     columns,
-    getCoreRowModel: getCoreRowModel(),
   })
 
   // Any control change re-anchors paging to the first page.
@@ -182,7 +178,7 @@ export function AuditPage() {
             ) : (
               table.getRowModel().rows.map((row) => (
                 <TableRow key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
+                  {row.getAllCells().map((cell) => (
                     <TableCell key={cell.id}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>

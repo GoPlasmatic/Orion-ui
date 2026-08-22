@@ -2,12 +2,8 @@ import { useState } from "react"
 import { useNavigate } from "react-router"
 import { useConnectors, useReloadConnectors, useImportConnectors } from "@/hooks/use-connectors"
 import { ImportDialog } from "@/components/shared/import-dialog"
-import {
-  useReactTable,
-  getCoreRowModel,
-  flexRender,
-  createColumnHelper,
-} from "@tanstack/react-table"
+import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
+import { listTableFeatures } from "@/lib/table"
 import type { ConnectorListItem, ConnectorType, CreateConnectorRequest } from "@/api/types"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
@@ -25,9 +21,9 @@ import { enabledBadgeClass, disabledBadgeClass } from "@/lib/status"
 import { formatDate, downloadJson } from "@/lib/utils"
 import { Download, Plug, Plus, RefreshCw, Upload } from "lucide-react"
 
-const columnHelper = createColumnHelper<ConnectorListItem>()
+const columnHelper = createColumnHelper<typeof listTableFeatures, ConnectorListItem>()
 
-const columns = [
+const columns = columnHelper.columns([
   columnHelper.accessor("name", {
     header: "Name",
     cell: (info) => <span className="font-medium">{info.getValue()}</span>,
@@ -77,7 +73,7 @@ const columns = [
     header: "Updated",
     cell: (info) => <span className="text-muted-foreground">{formatDate(info.getValue())}</span>,
   }),
-]
+])
 
 export function ConnectorsPage() {
   const navigate = useNavigate()
@@ -119,10 +115,10 @@ export function ConnectorsPage() {
     (c) => !typeFilter || c.connector_type === typeFilter
   )
 
-  const table = useReactTable({
+  const table = useTable({
+    features: listTableFeatures,
     data: rows,
     columns,
-    getCoreRowModel: getCoreRowModel(),
   })
 
 
@@ -229,7 +225,7 @@ export function ConnectorsPage() {
                   className="cursor-pointer hover:bg-muted/50"
                   onClick={() => navigate(`/connectors/${row.original.id}`)}
                 >
-                  {row.getVisibleCells().map((cell) => (
+                  {row.getAllCells().map((cell) => (
                     <TableCell key={cell.id}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
