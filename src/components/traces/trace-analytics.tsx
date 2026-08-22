@@ -26,14 +26,17 @@ export function TraceAnalytics() {
   const [window, setWindow] = useState(200)
   const a = useTraceAnalytics(window)
 
+  // Only channels that actually failed belong on the error chart — a row of
+  // zeroes reads as a rendering bug rather than as good news.
+  const failingChannels = a.channels.filter((c) => c.errorPct > 0)
+  const busiestChannels = a.channels.slice(0, 8)
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           Aggregated over the last {a.total} traces
-          {a.taskAvailable
-            ? ` · per-task detail in ${a.coverage}/${a.total}`
-            : " · no per-task detail in this window"}
+          {a.failed > 0 ? ` · ${a.failed} failed` : ""}
         </p>
         <Select
           value={String(window)}
@@ -50,46 +53,87 @@ export function TraceAnalytics() {
         <Skeleton className="h-64 w-full" />
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
-          {/* Errors by task */}
+          {/* Volume by channel */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle>Errors by task</CardTitle>
+              <CardTitle>Busiest channels</CardTitle>
             </CardHeader>
             <CardContent>
-              {a.errorsByTask.length === 0 ? (
-                <p className="py-6 text-sm text-muted-foreground">
-                  {a.taskAvailable ? "No task errors in this window." : "Per-task detail unavailable (enable task tracing on the channel)."}
-                </p>
+              {busiestChannels.length === 0 ? (
+                <p className="py-6 text-sm text-muted-foreground">No traces in this window.</p>
               ) : (
-                <ResponsiveContainer width="100%" height={Math.max(120, a.errorsByTask.length * 40)}>
-                  <BarChart data={a.errorsByTask} layout="vertical" margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
+                <ResponsiveContainer
+                  width="100%"
+                  height={Math.max(120, busiestChannels.length * 40)}
+                >
+                  <BarChart
+                    data={busiestChannels}
+                    layout="vertical"
+                    margin={{ top: 4, right: 8, bottom: 4, left: 8 }}
+                  >
                     <XAxis type="number" hide allowDecimals={false} />
-                    <YAxis type="category" dataKey="task" width={120} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "var(--muted-foreground)" }} />
-                    <Tooltip cursor={{ fill: "var(--muted)", opacity: 0.4 }} contentStyle={tooltipStyle} />
-                    <Bar dataKey="error" fill={statusChartColor("error")} radius={[0, 4, 4, 0]} />
+                    <YAxis
+                      type="category"
+                      dataKey="channel"
+                      width={120}
+                      tickLine={false}
+                      axisLine={false}
+                      tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
+                    />
+                    <Tooltip
+                      cursor={{ fill: "var(--muted)", opacity: 0.4 }}
+                      contentStyle={tooltipStyle}
+                    />
+                    <Bar
+                      dataKey="volume"
+                      fill={statusChartColor("completed")}
+                      radius={[0, 4, 4, 0]}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               )}
             </CardContent>
           </Card>
 
-          {/* Task execution mix */}
+          {/* Failures by channel */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle>Task execution mix</CardTitle>
+              <CardTitle>Failures by channel</CardTitle>
             </CardHeader>
             <CardContent>
-              {a.tasks.length === 0 ? (
-                <p className="py-6 text-sm text-muted-foreground">No per-task detail in this window.</p>
+              {failingChannels.length === 0 ? (
+                <p className="py-6 text-sm text-muted-foreground">
+                  No failed traces in this window.
+                </p>
               ) : (
-                <ResponsiveContainer width="100%" height={Math.max(120, a.tasks.length * 40)}>
-                  <BarChart data={a.tasks} layout="vertical" margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
-                    <XAxis type="number" hide allowDecimals={false} />
-                    <YAxis type="category" dataKey="task" width={120} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "var(--muted-foreground)" }} />
-                    <Tooltip cursor={{ fill: "var(--muted)", opacity: 0.4 }} contentStyle={tooltipStyle} />
-                    <Bar dataKey="executed" stackId="s" fill={statusChartColor("completed")} />
-                    <Bar dataKey="skipped" stackId="s" fill={statusChartColor("pending")} />
-                    <Bar dataKey="error" stackId="s" fill={statusChartColor("error")} radius={[0, 4, 4, 0]} />
+                <ResponsiveContainer
+                  width="100%"
+                  height={Math.max(120, failingChannels.length * 40)}
+                >
+                  <BarChart
+                    data={failingChannels}
+                    layout="vertical"
+                    margin={{ top: 4, right: 8, bottom: 4, left: 8 }}
+                  >
+                    <XAxis type="number" hide unit="%" />
+                    <YAxis
+                      type="category"
+                      dataKey="channel"
+                      width={120}
+                      tickLine={false}
+                      axisLine={false}
+                      tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
+                    />
+                    <Tooltip
+                      cursor={{ fill: "var(--muted)", opacity: 0.4 }}
+                      contentStyle={tooltipStyle}
+                      formatter={(v) => [`${Number(v).toFixed(1)}%`, "Error rate"]}
+                    />
+                    <Bar
+                      dataKey="errorPct"
+                      fill={statusChartColor("error")}
+                      radius={[0, 4, 4, 0]}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -138,7 +182,7 @@ export function TraceAnalytics() {
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        Per-task durations and cache-hit rate are not available from the current trace data.
+        The trace list carries no per-task detail — open a single trace for its execution pipeline.
       </p>
     </div>
   )

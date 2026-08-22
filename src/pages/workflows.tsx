@@ -17,13 +17,15 @@ import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
+import { PaginationFooter } from "@/components/shared/pagination"
+import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { WorkflowImportWizard } from "@/components/shared/workflow-import-wizard"
 import { EmptyState } from "@/components/shared/empty-state"
-import { formatDate } from "@/lib/utils"
-import { ChevronLeft, ChevronRight, Download, GitBranch, Plus, Upload } from "lucide-react"
+import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
+import { formatDate, downloadJson } from "@/lib/utils"
+import { Download, GitBranch, Plus, Upload } from "lucide-react"
 
-const PAGE_SIZE = 20
 const columnHelper = createColumnHelper<Workflow>()
 
 const columns = [
@@ -70,7 +72,7 @@ const columns = [
 
 export function WorkflowsPage() {
   const navigate = useNavigate()
-  const [offset, setOffset] = useState(0)
+  const { offset, reset: resetPage, prev, next } = usePagination()
   const [statusFilter, setStatusFilter] = useState<EntityStatus | "">("")
   const [tagFilter, setTagFilter] = useState("")
   const [showImport, setShowImport] = useState(false)
@@ -92,13 +94,7 @@ export function WorkflowsPage() {
         status: statusFilter || undefined,
         tag: tagFilter || undefined,
       })
-      const blob = new Blob([JSON.stringify(workflows, null, 2)], { type: "application/json" })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `orion-workflows-${new Date().toISOString().slice(0, 10)}.json`
-      a.click()
-      URL.revokeObjectURL(url)
+      downloadJson(workflows, "orion-workflows")
       toast.success(`Exported ${workflows.length} workflow${workflows.length !== 1 ? "s" : ""}`)
     } catch (e) {
       toast.error("Export failed", { description: e instanceof Error ? e.message : undefined })
@@ -113,9 +109,6 @@ export function WorkflowsPage() {
     getCoreRowModel: getCoreRowModel(),
   })
 
-  const total = data?.total ?? 0
-  const hasNext = offset + PAGE_SIZE < total
-  const hasPrev = offset > 0
 
   return (
     <div className="space-y-6">
@@ -138,13 +131,14 @@ export function WorkflowsPage() {
 
       <WorkflowImportWizard open={showImport} onClose={() => setShowImport(false)} />
 
-      <div className="flex items-center gap-3">
+      <FilterBar>
         <Select
           value={statusFilter}
           onChange={(e) => {
             setStatusFilter(e.target.value as EntityStatus | "")
-            setOffset(0)
+            resetPage()
           }}
+          className={FILTER_W}
         >
           <option value="">All statuses</option>
           <option value="draft">Draft</option>
@@ -156,13 +150,13 @@ export function WorkflowsPage() {
           value={tagFilter}
           onChange={(e) => {
             setTagFilter(e.target.value)
-            setOffset(0)
+            resetPage()
           }}
           className="w-48"
         />
-      </div>
+      </FilterBar>
 
-      <div className="rounded-md border">
+      <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -225,19 +219,13 @@ export function WorkflowsPage() {
         </Table>
       </div>
 
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {total > 0 ? `${offset + 1}--${Math.min(offset + PAGE_SIZE, total)} of ${total}` : "No results"}
-        </p>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={!hasPrev} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" disabled={!hasNext} onClick={() => setOffset(offset + PAGE_SIZE)}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <PaginationFooter
+        offset={offset}
+        count={data?.data.length ?? 0}
+        total={data?.total}
+        onPrev={prev}
+        onNext={next}
+      />
     </div>
   )
 }

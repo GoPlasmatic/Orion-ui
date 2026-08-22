@@ -30,7 +30,7 @@ function FunctionCard({ fn }: { fn: FunctionSchema }) {
                   <span className="font-mono text-sm">{field.name}</span>
                   <Badge variant="outline" className="text-xs">{field.kind}</Badge>
                   {field.required && (
-                    <Badge variant="outline" className="border-chart-3/40 bg-chart-3/10 text-xs text-chart-3">
+                    <Badge variant="warning" className="text-xs">
                       required
                     </Badge>
                   )}

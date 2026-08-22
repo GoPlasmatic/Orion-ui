@@ -15,8 +15,11 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
+import { Callout } from "@/components/ui/callout"
 import { PageHeader } from "@/components/shared/page-header"
-import { ArrowLeft, Braces, CheckCircle2, Network, Plus, Save, ShieldCheck, Trash2 } from "lucide-react"
+import { ValidationResults } from "@/components/shared/validation-results"
+import { ArrowLeft, Braces, Network, Plus, Save, ShieldCheck, Trash2 } from "lucide-react"
 
 const SAMPLE_TASKS = `[
   {
@@ -67,7 +70,7 @@ function ConditionEditor({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div>
-          <label className="text-sm font-medium">Trigger condition</label>
+          <Label className="mb-0">Trigger condition</Label>
           <p className="text-xs text-muted-foreground">
             JSONLogic over the incoming message; the workflow runs when it evaluates truthy.
             Leave unset to always match.
@@ -138,35 +141,6 @@ function ConditionEditor({
   )
 }
 
-function ValidationResults({ result }: { result: ValidationResponse }) {
-  if (result.valid && result.warnings.length === 0) {
-    return (
-      <div className="flex items-center gap-2 rounded-md border border-chart-2/40 bg-chart-2/10 px-4 py-3 text-sm text-chart-2">
-        <CheckCircle2 className="h-4 w-4" /> Workflow is valid.
-      </div>
-    )
-  }
-  return (
-    <div className="space-y-2">
-      {result.errors.map((e, i) => (
-        <div
-          key={`e-${i}`}
-          className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive"
-        >
-          <span className="font-mono text-xs">{e.field}</span> — {e.message}
-        </div>
-      ))}
-      {result.warnings.map((w, i) => (
-        <div
-          key={`w-${i}`}
-          className="rounded-md border border-chart-3/40 bg-chart-3/10 px-4 py-2 text-sm text-chart-3"
-        >
-          <span className="font-mono text-xs">{w.field}</span> — {w.message}
-        </div>
-      ))}
-    </div>
-  )
-}
 
 function WorkflowForm({ existing }: { existing?: Workflow }) {
   const isEdit = !!existing
@@ -284,9 +258,9 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
       />
 
       {editLocked && (
-        <div className="max-w-3xl rounded-md border border-chart-3/40 bg-chart-3/10 px-4 py-3 text-sm text-chart-3">
+        <Callout variant="warning" className="max-w-3xl">
           Only drafts can be edited. Create a new version from the workflow detail page first.
-        </div>
+        </Callout>
       )}
 
       <Card className="max-w-3xl">
@@ -295,7 +269,7 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">Name</label>
+            <Label>Name</Label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -305,17 +279,17 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium">Description</label>
+            <Label>Description</Label>
             <Input value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="mb-1 block text-sm font-medium">Priority</label>
+              <Label>Priority</Label>
               <Input type="number" value={priority} onChange={(e) => setPriority(e.target.value)} />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium">Tags</label>
+              <Label>Tags</Label>
               <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="orders, billing" />
             </div>
           </div>
@@ -336,7 +310,7 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
 
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <label className="block text-sm font-medium">Tasks</label>
+              <Label className="mb-0">Tasks</Label>
               <Link
                 to="/functions"
                 target="_blank"
@@ -359,12 +333,12 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
             {tasksError && <p className="mt-1 text-xs text-destructive">{tasksError}</p>}
           </div>
 
-          {validation && <ValidationResults result={validation} />}
+          {validation && <ValidationResults result={validation} validLabel="Workflow is valid." />}
 
           {error && (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            <Callout variant="destructive">
               {error}
-            </div>
+            </Callout>
           )}
 
           <div className="flex justify-end gap-2">

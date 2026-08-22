@@ -70,7 +70,7 @@ export function Dialog({ open, onClose, children, className, ...props }: DialogP
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 p-4 backdrop-blur-sm animate-in fade-in-0 duration-150 dark:bg-black/60"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -82,7 +82,7 @@ export function Dialog({ open, onClose, children, className, ...props }: DialogP
         tabIndex={-1}
         onKeyDown={handleKeyDown}
         className={cn(
-          "flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border bg-card text-card-foreground outline-none",
+          "flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border bg-card text-card-foreground shadow-lg outline-none animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-150",
           className
         )}
         {...props}
@@ -94,11 +94,11 @@ export function Dialog({ open, onClose, children, className, ...props }: DialogP
 }
 
 export function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex flex-col gap-1.5 border-b p-4", className)} {...props} />
+  return <div className={cn("flex flex-col gap-1.5 border-b px-5 py-4", className)} {...props} />
 }
 
 export function DialogTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 className={cn("text-lg font-semibold leading-none tracking-tight", className)} {...props} />
+  return <h2 className={cn("font-display text-base font-semibold leading-none tracking-tight", className)} {...props} />
 }
 
 export function DialogDescription({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) {
@@ -106,9 +106,9 @@ export function DialogDescription({ className, ...props }: React.HTMLAttributes<
 }
 
 export function DialogBody({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex-1 space-y-3 overflow-y-auto p-4", className)} {...props} />
+  return <div className={cn("flex-1 space-y-3 overflow-y-auto px-5 py-4", className)} {...props} />
 }
 
 export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex justify-end gap-2 border-t p-4", className)} {...props} />
+  return <div className={cn("flex justify-end gap-2 border-t bg-muted/30 px-5 py-3.5", className)} {...props} />
 }

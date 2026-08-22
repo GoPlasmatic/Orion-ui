@@ -24,7 +24,11 @@ export function AppLayout() {
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onOpenSearch={() => setPaletteOpen(true)} />
-        <main className="flex-1 overflow-auto p-6">
+        {/* The width constraint lives on <main> itself, not on an inner wrapper:
+            pages that fill the viewport (System Map's graph) size themselves with
+            `h-full`, which only resolves against a parent with a definite height.
+            `flex-1` gives <main> one; an auto-height wrapper would collapse them. */}
+        <main className="mx-auto w-full max-w-[1600px] flex-1 overflow-auto px-4 py-6 sm:px-6 lg:px-8">
           <Outlet />
         </main>
       </div>

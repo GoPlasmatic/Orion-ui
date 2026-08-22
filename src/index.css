@@ -20,7 +20,14 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-chart-1: var(--chart-1);
@@ -40,33 +47,51 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 10px);
   --font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
   --font-mono: "DM Mono", "Fira Code", monospace;
   --font-display: "Montserrat", "DM Sans", system-ui, sans-serif;
+  /* Elevation. Four steps, theme-aware: light casts a soft ink shadow, dark
+     casts a deeper near-black one so cards still lift off a #07111A page. */
+  --shadow-xs: var(--elev-1);
+  --shadow-sm: var(--elev-2);
+  --shadow: var(--elev-2);
+  --shadow-md: var(--elev-3);
+  --shadow-lg: var(--elev-4);
+  --shadow-xl: var(--elev-4);
 }
 
 /* Light theme */
 :root {
-  --radius: 0.5rem;
+  --radius: 0.625rem;
   --background: #F8FBFD;
   --foreground: #07111A;
   --card: #FFFFFF;
   --card-foreground: #07111A;
   --popover: #FFFFFF;
   --popover-foreground: #07111A;
-  --primary: #119FCD;
+  /* Brand cyan darkened to #0A7C9E so white button labels clear 4.5:1.
+     The undarkened brand value lives on in --chart-1 for data viz. */
+  --primary: #0A7C9E;
   --primary-foreground: #FFFFFF;
   --secondary: #EDF3F7;
   --secondary-foreground: #0B1925;
   --muted: #EDF3F7;
   --muted-foreground: #3D6B7D;
-  --accent: #E5F5ED;
+  --accent: #E2F1F7;
   --accent-foreground: #063B4C;
-  --destructive: #EF476F;
+  --destructive: #C2264A;
   --destructive-foreground: #FFFFFF;
-  --border: #D0DEE6;
-  --input: #D0DEE6;
-  --ring: #119FCD;
+  --success: #0E7C5A;
+  --success-foreground: #FFFFFF;
+  --warning: #9A6800;
+  --warning-foreground: #FFFFFF;
+  --info: #0A7C9E;
+  --info-foreground: #FFFFFF;
+  --border: #D8E4EB;
+  --border-strong: #B9CEDA;
+  --input: #CFDDE6;
+  --ring: #0A7C9E;
   --chart-1: #119FCD;
   --chart-2: #4CBD97;
   --chart-3: #FFD167;
@@ -74,12 +99,17 @@
   --chart-5: #7FAFC0;
   --sidebar: #F0F5F8;
   --sidebar-foreground: #07111A;
-  --sidebar-primary: #119FCD;
+  --sidebar-primary: #0A7C9E;
   --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #E0ECF2;
+  --sidebar-accent: #DDEBF2;
   --sidebar-accent-foreground: #063B4C;
-  --sidebar-border: #D0DEE6;
-  --sidebar-ring: #119FCD;
+  --sidebar-border: #D8E4EB;
+  --sidebar-ring: #0A7C9E;
+  --scrollbar-thumb: #C2D4DE;
+  --elev-1: 0 1px 2px 0 rgb(7 17 26 / 0.05);
+  --elev-2: 0 1px 3px 0 rgb(7 17 26 / 0.07), 0 1px 2px -1px rgb(7 17 26 / 0.06);
+  --elev-3: 0 4px 12px -2px rgb(7 17 26 / 0.10), 0 2px 4px -2px rgb(7 17 26 / 0.06);
+  --elev-4: 0 12px 32px -8px rgb(7 17 26 / 0.18), 0 4px 8px -4px rgb(7 17 26 / 0.08);
 }
 
 /* Dark theme — Plasmatic design guide */
@@ -91,17 +121,26 @@
   --popover: #0F2030;
   --popover-foreground: #ECF4F8;
   --primary: #119FCD;
-  --primary-foreground: #063B4C;
+  --primary-foreground: #04222D;
   --secondary: #0F2030;
   --secondary-foreground: #7FAFC0;
   --muted: #0F2030;
-  --muted-foreground: #3D6B7D;
-  --accent: rgba(17, 159, 205, 0.12);
+  /* Was #3D6B7D — only 2.6:1 on --card, which fails AA for the ~190 places
+     text-muted-foreground is used. #7BA5B6 clears 5.7:1 on card, 7.2:1 on bg. */
+  --muted-foreground: #7BA5B6;
+  --accent: rgba(17, 159, 205, 0.14);
   --accent-foreground: #ECF4F8;
   --destructive: #EF476F;
   --destructive-foreground: #ECF4F8;
-  --border: rgba(61, 107, 125, 0.25);
-  --input: rgba(61, 107, 125, 0.25);
+  --success: #4CBD97;
+  --success-foreground: #04221A;
+  --warning: #FFD167;
+  --warning-foreground: #2B1F00;
+  --info: #119FCD;
+  --info-foreground: #04222D;
+  --border: rgba(125, 168, 190, 0.20);
+  --border-strong: rgba(125, 168, 190, 0.34);
+  --input: rgba(125, 168, 190, 0.26);
   --ring: #119FCD;
   --chart-1: #119FCD;
   --chart-2: #4CBD97;
@@ -112,10 +151,15 @@
   --sidebar-foreground: #ECF4F8;
   --sidebar-primary: #119FCD;
   --sidebar-primary-foreground: #ECF4F8;
-  --sidebar-accent: rgba(17, 159, 205, 0.12);
+  --sidebar-accent: rgba(17, 159, 205, 0.14);
   --sidebar-accent-foreground: #ECF4F8;
-  --sidebar-border: rgba(61, 107, 125, 0.15);
+  --sidebar-border: rgba(125, 168, 190, 0.14);
   --sidebar-ring: #119FCD;
+  --scrollbar-thumb: rgba(125, 168, 190, 0.30);
+  --elev-1: 0 1px 2px 0 rgb(0 0 0 / 0.40);
+  --elev-2: 0 1px 3px 0 rgb(0 0 0 / 0.50), 0 1px 2px -1px rgb(0 0 0 / 0.40);
+  --elev-3: 0 6px 16px -4px rgb(0 0 0 / 0.55), 0 2px 6px -2px rgb(0 0 0 / 0.40);
+  --elev-4: 0 16px 40px -12px rgb(0 0 0 / 0.70), 0 4px 12px -4px rgb(0 0 0 / 0.50);
 }
 
 @layer base {
@@ -124,9 +168,88 @@
   }
   body {
     @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
   h1, h2, h3 {
     font-family: var(--font-display);
     letter-spacing: -0.01em;
   }
+  /* Numbers in tables, KPIs and durations should not jitter as they tick. */
+  code, kbd, pre, samp, .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+  ::selection {
+    background-color: color-mix(in oklab, var(--primary) 28%, transparent);
+  }
+  /* Thin, theme-aware scrollbars so overflow panes stop drawing OS chrome. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--border-strong);
+  }
+}
+
+/* React Flow (System Map, relationship graphs) ships its own light-only chrome.
+   Map its controls, attribution and minimap onto the theme tokens so the panel
+   does not render as a white block on the dark canvas.
+
+   Deliberately NOT inside `@layer components`: React Flow's stylesheet is
+   unlayered, and unlayered CSS always beats layered CSS regardless of source
+   order. These rules must stay unlayered to win on order. */
+.react-flow__controls {
+  box-shadow: var(--elev-3);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.react-flow__controls-button {
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  fill: var(--muted-foreground);
+  color: var(--muted-foreground);
+  width: 1.75rem;
+  height: 1.75rem;
+}
+.react-flow__controls-button:hover {
+  background: var(--accent);
+  fill: var(--foreground);
+  color: var(--foreground);
+}
+.react-flow__controls-button:last-child {
+  border-bottom: none;
+}
+.react-flow__controls-button svg {
+  max-width: 0.75rem;
+  max-height: 0.75rem;
+  fill: currentColor;
+}
+.react-flow__attribution {
+  background: transparent;
+  color: var(--muted-foreground);
+  opacity: 0.5;
+}
+.react-flow__attribution a {
+  color: inherit;
+}
+.react-flow__minimap {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
 }

@@ -68,6 +68,8 @@ const { backupApi } = await import("@/api/backup")
 const { functionsApi } = await import("@/api/functions")
 const { tracesApi } = await import("@/api/traces")
 const { dataApi } = await import("@/api/data")
+const { traceDlqApi } = await import("@/api/trace-dlq")
+const { packagesApi } = await import("@/api/packages")
 
 /** Resolve a client path ("admin/workflows/x?y=1" or "/health") to spec-path + query. */
 function normalize(rawPath: string): { url: string; query: string | undefined } {
@@ -131,13 +133,16 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
     create: () => workflowsApi.create({ name: "wf", tasks: [] }),
     update: () => workflowsApi.update("wf-1", { name: "wf" }),
     delete: () => workflowsApi.delete("wf-1"),
-    changeStatus: () => workflowsApi.changeStatus("wf-1", { status: "active" }),
-    setRollout: () => workflowsApi.setRollout("wf-1", { rollout_percentage: 50 }),
-    listVersions: () => workflowsApi.listVersions("wf-1"),
+    changeStatus: () => workflowsApi.changeStatus("wf-1", { status: "active" }, { reload: "defer" }),
+    changeStatusDryRun: () => workflowsApi.changeStatusDryRun("wf-1", { status: "active" }),
+    setRollout: () =>
+      workflowsApi.setRollout("wf-1", { rollout_percentage: 50 }, { reload: "defer" }),
+    listVersions: () => workflowsApi.listVersions("wf-1", { limit: 10, offset: 0 }),
     createVersion: () => workflowsApi.createVersion("wf-1"),
     test: () => workflowsApi.test("wf-1", { data: {} }),
     validate: () => workflowsApi.validate({ name: "wf", tasks: [] }),
-    import: () => workflowsApi.import([], true),
+    dependencies: () => workflowsApi.dependencies("wf-1"),
+    import: () => workflowsApi.import([], { dryRun: true, onConflict: "new_version" }),
     export: () => workflowsApi.export({ status: "active", tag: "t" }),
   },
   channelsApi: {
@@ -148,23 +153,44 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
         status: "active",
         channel_type: "sync",
         protocol: "rest",
+        tag: "t",
+        sort_by: "name",
+        sort_order: "asc",
       }),
     get: () => channelsApi.get("ch-1"),
     create: () => channelsApi.create({ name: "ch", channel_type: "sync", protocol: "rest" }),
     update: () => channelsApi.update("ch-1", { name: "ch" }),
     delete: () => channelsApi.delete("ch-1"),
-    changeStatus: () => channelsApi.changeStatus("ch-1", { status: "active" }),
-    listVersions: () => channelsApi.listVersions("ch-1"),
+    validate: () => channelsApi.validate({ name: "ch", channel_type: "sync", protocol: "rest" }),
+    changeStatus: () => channelsApi.changeStatus("ch-1", { status: "active" }, { reload: "defer" }),
+    changeStatusDryRun: () => channelsApi.changeStatusDryRun("ch-1", { status: "active" }),
+    listVersions: () => channelsApi.listVersions("ch-1", { limit: 10, offset: 0 }),
     createVersion: () => channelsApi.createVersion("ch-1"),
-    import: () => channelsApi.import([], true),
+    import: () => channelsApi.import([], { dryRun: true, onConflict: "skip" }),
+    export: () =>
+      channelsApi.export({
+        status: "active",
+        channel_type: "sync",
+        protocol: "rest",
+        tag: "t",
+        limit: 10,
+        offset: 0,
+        sort_by: "name",
+        sort_order: "asc",
+      }),
   },
   connectorsApi: {
-    list: () => connectorsApi.list({ limit: 10, offset: 0 }),
+    list: () =>
+      connectorsApi.list({ limit: 10, offset: 0, tag: "t", sort_by: "name", sort_order: "asc" }),
     get: () => connectorsApi.get("conn-1"),
     create: () => connectorsApi.create({ name: "c", connector_type: "http", config: {} }),
     update: () => connectorsApi.update("conn-1", { enabled: false }),
     delete: () => connectorsApi.delete("conn-1"),
-    import: () => connectorsApi.import([], true),
+    validate: () => connectorsApi.validate({ name: "c", connector_type: "http", config: {} }),
+    test: () => connectorsApi.test("conn-1"),
+    import: () => connectorsApi.import([], { dryRun: true, onConflict: "fail" }),
+    export: () =>
+      connectorsApi.export({ tag: "t", limit: 10, offset: 0, sort_by: "name", sort_order: "asc" }),
     getCircuitBreakers: () => connectorsApi.getCircuitBreakers(),
     resetCircuitBreaker: () => connectorsApi.resetCircuitBreaker("ch-1:conn-1"),
   },
@@ -174,7 +200,17 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
     health: () => engineApi.health(),
   },
   auditApi: {
-    list: () => auditApi.list({ limit: 50, offset: 0 }),
+    list: () =>
+      auditApi.list({
+        limit: 50,
+        offset: 0,
+        action: "create",
+        resource_type: "workflow",
+        resource_id: "wf-1",
+        principal: "admin",
+        start_time: "2026-07-01T00:00:00Z",
+        end_time: "2026-08-01T00:00:00Z",
+      }),
   },
   backupApi: {
     create: () => backupApi.create(),
@@ -188,13 +224,24 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
       tracesApi.list({
         limit: 10,
         offset: 0,
+        include_total: true,
         status: "completed",
         channel: "ch",
         mode: "sync",
         sort_by: "created_at",
         sort_order: "desc",
       }),
-    get: () => tracesApi.get("trace-1"),
+    get: () => tracesApi.get("trace-1", "tok"),
+  },
+  traceDlqApi: {
+    list: () => traceDlqApi.list({ limit: 10, offset: 0, channel: "ch", exhausted: true }),
+    get: () => traceDlqApi.get("dlq-1"),
+    requeue: () => traceDlqApi.requeue("dlq-1"),
+    purge: () => traceDlqApi.purge({ older_than_hours: 24 }),
+  },
+  packagesApi: {
+    list: () => packagesApi.list({ limit: 10, offset: 0 }),
+    get: () => packagesApi.get("payments"),
   },
 }
 
@@ -207,6 +254,8 @@ const MODULES: Record<string, object> = {
   backupApi,
   functionsApi,
   tracesApi,
+  traceDlqApi,
+  packagesApi,
 }
 
 describe("API layer ↔ OpenAPI contract", () => {

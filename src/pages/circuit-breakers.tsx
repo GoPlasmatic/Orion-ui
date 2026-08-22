@@ -62,6 +62,13 @@ export function CircuitBreakersPage() {
         </Button>
       </PageHeader>
 
+      {data?.instance_id && (
+        <p className="text-xs text-muted-foreground">
+          Breaker state is per-replica, never cluster-wide — this is node{" "}
+          <span className="font-mono">{data.instance_id}</span>. Other replicas keep their own map.
+        </p>
+      )}
+
       {isLoading ? (
         <Skeleton className="h-48 w-full" />
       ) : data && !data.enabled ? (
@@ -84,7 +91,7 @@ export function CircuitBreakersPage() {
             <Badge variant="outline" className={breakerStateBadgeClass("closed")}>{counts.closed} closed</Badge>
           </div>
 
-          <div className="rounded-md border">
+          <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
             <Table>
               <TableHeader>
                 <TableRow>

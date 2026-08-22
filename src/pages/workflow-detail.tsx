@@ -8,6 +8,7 @@ import {
   useDeleteWorkflow,
   useSetWorkflowRollout,
   useTestWorkflow,
+  useWorkflowStatusDryRun,
 } from "@/hooks/use-workflows"
 import { WorkflowVisualizer } from "@goplasmatic/dataflow-ui"
 import { toVisualizerWorkflow } from "@/lib/workflow-mapper"
@@ -18,12 +19,14 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Callout } from "@/components/ui/callout"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { LifecycleActions } from "@/components/shared/lifecycle-actions"
 import { VersionHistory } from "@/components/shared/version-history"
 import { VersionCompare } from "@/components/shared/version-compare"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { RelationshipGraph } from "@/components/graph/relationship-graph"
+import { WorkflowDependencies } from "@/components/shared/workflow-dependencies"
 import { stepResultBadgeClass } from "@/lib/status"
 import { ArrowLeft, AlertCircle, Pencil, Percent, Play } from "lucide-react"
 import type { WorkflowTestResponse } from "@/api/types"
@@ -32,6 +35,7 @@ export function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { data: workflow, isLoading, error } = useWorkflow(id ?? "")
+  const statusDryRun = useWorkflowStatusDryRun()
   const { data: versions, isLoading: versionsLoading } = useWorkflowVersions(id ?? "")
   const changeStatus = useChangeWorkflowStatus()
   const createVersion = useCreateWorkflowVersion()
@@ -131,6 +135,11 @@ export function WorkflowDetailPage() {
             </Button>
           )}
           <LifecycleActions
+            onPreflight={() =>
+              statusDryRun.mutate({ id: workflow.workflow_id, req: { status: "active" } })
+            }
+            preflight={statusDryRun.data ?? null}
+            preflightPending={statusDryRun.isPending}
             status={workflow.status}
             isPending={isPending}
             onActivate={() => changeStatus.mutate({ id: workflow.workflow_id, req: { status: "active" } })}
@@ -194,6 +203,7 @@ export function WorkflowDetailPage() {
       <Tabs defaultValue="relationships">
         <TabsList>
           <TabsTrigger value="relationships">Relationships</TabsTrigger>
+          <TabsTrigger value="dependencies">Dependencies</TabsTrigger>
           <TabsTrigger value="test">Dry Run</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
@@ -201,6 +211,10 @@ export function WorkflowDetailPage() {
 
         <TabsContent value="relationships">
           <RelationshipGraph kind="workflow" id={workflow.workflow_id} />
+        </TabsContent>
+
+        <TabsContent value="dependencies">
+          <WorkflowDependencies workflowId={workflow.workflow_id} />
         </TabsContent>
 
         <TabsContent value="test">
@@ -227,9 +241,9 @@ export function WorkflowDetailPage() {
                 </Button>
 
                 {testError && (
-                  <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                  <Callout variant="destructive">
                     {testError}
-                  </div>
+                  </Callout>
                 )}
               </CardContent>
             </Card>
@@ -242,7 +256,7 @@ export function WorkflowDetailPage() {
                 {testResult ? (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <Badge variant={testResult.matched ? "default" : "secondary"} className={testResult.matched ? "bg-chart-2 text-white" : ""}>
+                      <Badge variant={testResult.matched ? "success" : "secondary"}>
                         {testResult.matched ? "Matched" : "No Match"}
                       </Badge>
                       {testResult.errors.length > 0 && (

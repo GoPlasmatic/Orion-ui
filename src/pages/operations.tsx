@@ -206,17 +206,17 @@ export function OperationsPage() {
         </Card>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid items-start gap-4 lg:grid-cols-2">
         {/* Needs attention */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardHeader className="flex h-[3.25rem] flex-row items-center justify-between pb-2">
             <CardTitle>Needs attention</CardTitle>
             {attentionCount > 0 && <Badge variant="outline" className={traceStatusBadgeClass("failed")}>{attentionCount}</Badge>}
           </CardHeader>
           <CardContent className="space-y-2">
             {attentionCount === 0 ? (
               <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-                <CheckCircle2 className="h-4 w-4 text-chart-2" />
+                <CheckCircle2 className="h-4 w-4 text-success" />
                 All clear — no open breakers, recent failures, or idle channels.
               </div>
             ) : (
@@ -256,7 +256,7 @@ export function OperationsPage() {
 
         {/* Outcome distribution */}
         <Card>
-          <CardHeader className="pb-2">
+          <CardHeader className="flex h-[3.25rem] flex-row items-center justify-between pb-2">
             <CardTitle>Outcomes by channel</CardTitle>
           </CardHeader>
           <CardContent>
@@ -299,10 +299,10 @@ export function OperationsPage() {
         </Card>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid items-start gap-4 lg:grid-cols-2">
       {/* Top channels */}
       <Card>
-        <CardHeader className="pb-2">
+        <CardHeader className="flex h-[3.25rem] flex-row items-center justify-between pb-2">
           <CardTitle>Top channels</CardTitle>
         </CardHeader>
         <CardContent>
@@ -347,7 +347,7 @@ export function OperationsPage() {
 
       {/* Recent traces */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardHeader className="flex h-[3.25rem] flex-row items-center justify-between pb-2">
           <CardTitle>Recent traces</CardTitle>
           <Button variant="ghost" size="sm" onClick={() => navigate("/traces")}>
             View all
@@ -359,7 +359,7 @@ export function OperationsPage() {
               {recentTraces.data.map((trace) => (
                 <div
                   key={trace.id}
-                  className="flex cursor-pointer items-center justify-between rounded-md border px-3 py-2 hover:bg-muted/50"
+                  className="flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 transition-colors hover:border-border-strong hover:bg-muted/50"
                   onClick={() => navigate(`/traces/${trace.id}`)}
                 >
                   <div className="flex items-center gap-3">
@@ -406,7 +406,7 @@ function AttentionRow({
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center gap-3 rounded-md border px-3 py-2 text-left hover:bg-muted/50"
+      className="flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors outline-none hover:border-border-strong hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/60"
     >
       {icon}
       <div className="min-w-0 flex-1">

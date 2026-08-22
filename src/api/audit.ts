@@ -1,23 +1,18 @@
 import { api, buildQuery } from "./client"
 import type { AuditLog, ListAuditLogsParams, PaginatedResponse } from "./types"
 
-// The audit-logs endpoint nests paging under `pagination` (unlike other list
-// endpoints, which are flat). Normalise to PaginatedResponse so the UI is uniform.
-interface RawAuditResponse {
-  data: AuditLog[]
-  pagination?: { total: number; limit: number; offset: number }
-}
-
+/**
+ * Since 1.0 the audit list uses the same flat `{data, total, limit, offset}`
+ * envelope as every other admin list — the old nested `{pagination}` shape and
+ * the client-side filtering it forced are both gone. Filtering is server-side:
+ * exact-match on action / resource_type / resource_id / principal, plus an
+ * RFC 3339 time range.
+ *
+ * This endpoint takes no `sort_by`, and clamps `limit` to 1–1000.
+ */
 export const auditApi = {
-  list: (params: ListAuditLogsParams = {}): Promise<PaginatedResponse<AuditLog>> =>
-    api
-      .get<RawAuditResponse>(
-        `admin/audit-logs${buildQuery(params as Record<string, string | number | undefined>)}`
-      )
-      .then((r) => ({
-        data: r.data,
-        total: r.pagination?.total ?? r.data.length,
-        limit: r.pagination?.limit ?? params.limit ?? 0,
-        offset: r.pagination?.offset ?? params.offset ?? 0,
-      })),
+  list: (params: ListAuditLogsParams = {}) =>
+    api.get<PaginatedResponse<AuditLog>>(
+      `admin/audit-logs${buildQuery(params as Record<string, string | number | undefined>)}`
+    ),
 }

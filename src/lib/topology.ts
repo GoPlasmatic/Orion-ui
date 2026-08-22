@@ -37,16 +37,36 @@ export interface EntityIndex {
   connectorsByName: Map<string, Connector>
 }
 
-// Task functions that reference an external connector, and the input keys a
-// connector name might live under. Untyped on the wire — best-effort, tunable here.
+/**
+ * Task functions that reference an external connector, and the input keys a
+ * connector name might live under. Untyped on the wire — best-effort, tunable
+ * here.
+ *
+ * This is the *bulk* path, used by the system map and the reverse
+ * connector→workflow sweep, which need every workflow at once. For a single
+ * workflow prefer `GET admin/workflows/{id}/dependencies`
+ * (`workflowsApi.dependencies`): the server walks the real tasks, so it cannot
+ * drift from this list, and it also reports `has_dynamic_channel_calls`, which
+ * static parsing cannot see.
+ *
+ * Keep in sync with the connector functions in the server's function registry
+ * (`GET admin/functions`, rendered on /functions).
+ */
 const CONNECTOR_FUNCTIONS = new Set([
   "http_call",
+  "data_query",
+  "data_write",
   "db_read",
   "db_write",
   "cache_read",
   "cache_write",
-  "publish_kafka",
   "mongo_read",
+  "mongo_write",
+  "mongo_aggregate",
+  "publish_kafka",
+  "send_email",
+  "storage_presign",
+  "storage_head",
 ])
 const CONNECTOR_KEYS = ["connector", "connector_name", "connector_id"]
 

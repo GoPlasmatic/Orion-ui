@@ -2,13 +2,22 @@ import { useState } from "react"
 import { Link } from "react-router"
 import { dataApi } from "@/api/data"
 import { useChannels } from "@/hooks/use-channels"
-import type { Channel, ProcessResponse, ProfileResult } from "@/api/types"
+import type {
+  AsyncSubmitResponse,
+  Channel,
+  ProcessResponse,
+  ProcessTaskError,
+  ProfileResult,
+} from "@/api/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Label } from "@/components/ui/label"
+import { Callout } from "@/components/ui/callout"
+import { Checkbox } from "@/components/ui/checkbox"
 import { PageHeader } from "@/components/shared/page-header"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { formatDate } from "@/lib/utils"
@@ -36,6 +45,8 @@ interface HistoryEntry {
   path?: string
   status?: string
   traceId?: string
+  /** Capability token from an async 202; required to poll that trace. */
+  traceToken?: string
   at: string
 }
 
@@ -109,6 +120,51 @@ function ProfilePanel({ profile }: { profile: ProfileResult }) {
   )
 }
 
+/**
+ * Polling an async trace needs the capability token handed out with the 202 —
+ * an admin credential is the only alternative, and the console may not have one.
+ */
+function traceLink(traceId: string, token?: string): string {
+  return token
+    ? `/traces/${traceId}?token=${encodeURIComponent(token)}`
+    : `/traces/${traceId}`
+}
+
+/**
+ * A 200 does not mean the workflow succeeded: a failed task still answers 200
+ * with the failure in `errors`. Since 1.1 the code names the real failure
+ * rather than a flat TASK_ERROR, so it is worth surfacing rather than leaving
+ * buried in the raw JSON.
+ */
+function TaskErrors({
+  errors,
+  requestId,
+}: {
+  errors: ProcessTaskError[]
+  requestId?: string | null
+}) {
+  return (
+    <Callout variant="destructive">
+      <p className="text-sm font-medium">
+        {errors.length} task {errors.length === 1 ? "error" : "errors"}
+      </p>
+      <ul className="mt-1.5 space-y-1 text-xs">
+        {errors.map((e, i) => (
+          <li key={i}>
+            <span className="font-mono font-medium">{e.code}</span>
+            {e.task_id && <span className="font-mono opacity-70"> @{e.task_id}</span>}
+            {" — "}
+            {e.message}
+          </li>
+        ))}
+      </ul>
+      {requestId && (
+        <p className="font-mono text-xs text-muted-foreground">request_id: {requestId}</p>
+      )}
+    </Callout>
+  )
+}
+
 export function ConsolePage() {
   const [channel, setChannel] = useState("")
   const [payload, setPayload] = useState('{\n  \n}')
@@ -118,6 +174,9 @@ export function ConsolePage() {
   const [path, setPath] = useState("")
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ProcessResponse | null>(null)
+  // An async submission answers with a receipt, not a result — kept separately
+  // so the sync response renderer never has to guess which shape it holds.
+  const [receipt, setReceipt] = useState<AsyncSubmitResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [history, setHistory] = useState<HistoryEntry[]>([])
 
@@ -129,7 +188,11 @@ export function ConsolePage() {
   const bodyless = restMode && BODYLESS.has(method)
 
   const profileResult = result?._orion?.profile
-  const traceId = result?.id
+  // A sync response correlates through the engine message id; an async one
+  // hands back the trace id explicitly.
+  const traceId = receipt?.trace_id ?? result?.id
+  const traceToken = receipt?.trace_token
+  const taskErrors = result?.errors ?? []
 
   // Pre-fill a starter payload when a channel is picked and the editor is empty;
   // seed method/path from the channel's REST route when it has one.
@@ -156,6 +219,7 @@ export function ConsolePage() {
   const handleSend = async () => {
     setError(null)
     setResult(null)
+    setReceipt(null)
 
     if (!channel.trim()) {
       setError("Channel name is required")
@@ -180,14 +244,32 @@ export function ConsolePage() {
     }
 
     setLoading(true)
+    const isAsync = !restMode && !sync
     try {
-      const res = restMode
-        ? await dataApi.processRest(method, path, data !== undefined ? { data } : undefined, profile)
-        : sync
-          ? await dataApi.processSync(channel, { data: data ?? {} }, profile)
-          : await dataApi.processAsync(channel, { data: data ?? {} })
-      const typed = res as ProcessResponse
-      setResult(typed)
+      let entryStatus: string | undefined
+      let entryTraceId: string | undefined
+      let entryTraceToken: string | undefined
+
+      if (isAsync) {
+        const ack = await dataApi.processAsync(channel, { data: data ?? {} })
+        setReceipt(ack)
+        entryStatus = "accepted"
+        entryTraceId = ack.trace_id
+        entryTraceToken = ack.trace_token
+      } else {
+        const res = restMode
+          ? await dataApi.processRest(
+              method,
+              path,
+              data !== undefined ? { data } : undefined,
+              profile
+            )
+          : await dataApi.processSync(channel, { data: data ?? {} }, profile)
+        setResult(res)
+        entryStatus = res.status
+        entryTraceId = res.id
+      }
+
       setHistory((prev) =>
         [
           {
@@ -196,8 +278,9 @@ export function ConsolePage() {
             sync: restMode ? true : sync,
             method: restMode ? method : undefined,
             path: restMode ? path : undefined,
-            status: typed.status,
-            traceId: typed.id,
+            status: entryStatus,
+            traceId: entryTraceId,
+            traceToken: entryTraceToken,
             at: new Date().toISOString(),
           },
           ...prev,
@@ -221,7 +304,7 @@ export function ConsolePage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <label className="mb-1 block text-sm font-medium">Channel</label>
+              <Label>Channel</Label>
               <Select
                 value={channel}
                 onChange={(e) => onChannelChange(e.target.value)}
@@ -239,7 +322,7 @@ export function ConsolePage() {
             {restMode && (
               <div className="flex gap-2">
                 <div className="w-32">
-                  <label className="mb-1 block text-sm font-medium">Method</label>
+                  <Label>Method</Label>
                   <Select value={method} onChange={(e) => setMethod(e.target.value)}>
                     {((selected?.methods?.length ?? 0) > 0
                       ? selected!.methods!.map((m) => m.toUpperCase())
@@ -250,7 +333,7 @@ export function ConsolePage() {
                   </Select>
                 </div>
                 <div className="flex-1">
-                  <label className="mb-1 block text-sm font-medium">Path</label>
+                  <Label>Path</Label>
                   <Input
                     value={path}
                     onChange={(e) => setPath(e.target.value)}
@@ -268,7 +351,7 @@ export function ConsolePage() {
             {!bodyless && (
               <div>
                 <div className="mb-1 flex items-center justify-between">
-                  <label className="block text-sm font-medium">JSON Payload</label>
+                  <Label className="mb-0">JSON Payload</Label>
                   <button
                     type="button"
                     onClick={() => setPayload(SAMPLE_PAYLOAD)}
@@ -292,26 +375,16 @@ export function ConsolePage() {
                 <Badge variant="outline">REST · Sync</Badge>
               ) : (
                 <>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={sync}
-                      onChange={(e) => setSync(e.target.checked)}
-                      className="rounded"
-                    />
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <Checkbox checked={sync} onCheckedChange={setSync} aria-label="Synchronous" />
                     Synchronous
                   </label>
                   <Badge variant="outline">{sync ? "Sync" : "Async"}</Badge>
                 </>
               )}
               {(restMode || sync) && (
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={profile}
-                    onChange={(e) => setProfile(e.target.checked)}
-                    className="rounded"
-                  />
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox checked={profile} onCheckedChange={setProfile} aria-label="Profile" />
                   Profile
                 </label>
               )}
@@ -329,9 +402,9 @@ export function ConsolePage() {
             )}
 
             {error && (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              <Callout variant="destructive">
                 {error}
-              </div>
+              </Callout>
             )}
           </CardContent>
         </Card>
@@ -343,15 +416,24 @@ export function ConsolePage() {
                 Response
                 {traceId && (
                   <Button variant="outline" size="sm" asChild>
-                    <Link to={`/traces/${traceId}`}>
+                    <Link to={traceLink(traceId, traceToken)}>
                       <ExternalLink className="h-3.5 w-3.5" /> Open as trace
                     </Link>
                   </Button>
                 )}
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              {result ? (
+            <CardContent className="space-y-3">
+              {taskErrors.length > 0 && <TaskErrors errors={taskErrors} requestId={result?.request_id} />}
+              {receipt ? (
+                <div className="space-y-2">
+                  <p className="text-sm">
+                    Accepted for asynchronous processing. The result is not returned here — follow
+                    the trace.
+                  </p>
+                  <JsonViewer data={receipt} maxHeight="200px" />
+                </div>
+              ) : result ? (
                 <JsonViewer data={result} maxHeight="500px" />
               ) : (
                 <p className="text-sm text-muted-foreground">

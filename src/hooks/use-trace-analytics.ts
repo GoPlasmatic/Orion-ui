@@ -1,18 +1,20 @@
 import { useMemo } from "react"
 import { useTraces } from "@/hooks/use-traces"
-import { parseJson } from "@/lib/utils"
-import type { ExecutionStep } from "@/api/types"
 
-// Aggregates recent traces (the list endpoint returns populated task_trace_json)
-// into task- and channel-level summaries. Per-task durations are NOT available on
-// the wire, so "slowest tasks" is intentionally out of scope.
-
-export interface TaskStat {
-  task: string
-  executed: number
-  skipped: number
-  error: number
-}
+/**
+ * Aggregates recent traces into channel-level summaries.
+ *
+ * Per-task statistics used to be derived here from each row's
+ * `task_trace_json`. Since 1.0 the trace list is a payload-free projection —
+ * `task_trace_json`, `input_json` and `result_json` are returned only by
+ * `GET admin/traces/{id}` — so per-task aggregation would need one detail
+ * request per row (up to 500 per render). It is out of scope rather than
+ * silently reporting zeros; the per-task view lives on a single trace's detail
+ * page, which has the data.
+ *
+ * `total` is computed from the rows actually fetched, so this never needs
+ * `include_total` and never pays for the count.
+ */
 
 export interface ChannelStat {
   channel: string
@@ -20,14 +22,6 @@ export interface ChannelStat {
   errorPct: number
   avgMs: number | null
   p95Ms: number | null
-}
-
-function extractSteps(raw: unknown): ExecutionStep[] {
-  if (Array.isArray(raw)) return raw as ExecutionStep[]
-  if (raw && typeof raw === "object" && Array.isArray((raw as { steps?: unknown }).steps)) {
-    return (raw as { steps: ExecutionStep[] }).steps
-  }
-  return []
 }
 
 function percentile(sorted: number[], p: number): number | null {
@@ -45,13 +39,10 @@ export function useTraceAnalytics(window: number) {
 
   return useMemo(() => {
     const rows = data?.data ?? []
-    const taskMap = new Map<string, TaskStat>()
     const channelDurations = new Map<string, number[]>()
     const channelAgg = new Map<string, { volume: number; failed: number }>()
-    let coverage = 0
 
     for (const row of rows) {
-      // channel-level (trace-level fields)
       const ch = channelAgg.get(row.channel) ?? { volume: 0, failed: 0 }
       ch.volume++
       if (row.status === "failed") ch.failed++
@@ -61,28 +52,7 @@ export function useTraceAnalytics(window: number) {
         arr.push(row.duration_ms)
         channelDurations.set(row.channel, arr)
       }
-
-      // task-level (from task_trace_json steps)
-      const steps = extractSteps(parseJson(row.task_trace_json))
-      if (steps.length > 0) coverage++
-      for (const step of steps) {
-        const key = step.task_id || step.task_name || step.function || "unknown"
-        const stat = taskMap.get(key) ?? { task: key, executed: 0, skipped: 0, error: 0 }
-        const result = typeof step.result === "string" ? step.result.toLowerCase() : ""
-        if (result === "error") stat.error++
-        else if (result === "skipped") stat.skipped++
-        else stat.executed++
-        taskMap.set(key, stat)
-      }
     }
-
-    const tasks = [...taskMap.values()].sort(
-      (a, b) =>
-        b.error - a.error ||
-        b.executed + b.skipped - (a.executed + a.skipped) ||
-        a.task.localeCompare(b.task),
-    )
-    const errorsByTask = tasks.filter((t) => t.error > 0)
 
     const channels: ChannelStat[] = [...channelAgg.entries()]
       .map(([channel, { volume, failed }]) => {
@@ -98,13 +68,12 @@ export function useTraceAnalytics(window: number) {
       })
       .sort((a, b) => b.volume - a.volume || a.channel.localeCompare(b.channel))
 
+    const failed = rows.filter((r) => r.status === "failed").length
+
     return {
       isLoading,
       total: rows.length,
-      coverage, // traces that carried per-task detail
-      taskAvailable: coverage > 0,
-      tasks,
-      errorsByTask,
+      failed,
       channels,
     }
   }, [data?.data, isLoading])

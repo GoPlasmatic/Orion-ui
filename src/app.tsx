@@ -19,9 +19,11 @@ import { ConnectorDetailPage } from "@/pages/connector-detail"
 import { ConnectorFormPage } from "@/pages/connector-form"
 import { CircuitBreakersPage } from "@/pages/circuit-breakers"
 import { TracesPage } from "@/pages/traces"
+import { TraceDlqPage } from "@/pages/trace-dlq"
 import { TraceDetailPage } from "@/pages/trace-detail"
 import { AuditPage } from "@/pages/audit"
 import { ConsolePage } from "@/pages/console"
+import { PackagesPage } from "@/pages/packages"
 import { SettingsPage } from "@/pages/settings"
 
 const queryClient = new QueryClient({
@@ -66,8 +68,10 @@ export default function App() {
               <Route path="circuit-breakers" element={<CircuitBreakersPage />} />
               <Route path="traces" element={<TracesPage />} />
               <Route path="traces/:id" element={<TraceDetailPage />} />
+              <Route path="trace-dlq" element={<TraceDlqPage />} />
               <Route path="audit" element={<AuditPage />} />
               <Route path="console" element={<ConsolePage />} />
+              <Route path="packages" element={<PackagesPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
           </Routes>

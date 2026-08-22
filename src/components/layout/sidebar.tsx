@@ -7,6 +7,8 @@ import {
   GitBranch,
   Plug,
   Activity,
+  Inbox,
+  Package,
   ZapOff,
   FileText,
   FunctionSquare,
@@ -26,12 +28,14 @@ const navSections = [
       { to: "/workflows", icon: GitBranch, label: "Workflows" },
       { to: "/connectors", icon: Plug, label: "Connectors" },
       { to: "/functions", icon: FunctionSquare, label: "Functions" },
+      { to: "/packages", icon: Package, label: "Packages" },
     ],
   },
   {
     label: "Monitoring",
     items: [
       { to: "/traces", icon: Activity, label: "Traces" },
+      { to: "/trace-dlq", icon: Inbox, label: "Trace DLQ" },
       { to: "/circuit-breakers", icon: ZapOff, label: "Circuit Breakers" },
       { to: "/audit", icon: FileText, label: "Audit Log" },
     ],
@@ -47,10 +51,10 @@ const navSections = [
 
 export function Sidebar() {
   return (
-    <aside className="flex h-full w-60 flex-col border-r border-sidebar-border bg-sidebar">
+    <aside className="flex h-full w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
       <NavLink
         to="/"
-        className="flex h-14 items-center gap-2.5 border-b border-sidebar-border px-4 transition-colors hover:bg-sidebar-accent/50"
+        className="flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-4 transition-colors outline-none hover:bg-sidebar-accent/60 focus-visible:ring-2 focus-visible:ring-sidebar-ring/60 focus-visible:ring-inset"
       >
         <img
           src="/orion-logo.svg"
@@ -65,7 +69,7 @@ export function Sidebar() {
         {navSections.map((section, i) => (
           <div key={section.label ?? i} className="space-y-1">
             {section.label && (
-              <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
+              <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/60">
                 {section.label}
               </p>
             )}
@@ -76,14 +80,18 @@ export function Sidebar() {
                 end={item.to === "/"}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    // The left rail is drawn with a ::before bar so the active
+                    // item reads at a glance without shifting the label.
+                    "relative flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors outline-none",
+                    "before:absolute before:left-0 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-r-full before:bg-sidebar-primary before:transition-opacity",
+                    "focus-visible:ring-2 focus-visible:ring-sidebar-ring/60",
                     isActive
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground before:opacity-100"
+                      : "text-sidebar-foreground/80 before:opacity-0 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
                   )
                 }
               >
-                <item.icon className="h-4 w-4" />
+                <item.icon className="h-4 w-4 shrink-0" />
                 {item.label}
               </NavLink>
             ))}

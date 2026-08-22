@@ -8,20 +8,24 @@ import {
   flexRender,
   createColumnHelper,
 } from "@tanstack/react-table"
-import type { Connector, ConnectorType, CreateConnectorRequest } from "@/api/types"
+import type { ConnectorListItem, ConnectorType, CreateConnectorRequest } from "@/api/types"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
+import { toast } from "sonner"
+import { connectorsApi } from "@/api/connectors"
 import { PageHeader } from "@/components/shared/page-header"
+import { PaginationFooter } from "@/components/shared/pagination"
+import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
 import { EmptyState } from "@/components/shared/empty-state"
+import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
 import { enabledBadgeClass, disabledBadgeClass } from "@/lib/status"
-import { formatDate } from "@/lib/utils"
-import { ChevronLeft, ChevronRight, Plug, Plus, RefreshCw, Upload } from "lucide-react"
+import { formatDate, downloadJson } from "@/lib/utils"
+import { Download, Plug, Plus, RefreshCw, Upload } from "lucide-react"
 
-const PAGE_SIZE = 20
-const columnHelper = createColumnHelper<Connector>()
+const columnHelper = createColumnHelper<ConnectorListItem>()
 
 const columns = [
   columnHelper.accessor("name", {
@@ -45,6 +49,30 @@ const columns = [
       </Badge>
     ),
   }),
+  // A connector can be enabled and still not be serving — an unresolvable
+  // env:// reference, an unreachable host at load. Without this the failure is
+  // invisible until a workflow using it errors.
+  columnHelper.accessor("load_status", {
+    header: "Load",
+    cell: (info) => {
+      const status = info.getValue()
+      const row = info.row.original
+      if (status === "loaded") {
+        return <span className="text-xs text-muted-foreground">Loaded</span>
+      }
+      if (status === "disabled") {
+        return <span className="text-xs text-muted-foreground">Disabled</span>
+      }
+      return (
+        <Badge
+          variant="destructive"
+          title={[row.load_error_stage, row.load_error].filter(Boolean).join(": ")}
+        >
+          Failed
+        </Badge>
+      )
+    },
+  }),
   columnHelper.accessor("updated_at", {
     header: "Updated",
     cell: (info) => <span className="text-muted-foreground">{formatDate(info.getValue())}</span>,
@@ -53,9 +81,31 @@ const columns = [
 
 export function ConnectorsPage() {
   const navigate = useNavigate()
-  const [offset, setOffset] = useState(0)
+  const { offset, reset: resetPage, prev, next } = usePagination()
   const [typeFilter, setTypeFilter] = useState<ConnectorType | "">("")
   const [showImport, setShowImport] = useState(false)
+  const [exporting, setExporting] = useState(false)
+
+  /**
+   * Exports in the shape /import accepts, with secrets masked. Only connectors
+   * authored with env:// or vault:// references round-trip — a literal
+   * credential exports as "******" and is refused on import, so the bundle is
+   * safe to commit but is not a backup of the secrets themselves.
+   */
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const connectors = await connectorsApi.export({})
+      downloadJson(connectors, "orion-connectors")
+      toast.success(
+        `Exported ${connectors.length} connector${connectors.length !== 1 ? "s" : ""} — secrets masked`
+      )
+    } catch (e) {
+      toast.error("Export failed", { description: e instanceof Error ? e.message : undefined })
+    } finally {
+      setExporting(false)
+    }
+  }
   const reloadConnectors = useReloadConnectors()
   const importConnectors = useImportConnectors()
 
@@ -75,9 +125,6 @@ export function ConnectorsPage() {
     getCoreRowModel: getCoreRowModel(),
   })
 
-  const total = data?.total ?? 0
-  const hasNext = offset + PAGE_SIZE < total
-  const hasPrev = offset > 0
 
   return (
     <div className="space-y-6">
@@ -89,6 +136,10 @@ export function ConnectorsPage() {
         >
           <RefreshCw className={`h-4 w-4 ${reloadConnectors.isPending ? "animate-spin" : ""}`} />
           Reload All
+        </Button>
+        <Button variant="outline" onClick={handleExport} disabled={exporting}>
+          <Download className="h-4 w-4" />
+          {exporting ? "Exporting..." : "Export"}
         </Button>
         <Button variant="outline" onClick={() => setShowImport(true)}>
           <Upload className="h-4 w-4" />
@@ -103,20 +154,21 @@ export function ConnectorsPage() {
       {showImport && (
         <ImportDialog
           title="Import Connectors"
-          onImport={(items, dryRun) =>
-            importConnectors.mutateAsync({ items: items as CreateConnectorRequest[], dryRun })
+          onImport={(items, opts) =>
+            importConnectors.mutateAsync({ items: items as CreateConnectorRequest[], ...opts })
           }
           onClose={() => setShowImport(false)}
         />
       )}
 
-      <div className="flex items-center gap-3">
+      <FilterBar>
         <Select
           value={typeFilter}
           onChange={(e) => {
             setTypeFilter(e.target.value as ConnectorType | "")
-            setOffset(0)
+            resetPage()
           }}
+          className={FILTER_W}
         >
           <option value="">All types</option>
           <option value="http">HTTP</option>
@@ -126,9 +178,9 @@ export function ConnectorsPage() {
           <option value="storage">Storage</option>
           <option value="es">Elasticsearch</option>
         </Select>
-      </div>
+      </FilterBar>
 
-      <div className="rounded-md border">
+      <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -189,19 +241,13 @@ export function ConnectorsPage() {
         </Table>
       </div>
 
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {total > 0 ? `${offset + 1}--${Math.min(offset + PAGE_SIZE, total)} of ${total}` : "No results"}
-        </p>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={!hasPrev} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" disabled={!hasNext} onClick={() => setOffset(offset + PAGE_SIZE)}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <PaginationFooter
+        offset={offset}
+        count={rows.length}
+        total={data?.total}
+        onPrev={prev}
+        onNext={next}
+      />
     </div>
   )
 }

@@ -15,14 +15,16 @@ import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
+import { PaginationFooter } from "@/components/shared/pagination"
+import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { TraceAnalytics } from "@/components/traces/trace-analytics"
 import { EmptyState } from "@/components/shared/empty-state"
+import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
 import { formatDate, formatDuration } from "@/lib/utils"
 import { traceStatusBadgeClass } from "@/lib/status"
-import { ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Activity } from "lucide-react"
+import { ArrowUpDown, ArrowUp, ArrowDown, Activity } from "lucide-react"
 
-const PAGE_SIZE = 20
 
 const columnHelper = createColumnHelper<Trace>()
 
@@ -70,16 +72,20 @@ const sortableColumns: Record<string, TraceSortBy> = {
 
 export function TracesPage() {
   const navigate = useNavigate()
-  const [offset, setOffset] = useState(0)
+  const { offset, reset: resetPage, prev, next } = usePagination()
   const [sortBy, setSortBy] = useState<TraceSortBy>("created_at")
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc")
   const [statusFilter, setStatusFilter] = useState("")
   const [channelFilter, setChannelFilter] = useState("")
   const [modeFilter, setModeFilter] = useState("")
 
+  // This page shows a count, so it opts into the total explicitly — every other
+  // trace read (analytics, the operations dashboard) leaves it off and does not
+  // pay for the scan.
   const { data, isLoading } = useTraces({
     limit: PAGE_SIZE,
     offset,
+    include_total: true,
     sort_by: sortBy,
     sort_order: sortOrder,
     status: statusFilter || undefined,
@@ -93,10 +99,6 @@ export function TracesPage() {
     getCoreRowModel: getCoreRowModel(),
   })
 
-  const total = data?.total ?? 0
-  const hasNext = offset + PAGE_SIZE < total
-  const hasPrev = offset > 0
-
   function handleSort(columnId: string) {
     const field = sortableColumns[columnId]
     if (!field) return
@@ -106,7 +108,7 @@ export function TracesPage() {
       setSortBy(field)
       setSortOrder("desc")
     }
-    setOffset(0)
+    resetPage()
   }
 
   function SortIcon({ columnId }: { columnId: string }) {
@@ -129,13 +131,14 @@ export function TracesPage() {
         </TabsList>
 
         <TabsContent value="list" className="space-y-6">
-      <div className="flex items-center gap-3">
+      <FilterBar>
         <Select
           value={statusFilter}
           onChange={(e) => {
             setStatusFilter(e.target.value)
-            setOffset(0)
+            resetPage()
           }}
+          className={FILTER_W}
         >
           <option value="">All statuses</option>
           <option value="pending">Pending</option>
@@ -148,7 +151,7 @@ export function TracesPage() {
           value={channelFilter}
           onChange={(e) => {
             setChannelFilter(e.target.value)
-            setOffset(0)
+            resetPage()
           }}
           className="w-48"
         />
@@ -156,16 +159,17 @@ export function TracesPage() {
           value={modeFilter}
           onChange={(e) => {
             setModeFilter(e.target.value)
-            setOffset(0)
+            resetPage()
           }}
+          className={FILTER_W}
         >
           <option value="">All modes</option>
           <option value="sync">Sync</option>
           <option value="async">Async</option>
         </Select>
-      </div>
+      </FilterBar>
 
-      <div className="rounded-md border">
+      <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -229,19 +233,13 @@ export function TracesPage() {
         </Table>
       </div>
 
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {total > 0 ? `${offset + 1}--${Math.min(offset + PAGE_SIZE, total)} of ${total}` : "No results"}
-        </p>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={!hasPrev} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" disabled={!hasNext} onClick={() => setOffset(offset + PAGE_SIZE)}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <PaginationFooter
+        offset={offset}
+        count={data?.data.length ?? 0}
+        total={data?.total}
+        onPrev={prev}
+        onNext={next}
+      />
         </TabsContent>
 
         <TabsContent value="analytics">

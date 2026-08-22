@@ -1,9 +1,14 @@
 import * as React from "react"
+import { DataLogicEditor } from "@goplasmatic/datalogic-ui"
+import { Plus, Trash2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import type { JsonLogicValue } from "@/api/types"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
 
 /** A titled group of related config fields. */
 export function ConfigSection({
@@ -30,9 +35,9 @@ export function ConfigSection({
 
 function FieldLabel({ label, htmlFor }: { label: string; htmlFor?: string }) {
   return (
-    <label htmlFor={htmlFor} className="mb-1 block text-sm font-medium">
+    <Label htmlFor={htmlFor}>
       {label}
-    </label>
+    </Label>
   )
 }
 
@@ -187,6 +192,54 @@ export function StringListField({
         }}
       />
       <p className="mt-1 text-xs text-muted-foreground">Comma-separated</p>
+    </div>
+  )
+}
+
+/**
+ * Editable JSONLogic block with add/remove affordances. Absent logic stays
+ * absent (no editor rendered) until the operator explicitly adds it, so unset
+ * config keys are not written back as empty expressions.
+ */
+export function LogicField({
+  logic,
+  onChange,
+  addLabel,
+  starter,
+  theme,
+}: {
+  logic: JsonLogicValue | undefined
+  onChange: (next: JsonLogicValue | undefined) => void
+  addLabel: string
+  starter: JsonLogicValue
+  theme: "light" | "dark"
+}) {
+  if (logic === undefined || logic === null) {
+    return (
+      <Button type="button" variant="outline" size="sm" onClick={() => onChange(starter)}>
+        <Plus className="h-3.5 w-3.5" /> {addLabel}
+      </Button>
+    )
+  }
+  return (
+    <div className="space-y-2">
+      <div className="h-64 overflow-hidden rounded-md border">
+        <DataLogicEditor
+          value={logic}
+          editable
+          onChange={(expr) => onChange((expr ?? undefined) as JsonLogicValue | undefined)}
+          theme={theme}
+        />
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="text-muted-foreground hover:text-destructive"
+        onClick={() => onChange(undefined)}
+      >
+        <Trash2 className="h-3.5 w-3.5" /> Remove
+      </Button>
     </div>
   )
 }

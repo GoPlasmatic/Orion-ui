@@ -1,5 +1,10 @@
 import { useParams, Link, useNavigate } from "react-router"
-import { useConnector, useDeleteConnector, useCircuitBreakers, useResetCircuitBreaker } from "@/hooks/use-connectors"
+import {
+  useConnector,
+  useDeleteConnector,
+  useCircuitBreakers,
+  useResetCircuitBreaker,
+} from "@/hooks/use-connectors"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -8,9 +13,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { RelationshipGraph } from "@/components/graph/relationship-graph"
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
-import { formatDate, parseJson } from "@/lib/utils"
+import { ConnectorTestDialog } from "@/components/shared/connector-test-dialog"
+import { formatDate } from "@/lib/utils"
 import { enabledBadgeClass, disabledBadgeClass, breakerStateBadgeClass } from "@/lib/status"
-import { ArrowLeft, AlertCircle, Trash2, RefreshCw, Pencil } from "lucide-react"
+import { ArrowLeft, AlertCircle, Trash2, RefreshCw, Pencil, Activity } from "lucide-react"
 import { useState } from "react"
 
 export function ConnectorDetailPage() {
@@ -21,6 +27,7 @@ export function ConnectorDetailPage() {
   const deleteConnector = useDeleteConnector()
   const resetBreaker = useResetCircuitBreaker()
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showTest, setShowTest] = useState(false)
 
   if (isLoading) {
     return (
@@ -67,6 +74,14 @@ export function ConnectorDetailPage() {
           </Badge>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowTest(true)}
+          >
+            <Activity className="h-3.5 w-3.5" />
+            Test
+          </Button>
           <Button variant="outline" size="sm" asChild>
             <Link to={`/connectors/${connector.id}/edit`}>
               <Pencil className="h-3.5 w-3.5" />
@@ -102,7 +117,7 @@ export function ConnectorDetailPage() {
             Secret fields (passwords, tokens, API keys) are masked by the server.
           </p>
           <JsonViewer
-            data={parseJson(connector.config_json)}
+            data={connector.config}
             label="Connector Configuration"
             maxHeight="32rem"
           />
@@ -153,6 +168,10 @@ export function ConnectorDetailPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      {showTest && (
+        <ConnectorTestDialog connector={connector} onClose={() => setShowTest(false)} />
+      )}
 
       {showDeleteConfirm && (
         <ConfirmDialog

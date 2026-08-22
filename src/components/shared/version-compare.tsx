@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import type { PaginatedResponse, Workflow } from "@/api/types"
 import { Select } from "@/components/ui/select"
+import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 
 interface VersionCompareProps {
@@ -91,7 +92,7 @@ export function VersionCompare({ versions, isLoading }: VersionCompareProps) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Base</label>
+          <Label className="text-xs text-muted-foreground">Base</Label>
           <Select value={lv ?? ""} onChange={(e) => setLeftV(Number(e.target.value))} className="w-32">
             {sorted.map((w) => (
               <option key={w.version} value={w.version}>
@@ -101,7 +102,7 @@ export function VersionCompare({ versions, isLoading }: VersionCompareProps) {
           </Select>
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Compare</label>
+          <Label className="text-xs text-muted-foreground">Compare</Label>
           <Select value={rv ?? ""} onChange={(e) => setRightV(Number(e.target.value))} className="w-32">
             {sorted.map((w) => (
               <option key={w.version} value={w.version}>
@@ -121,7 +122,7 @@ export function VersionCompare({ versions, isLoading }: VersionCompareProps) {
             key={i}
             className={cn(
               "whitespace-pre-wrap px-1 font-mono",
-              d.type === "add" && "bg-chart-2/15 text-chart-2",
+              d.type === "add" && "bg-success/15 text-success",
               d.type === "del" && "bg-destructive/15 text-destructive"
             )}
           >

@@ -4,6 +4,7 @@ import { connectorsApi } from "@/api/connectors"
 import { engineApi } from "@/api/engine"
 import type {
   CreateConnectorRequest,
+  ImportOptions,
   ListConnectorsParams,
   UpdateConnectorRequest,
 } from "@/api/types"
@@ -63,18 +64,35 @@ export function useDeleteConnector() {
   })
 }
 
+/** Untoasted — the validation envelope renders inline in the form. */
+export function useValidateConnector() {
+  return useMutation({
+    mutationFn: (req: CreateConnectorRequest) => connectorsApi.validate(req),
+  })
+}
+
+/**
+ * Probe a saved connector. Untoasted: an unreachable backend is a legitimate
+ * 200 answer that the page renders, not a mutation failure.
+ */
+export function useTestConnector() {
+  return useMutation({
+    mutationFn: (id: string) => connectorsApi.test(id),
+  })
+}
+
 export function useImportConnectors() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ items, dryRun }: { items: CreateConnectorRequest[]; dryRun?: boolean }) =>
-      connectorsApi.import(items, dryRun),
+    mutationFn: ({ items, ...opts }: { items: CreateConnectorRequest[] } & ImportOptions) =>
+      connectorsApi.import(items, opts),
     onSuccess: (_data, vars) => {
       if (!vars.dryRun) queryClient.invalidateQueries({ queryKey: ["connectors"] })
     },
   })
 }
 
-// v0.2 has no dedicated connectors-reload endpoint; connector mutations reload
+// There is no dedicated connectors-reload endpoint; connector mutations reload
 // the registry server-side. This triggers a full engine reload for the manual
 // "reload" affordance still surfaced in the UI.
 export function useReloadConnectors() {

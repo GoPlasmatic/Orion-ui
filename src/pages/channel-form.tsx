@@ -1,6 +1,11 @@
 import { useState } from "react"
 import { Link, useNavigate, useParams } from "react-router"
-import { useChannel, useCreateChannel, useUpdateChannel } from "@/hooks/use-channels"
+import {
+  useChannel,
+  useCreateChannel,
+  useUpdateChannel,
+  useValidateChannel,
+} from "@/hooks/use-channels"
 import type {
   Channel,
   ChannelConfig,
@@ -8,6 +13,7 @@ import type {
   ChannelType,
   CreateChannelRequest,
   UpdateChannelRequest,
+  ValidationResponse,
 } from "@/api/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -16,9 +22,12 @@ import { Select } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
+import { Callout } from "@/components/ui/callout"
 import { PageHeader } from "@/components/shared/page-header"
+import { ValidationResults } from "@/components/shared/validation-results"
 import { ChannelConfigEditor } from "@/components/shared/channel-config-editor"
-import { ArrowLeft, Save } from "lucide-react"
+import { ArrowLeft, Save, ShieldCheck } from "lucide-react"
 
 const CHANNEL_TYPES: ChannelType[] = ["sync", "async"]
 const PROTOCOLS: ChannelProtocol[] = ["rest", "http", "kafka"]
@@ -28,6 +37,7 @@ function ChannelForm({ existing }: { existing?: Channel }) {
   const navigate = useNavigate()
   const createChannel = useCreateChannel()
   const updateChannel = useUpdateChannel()
+  const validateChannel = useValidateChannel()
 
   const [name, setName] = useState(existing?.name ?? "")
   const [description, setDescription] = useState(existing?.description ?? "")
@@ -46,15 +56,19 @@ function ChannelForm({ existing }: { existing?: Channel }) {
   })
   const [transportError, setTransportError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [validation, setValidation] = useState<ValidationResponse | null>(null)
 
   const backTo = existing ? `/channels/${existing.channel_id}` : "/channels"
 
-  const handleSubmit = () => {
-    setError(null)
-
+  /**
+   * Assemble the request, or return null after setting `error`. Shared by Save
+   * and Validate so Validate checks exactly what Save would send — a validator
+   * run against a different payload is worse than no validator.
+   */
+  const buildPayload = (): CreateChannelRequest | null => {
     if (!name.trim()) {
       setError("Name is required")
-      return
+      return null
     }
 
     const methodList = methods
@@ -68,16 +82,16 @@ function ChannelForm({ existing }: { existing?: Channel }) {
         const parsed = JSON.parse(transportConfig)
         if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
           setError("Transport config must be a JSON object")
-          return
+          return null
         }
         transport = parsed as Record<string, unknown>
       } catch {
         setError("Transport config is not valid JSON")
-        return
+        return null
       }
     }
 
-    const common = {
+    return {
       name,
       description: description || undefined,
       methods: methodList.length > 0 ? methodList : undefined,
@@ -88,10 +102,44 @@ function ChannelForm({ existing }: { existing?: Channel }) {
       workflow_id: workflowId || undefined,
       config,
       priority: Number(priority) || 0,
+      channel_type: channelType,
+      protocol,
     }
+  }
+
+  const handleValidate = () => {
+    setError(null)
+    setValidation(null)
+    const payload = buildPayload()
+    if (!payload) return
+    validateChannel.mutate(payload, {
+      onSuccess: setValidation,
+      onError: (e) => setError(e instanceof Error ? e.message : "Validation failed"),
+    })
+  }
+
+  const handleSubmit = () => {
+    setError(null)
+    setValidation(null)
+
+    const payload = buildPayload()
+    if (!payload) return
 
     if (existing) {
-      const req: UpdateChannelRequest = common
+      // channel_type and protocol are immutable after create, so an update
+      // sends only the mutable subset.
+      const req: UpdateChannelRequest = {
+        name: payload.name,
+        description: payload.description,
+        methods: payload.methods,
+        route_pattern: payload.route_pattern,
+        topic: payload.topic,
+        consumer_group: payload.consumer_group,
+        transport_config: payload.transport_config,
+        workflow_id: payload.workflow_id,
+        config: payload.config,
+        priority: payload.priority,
+      }
       updateChannel.mutate(
         { id: existing.channel_id, req },
         {
@@ -100,8 +148,7 @@ function ChannelForm({ existing }: { existing?: Channel }) {
         }
       )
     } else {
-      const req: CreateChannelRequest = { ...common, channel_type: channelType, protocol }
-      createChannel.mutate(req, {
+      createChannel.mutate(payload, {
         onSuccess: (c) => navigate(`/channels/${c.channel_id}`),
         onError: (e) => setError(e instanceof Error ? e.message : "Create failed"),
       })
@@ -129,7 +176,7 @@ function ChannelForm({ existing }: { existing?: Channel }) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">Name</label>
+            <Label>Name</Label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -139,13 +186,13 @@ function ChannelForm({ existing }: { existing?: Channel }) {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium">Description</label>
+            <Label>Description</Label>
             <Input value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="mb-1 block text-sm font-medium">Type</label>
+              <Label>Type</Label>
               {isEdit ? (
                 <div className="pt-1"><Badge variant="outline">{channelType}</Badge></div>
               ) : (
@@ -157,7 +204,7 @@ function ChannelForm({ existing }: { existing?: Channel }) {
               )}
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium">Protocol</label>
+              <Label>Protocol</Label>
               {isEdit ? (
                 <div className="pt-1"><Badge variant="outline" className="uppercase">{protocol}</Badge></div>
               ) : (
@@ -172,7 +219,7 @@ function ChannelForm({ existing }: { existing?: Channel }) {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="mb-1 block text-sm font-medium">Methods</label>
+              <Label>Methods</Label>
               <Input
                 value={methods}
                 onChange={(e) => setMethods(e.target.value)}
@@ -181,13 +228,13 @@ function ChannelForm({ existing }: { existing?: Channel }) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium">Priority</label>
+              <Label>Priority</Label>
               <Input type="number" value={priority} onChange={(e) => setPriority(e.target.value)} />
             </div>
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium">Route Pattern</label>
+            <Label>Route Pattern</Label>
             <Input
               value={routePattern}
               onChange={(e) => setRoutePattern(e.target.value)}
@@ -199,11 +246,11 @@ function ChannelForm({ existing }: { existing?: Channel }) {
           {protocol === "kafka" && (
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="mb-1 block text-sm font-medium">Topic</label>
+                <Label>Topic</Label>
                 <Input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="orders-in" />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium">Consumer Group</label>
+                <Label>Consumer Group</Label>
                 <Input value={consumerGroup} onChange={(e) => setConsumerGroup(e.target.value)} placeholder="orion" />
               </div>
             </div>
@@ -211,7 +258,7 @@ function ChannelForm({ existing }: { existing?: Channel }) {
 
           {(protocol === "kafka" || transportConfig.trim() !== "") && (
             <div>
-              <label className="mb-1 block text-sm font-medium">Transport Config</label>
+              <Label>Transport Config</Label>
               <p className="mb-1 text-xs text-muted-foreground">
                 Protocol-specific transport settings as JSON
                 {protocol === "kafka" ? " (e.g. brokers, offsets, security)" : ""}. Leave empty to keep unset.
@@ -240,7 +287,7 @@ function ChannelForm({ existing }: { existing?: Channel }) {
           )}
 
           <div>
-            <label className="mb-1 block text-sm font-medium">Linked Workflow ID</label>
+            <Label>Linked Workflow ID</Label>
             <Input
               value={workflowId}
               onChange={(e) => setWorkflowId(e.target.value)}
@@ -250,15 +297,21 @@ function ChannelForm({ existing }: { existing?: Channel }) {
 
           <ChannelConfigEditor value={config} onChange={setConfig} />
 
+          {validation && <ValidationResults result={validation} validLabel="Channel is valid." />}
+
           {error && (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            <Callout variant="destructive">
               {error}
-            </div>
+            </Callout>
           )}
 
           <div className="flex justify-end gap-2">
             <Button variant="outline" asChild>
               <Link to={backTo}>Cancel</Link>
+            </Button>
+            <Button variant="outline" onClick={handleValidate} disabled={validateChannel.isPending}>
+              <ShieldCheck className="h-4 w-4" />
+              {validateChannel.isPending ? "Validating..." : "Validate"}
             </Button>
             <Button onClick={handleSubmit} disabled={isPending}>
               <Save className="h-4 w-4" />

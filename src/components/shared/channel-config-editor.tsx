@@ -1,8 +1,9 @@
-import { DataLogicEditor } from "@goplasmatic/datalogic-ui"
+import { BUILTIN_KEY_HEADERS } from "@/api/types"
 import type { ChannelConfig, JsonLogicValue } from "@/api/types"
 import { useTheme } from "@/lib/use-theme"
-import { Button } from "@/components/ui/button"
 import { ConfigEditorShell } from "@/components/shared/config-editor-shell"
+import { ChannelAuthEditor } from "@/components/shared/channel-auth-editor"
+import { Callout } from "@/components/ui/callout"
 import {
   ConfigSection,
   NumberField,
@@ -10,56 +11,8 @@ import {
   SelectField,
   ToggleField,
   StringListField,
+  LogicField,
 } from "@/components/shared/config-field"
-import { Plus, Trash2 } from "lucide-react"
-
-/**
- * Editable JSONLogic block with add/remove affordances. Absent logic stays
- * absent (no editor rendered) until the operator explicitly adds it, so unset
- * config keys are not written back as empty expressions.
- */
-function LogicField({
-  logic,
-  onChange,
-  addLabel,
-  starter,
-  theme,
-}: {
-  logic: JsonLogicValue | undefined
-  onChange: (next: JsonLogicValue | undefined) => void
-  addLabel: string
-  starter: JsonLogicValue
-  theme: "light" | "dark"
-}) {
-  if (logic === undefined || logic === null) {
-    return (
-      <Button type="button" variant="outline" size="sm" onClick={() => onChange(starter)}>
-        <Plus className="h-3.5 w-3.5" /> {addLabel}
-      </Button>
-    )
-  }
-  return (
-    <div className="space-y-2">
-      <div className="h-64 overflow-hidden rounded-md border">
-        <DataLogicEditor
-          value={logic}
-          editable
-          onChange={(expr) => onChange((expr ?? undefined) as JsonLogicValue | undefined)}
-          theme={theme}
-        />
-      </div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="text-muted-foreground hover:text-destructive"
-        onClick={() => onChange(undefined)}
-      >
-        <Trash2 className="h-3.5 w-3.5" /> Remove
-      </Button>
-    </div>
-  )
-}
 
 interface ChannelConfigEditorProps {
   value: ChannelConfig
@@ -72,6 +25,60 @@ const TRACING_MODES = [
   { value: "batch", label: "Batch" },
   { value: "off", label: "Off" },
 ]
+
+const BODY_MODES = [
+  { value: "auto", label: "Auto — detect the Orion envelope" },
+  { value: "payload", label: "Payload — take the parsed body verbatim" },
+]
+
+const RESPONSE_MODES = [
+  { value: "envelope", label: "Envelope — fixed {id, status, data, errors}" },
+  { value: "shaped", label: "Shaped — workflow controls status, headers, body" },
+]
+
+const BACKEND_FAILURE_MODES = [
+  { value: "allow", label: "Allow (fail open)" },
+  { value: "deny", label: "Deny (503)" },
+]
+
+/**
+ * Collect `headers.<name>` paths a JSONLogic expression reads that are neither
+ * built in nor declared in `key_headers`. Matched case-insensitively, the way
+ * the server matches them.
+ */
+function findUndeclaredKeyHeaders(
+  logic: JsonLogicValue | undefined,
+  declared: string[] | undefined
+): string[] {
+  if (logic === undefined || logic === null) return []
+  const allowed = new Set<string>([
+    ...BUILTIN_KEY_HEADERS,
+    ...(declared ?? []).map((h) => h.toLowerCase()),
+  ])
+  const found = new Set<string>()
+
+  const walk = (node: JsonLogicValue) => {
+    if (Array.isArray(node)) {
+      node.forEach(walk)
+      return
+    }
+    if (node === null || typeof node !== "object") return
+    for (const [op, arg] of Object.entries(node)) {
+      if (op === "var") {
+        // `var` takes a path string, or [path, default].
+        const path = typeof arg === "string" ? arg : Array.isArray(arg) ? arg[0] : undefined
+        if (typeof path === "string" && path.toLowerCase().startsWith("headers.")) {
+          const name = path.slice("headers.".length).toLowerCase()
+          if (name && !allowed.has(name)) found.add(name)
+        }
+      }
+      walk(arg as JsonLogicValue)
+    }
+  }
+
+  walk(logic)
+  return [...found]
+}
 
 /**
  * Structured editor for the well-known ChannelConfig shape, with an "Advanced
@@ -102,14 +109,25 @@ export function ChannelConfigEditor({ value, onChange }: ChannelConfigEditorProp
 
   const rateLimit = value.rate_limit ?? {}
   const backpressure = value.backpressure ?? {}
-  const cors = value.cors ?? {}
+  const request = value.request ?? {}
+  const response = value.response ?? {}
   const cache = value.cache ?? {}
   const dedup = value.deduplication ?? {}
   const tracing = value.tracing ?? {}
 
+  // A key_logic that reads an undeclared header resolves to null, and since 1.1
+  // that is refused with 429 on every request rather than silently collapsing
+  // every caller into one bucket. Catch the typo here rather than in production.
+  const undeclaredKeyHeaders = findUndeclaredKeyHeaders(
+    rateLimit.key_logic,
+    rateLimit.key_headers
+  )
+
   return (
     <ConfigEditorShell value={value} onChange={onChange} label="Configuration">
       <div className="space-y-4">
+        <ChannelAuthEditor value={value.auth} onChange={(v) => setTop("auth", v)} />
+
         <ConfigSection title="Rate limiting" description="Throttle inbound requests.">
             <div className="grid grid-cols-2 gap-4">
               <NumberField
@@ -124,11 +142,18 @@ export function ChannelConfigEditor({ value, onChange }: ChannelConfigEditorProp
                 onChange={(v) => setSub("rate_limit", "burst", v)}
               />
             </div>
+            <SelectField
+              label="On backend error"
+              value={rateLimit.on_backend_error}
+              onChange={(v) => setSub("rate_limit", "on_backend_error", v)}
+              options={BACKEND_FAILURE_MODES}
+              includeEmpty="Allow (default)"
+            />
             <div>
               <p className="mb-1 text-sm font-medium">Key logic</p>
               <p className="mb-2 text-xs text-muted-foreground">
                 JSONLogic over {"{client_ip, channel, headers}"} that derives the rate-limit
-                bucket key — e.g. per API key or per tenant. Unset limits per client IP.
+                bucket key — e.g. per API key or per tenant. Unset limits per caller identity.
               </p>
               <LogicField
                 logic={rateLimit.key_logic}
@@ -138,21 +163,78 @@ export function ChannelConfigEditor({ value, onChange }: ChannelConfigEditorProp
                 theme={resolvedTheme}
               />
             </div>
+            {rateLimit.key_logic !== undefined && (
+              <StringListField
+                label="Key headers"
+                value={rateLimit.key_headers}
+                onChange={(v) => setSub("rate_limit", "key_headers", v)}
+                placeholder="device-id, x-partner-id"
+              />
+            )}
+            {undeclaredKeyHeaders.length > 0 && (
+              <Callout variant="destructive" icon={false} className="px-3 py-2 text-xs">
+                Key logic reads {undeclaredKeyHeaders.map((h) => `"${h}"`).join(", ")}, which is
+                not in the key context. Every request will be refused with 429 until the header is
+                added to Key headers.
+              </Callout>
+            )}
           </ConfigSection>
 
-          <ConfigSection title="Backpressure" description="Bound in-flight and queued work.">
-            <div className="grid grid-cols-2 gap-4">
-              <NumberField
-                label="Max concurrent"
-                value={backpressure.max_concurrent}
-                onChange={(v) => setSub("backpressure", "max_concurrent", v)}
-              />
-              <NumberField
-                label="Queue depth"
-                value={backpressure.queue_depth}
-                onChange={(v) => setSub("backpressure", "queue_depth", v)}
-              />
-            </div>
+          <ConfigSection
+            title="Backpressure"
+            description="Bound concurrent work on this node; excess is shed with 503."
+          >
+            <NumberField
+              label="Max concurrent per node"
+              value={backpressure.max_concurrent_per_node}
+              onChange={(v) => setSub("backpressure", "max_concurrent_per_node", v)}
+            />
+          </ConfigSection>
+
+          <ConfigSection
+            title="Request body"
+            description="How the HTTP request body becomes data and metadata."
+          >
+            <SelectField
+              label="Body mode"
+              value={request.body_mode}
+              onChange={(v) => setSub("request", "body_mode", v)}
+              options={BODY_MODES}
+              includeEmpty="Auto (default)"
+            />
+            <StringListField
+              label="Cookies to metadata"
+              value={request.cookies_to_metadata}
+              onChange={(v) => setSub("request", "cookies_to_metadata", v)}
+              placeholder="session_id, locale"
+            />
+            <p className="text-xs text-muted-foreground">
+              Named request cookies copied to <code className="font-mono">metadata.cookies.*</code>.
+              Absent exposes nothing.
+            </p>
+          </ConfigSection>
+
+          <ConfigSection
+            title="Response shaping"
+            description="Envelope, or a workflow-controlled status, headers and body."
+          >
+            <SelectField
+              label="Mode"
+              value={response.mode}
+              onChange={(v) => setSub("response", "mode", v)}
+              options={RESPONSE_MODES}
+              includeEmpty="Envelope (default)"
+            />
+            <StringListField
+              label="Allowed response headers"
+              value={response.allowed_headers}
+              onChange={(v) => setSub("response", "allowed_headers", v)}
+              placeholder="location, x-request-id"
+            />
+            <p className="text-xs text-muted-foreground">
+              <strong>Replaces</strong> the default allowlist rather than extending it, so a
+              channel can narrow it as well as widen it. Case-insensitive.
+            </p>
           </ConfigSection>
 
           <ConfigSection title="Timeout">
@@ -164,24 +246,15 @@ export function ChannelConfigEditor({ value, onChange }: ChannelConfigEditorProp
             />
           </ConfigSection>
 
-          <ConfigSection title="CORS">
+          <ConfigSection
+            title="Origins"
+            description="Server-side Origin header check. Allowed methods and headers are server-level CORS config, not per-channel."
+          >
             <StringListField
-              label="Allowed origins"
-              value={cors.allowed_origins}
-              onChange={(v) => setSub("cors", "allowed_origins", v)}
+              label="Origin allow list"
+              value={value.origin_allow_list}
+              onChange={(v) => setTop("origin_allow_list", v)}
               placeholder="https://app.example.com, *"
-            />
-            <StringListField
-              label="Allowed methods"
-              value={cors.allowed_methods}
-              onChange={(v) => setSub("cors", "allowed_methods", v)}
-              placeholder="GET, POST"
-            />
-            <StringListField
-              label="Allowed headers"
-              value={cors.allowed_headers}
-              onChange={(v) => setSub("cors", "allowed_headers", v)}
-              placeholder="Content-Type, Authorization"
             />
           </ConfigSection>
 
@@ -233,6 +306,13 @@ export function ChannelConfigEditor({ value, onChange }: ChannelConfigEditorProp
               value={dedup.connector}
               onChange={(v) => setSub("deduplication", "connector", v)}
               placeholder="idempotency-cache"
+            />
+            <SelectField
+              label="On backend error"
+              value={dedup.on_backend_error}
+              onChange={(v) => setSub("deduplication", "on_backend_error", v)}
+              options={BACKEND_FAILURE_MODES}
+              includeEmpty="Allow (default)"
             />
           </ConfigSection>
 

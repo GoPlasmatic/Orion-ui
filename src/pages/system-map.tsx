@@ -87,15 +87,21 @@ export function SystemMapPage() {
           <TopologyGraph model={model} fill onNodeClick={setNode} />
 
           {selectedNode && (
-            <div className="absolute right-3 top-3 z-10 w-64 rounded-md border bg-card/95 p-3 shadow-lg backdrop-blur">
+            <div className="absolute right-3 top-3 z-10 w-64 rounded-xl border bg-card/95 p-3 shadow-lg backdrop-blur">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <Badge variant="outline" className="text-[10px] uppercase">{selectedNode.kind}</Badge>
                   <p className="mt-1 truncate text-sm font-semibold">{selectedNode.label}</p>
                 </div>
-                <button onClick={clearNode} className="text-muted-foreground hover:text-foreground">
-                  <X className="h-4 w-4" />
-                </button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={clearNode}
+                  className="-mr-1 text-muted-foreground"
+                  aria-label="Close details"
+                >
+                  <X />
+                </Button>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 {selectedNode.status && (

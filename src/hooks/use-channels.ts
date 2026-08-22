@@ -3,6 +3,7 @@ import { toast } from "sonner"
 import { channelsApi } from "@/api/channels"
 import type {
   CreateChannelRequest,
+  ImportOptions,
   ListChannelsParams,
   StatusChangeRequest,
   UpdateChannelRequest,
@@ -98,11 +99,25 @@ export function useCreateChannelVersion() {
   })
 }
 
+/** Untoasted — the validation envelope renders inline in the form. */
+export function useValidateChannel() {
+  return useMutation({
+    mutationFn: (req: CreateChannelRequest) => channelsApi.validate(req),
+  })
+}
+
+export function useChannelStatusDryRun() {
+  return useMutation({
+    mutationFn: ({ id, req }: { id: string; req: StatusChangeRequest }) =>
+      channelsApi.changeStatusDryRun(id, req),
+  })
+}
+
 export function useImportChannels() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ items, dryRun }: { items: CreateChannelRequest[]; dryRun?: boolean }) =>
-      channelsApi.import(items, dryRun),
+    mutationFn: ({ items, ...opts }: { items: CreateChannelRequest[] } & ImportOptions) =>
+      channelsApi.import(items, opts),
     onSuccess: (_data, vars) => {
       if (!vars.dryRun) queryClient.invalidateQueries({ queryKey: ["channels"] })
     },

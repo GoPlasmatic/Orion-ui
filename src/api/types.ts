@@ -12,7 +12,10 @@ export type JsonLogicValue =
 
 export interface PaginatedResponse<T> {
   data: T[]
-  total: number
+  // Every list endpoint returns `total` except the trace list, which makes it
+  // opt-in via `?include_total=true` (the count is a full scan of the filtered
+  // set). Treat an absent total as "unknown", not as zero.
+  total?: number
   limit: number
   offset: number
 }
@@ -21,10 +24,54 @@ export interface DataResponse<T> {
   data: T
 }
 
+// Field-pathed entry on a validation failure, carried in the error envelope's
+// `details`. Omitted by the server when empty.
+export type ErrorFieldCode =
+  | "REQUIRED"
+  | "REQUIRED_FOR_PROTOCOL"
+  | "INVALID"
+  | "TYPE_MISMATCH"
+  | "TOO_LONG"
+  | "UNKNOWN_FIELD"
+  | "DUPLICATE_FIELD"
+  | "DUPLICATE_TASK_ID"
+  | "UNKNOWN_FUNCTION"
+  | (string & {})
+
+export interface ErrorFieldDetail {
+  path: string
+  code: ErrorFieldCode
+  message: string
+  expected?: unknown
+  got?: unknown
+}
+
 export interface StatusChangeRequest {
   status: EntityStatus
   // Accepted on workflow activation only; defaults to 100 server-side.
   rollout_percentage?: number
+}
+
+// `?reload=` on the status and rollout endpoints. `defer` commits the row but
+// leaves the running engine (and every peer) on the previous configuration
+// until POST admin/engine/reload — one rebuild for a whole bundle apply.
+export type ReloadMode = "now" | "defer"
+
+// `?on_conflict=` on the import endpoints: what an already-stored conflict key
+// means. `new_version` is the upsert mode that makes re-importing an unchanged
+// artifact a no-op.
+export type OnConflict = "fail" | "skip" | "new_version"
+
+export interface StatusChangeOptions {
+  // Runs every gate the real transition runs and answers the /validate
+  // envelope without writing. Gates that would 4xx are reported as `errors`.
+  dryRun?: boolean
+  reload?: ReloadMode
+}
+
+export interface ImportOptions {
+  dryRun?: boolean
+  onConflict?: OnConflict
 }
 
 // Channel types
@@ -34,21 +81,144 @@ export type ChannelProtocol = "rest" | "http" | "kafka"
 // Trace storage mode (global default + per-channel override via config.tracing)
 export type TraceStorageMode = "sync" | "async" | "batch" | "off"
 
+// Headers `rate_limit.key_logic` can always read. Any other header must be
+// declared in `key_headers` or the key resolves to null and every request is
+// refused 429 — silent before 1.1, refused since.
+export const BUILTIN_KEY_HEADERS = [
+  "authorization",
+  "x-api-key",
+  "x-forwarded-for",
+  "x-real-ip",
+  "user-agent",
+  "content-type",
+  "origin",
+  "x-tenant-id",
+] as const
+
+// `allow` fails open when the shared cluster Redis cannot answer; `deny`
+// refuses with 503.
+export type GuardBackendFailure = "allow" | "deny"
+
 export interface RateLimitConfig {
+  // Refused at create/update when 0 — it used to be floored to 1, so "admit
+  // nothing" quietly became one request per second.
   requests_per_second?: number
   burst?: number
   key_logic?: JsonLogicValue
+  // Merged with BUILTIN_KEY_HEADERS rather than replacing them; matched
+  // case-insensitively.
+  key_headers?: string[]
+  on_backend_error?: GuardBackendFailure
 }
 
 export interface BackpressureConfig {
-  max_concurrent?: number
-  queue_depth?: number
+  max_concurrent_per_node?: number
 }
 
-export interface CorsConfig {
-  allowed_origins?: string[]
-  allowed_methods?: string[]
+export type ChannelAuthMode = "api_key" | "hmac" | "jwt"
+export type HmacAlgorithm = "sha1" | "sha256" | "sha512"
+export type HmacEncoding = "hex" | "base64" | "base64url"
+export type HmacPreset = "zoom" | "slack" | "stripe" | "github" | "shopify" | "webex"
+
+export interface JwtKey {
+  algorithm: string
+  key: string
+  kid?: string
+  key_encoding?: string
+}
+
+// Where a JWT is read from. Query parameters are deliberately not offered.
+export interface JwtSource {
+  header?: string
+  scheme?: string
+  cookie?: string
+}
+
+/**
+ * Channel authentication. Covers `POST data/{channel}` and `/async`
+ * identically — appending `/async` is not a bypass. Kafka and `channel_call`
+ * are exempt by design.
+ *
+ * Modelled flat rather than as a discriminated union so a form can edit the
+ * object incrementally; `mode` selects which fields the server reads.
+ *
+ * `keys`, `secret`/`secrets` and `jwt_keys[].key` come back masked as
+ * `"******"`. Sending a mask back on update restores the stored value, so a
+ * form must round-trip masks untouched.
+ */
+export interface ChannelAuthConfig {
+  mode?: ChannelAuthMode
+
+  // api_key
+  keys?: string[]
+  scheme?: string
+
+  // api_key + hmac
+  header?: string
+
+  // hmac
+  preset?: HmacPreset
+  secret?: string
+  secrets?: string[]
+  algorithm?: HmacAlgorithm
+  // Signing-string template: literals plus {body} (required),
+  // {header:<name>} and {header:<name>:<key>} for packed k=v headers.
+  message?: string
+  encoding?: HmacEncoding
+  // Mutually exclusive with signature_key.
+  signature_prefix?: string
+  signature_key?: string
+  // Paired with tolerance_secs — either alone is a create-time error.
+  timestamp?: string
+  tolerance_secs?: number
+
+  // jwt
+  jwt_keys?: JwtKey[]
+  jwks_url?: string
+  // Mandatory non-empty allowlist; checked before anything else about a token.
+  algorithms?: string[]
+  issuer?: string | string[]
+  audience?: string | string[]
+  leeway_secs?: number
+  require_exp?: boolean
+  required?: boolean
+  source?: JwtSource
+  max_token_bytes?: number
+  claims_to_metadata?: string[]
+  // Evaluated over {"claims": …} after verification; falsy -> 403.
+  authorization_logic?: JsonLogicValue
+}
+
+// How the HTTP request body becomes `data` and `metadata`.
+export interface ChannelRequestConfig {
+  // `auto` detects the Orion envelope; `payload` takes the parsed body verbatim.
+  body_mode?: "auto" | "payload"
+  cookies_to_metadata?: string[]
+}
+
+// Replacement bytes for a guard rejection. The platform still decides the
+// status; only the body changes. Placeholders are a closed set — an unknown
+// one is refused at authoring time.
+export interface ChannelErrorBody {
+  body: string
+  content_type?: string
+}
+
+export const ERROR_BODY_PLACEHOLDERS = [
+  "status",
+  "code",
+  "message",
+  "request_id",
+  "channel",
+  "timestamp",
+] as const
+
+export interface ChannelResponseConfig {
+  mode?: "envelope" | "shaped"
+  // Replaces the default allowlist, so a channel can narrow as well as widen.
   allowed_headers?: string[]
+  // Keyed by HTTP status ("400"–"599") plus an optional "default".
+  error_bodies?: Record<string, ChannelErrorBody>
 }
 
 export interface CacheConfig {
@@ -62,6 +232,9 @@ export interface DeduplicationConfig {
   header?: string
   window_secs?: number
   connector?: string
+  // `deny` refuses with 503, never 409 — the key is unverifiable, not a known
+  // duplicate.
+  on_backend_error?: GuardBackendFailure
 }
 
 export interface ChannelTracingConfig {
@@ -71,11 +244,17 @@ export interface ChannelTracingConfig {
   task_details?: boolean
 }
 
+// Every key is optional; an empty `{}` is a channel with no guards of its own.
+// Unknown keys are REFUSED since 1.0 (they used to be silently ignored), so a
+// retired spelling is a 400 with an UNKNOWN_FIELD detail, not a no-op.
 export interface ChannelConfig {
+  auth?: ChannelAuthConfig
   rate_limit?: RateLimitConfig
   backpressure?: BackpressureConfig
   timeout_ms?: number
-  cors?: CorsConfig
+  origin_allow_list?: string[]
+  request?: ChannelRequestConfig
+  response?: ChannelResponseConfig
   validation_logic?: JsonLogicValue
   cache?: CacheConfig
   deduplication?: DeduplicationConfig
@@ -98,6 +277,10 @@ export interface Channel {
   status: EntityStatus
   version: number
   priority: number
+  tags: string[]
+  // sha256:… over the canonical importable content, excluding the DB-owned
+  // fields. Equal hashes mean importing one over the other is a no-op.
+  content_hash: string
   created_at: string
   updated_at: string
 }
@@ -108,6 +291,20 @@ export interface ListChannelsParams {
   status?: EntityStatus
   channel_type?: ChannelType
   protocol?: ChannelProtocol
+  tag?: string
+  sort_by?: string
+  sort_order?: SortOrder
+}
+
+export interface ExportChannelsParams {
+  status?: EntityStatus
+  channel_type?: ChannelType
+  protocol?: ChannelProtocol
+  tag?: string
+  limit?: number
+  offset?: number
+  sort_by?: string
+  sort_order?: SortOrder
 }
 
 export interface CreateChannelRequest {
@@ -124,6 +321,7 @@ export interface CreateChannelRequest {
   workflow_id?: string
   config?: ChannelConfig
   priority?: number
+  tags?: string[]
 }
 
 export interface UpdateChannelRequest {
@@ -137,6 +335,7 @@ export interface UpdateChannelRequest {
   workflow_id?: string
   config?: ChannelConfig
   priority?: number
+  tags?: string[]
 }
 
 export interface ChannelVersion {
@@ -172,8 +371,31 @@ export interface Workflow {
   version: number
   rollout_percentage?: number
   tasks: Task[]
+  // The engine-managed loop over `tasks`, absent for a workflow that runs its
+  // tasks once.
+  loop?: unknown
+  content_hash: string
   created_at: string
   updated_at: string
+}
+
+// What a workflow's tasks reference. The server walks the latest version's
+// tasks, so this is authoritative where client-side task parsing is a guess.
+export interface ConnectorDependency {
+  connector: string
+  // The task function that uses it (`db_read`, `http_call`, …).
+  function: string
+}
+
+export interface WorkflowDependencies {
+  workflow_id: string
+  version: number
+  connectors: ConnectorDependency[]
+  // Channel names targeted by `channel_call` tasks, statically.
+  channels: string[]
+  // True when a `channel_call` resolves its target with `channel_logic` at
+  // runtime — the case static analysis cannot see.
+  has_dynamic_channel_calls: boolean
 }
 
 export interface ListWorkflowsParams {
@@ -181,6 +403,8 @@ export interface ListWorkflowsParams {
   offset?: number
   status?: EntityStatus
   tag?: string
+  sort_by?: string
+  sort_order?: SortOrder
 }
 
 export interface CreateWorkflowRequest {
@@ -269,50 +493,140 @@ export interface ValidationResponse {
   warnings: ValidationIssue[]
 }
 
-// Bulk import (channels / connectors / workflows)
+// Bulk import (channels / connectors / workflows).
+// At most 1000 items per request; above that the server answers 400.
 export interface ImportError {
   index: number
   error: string
 }
 
-export interface ImportResult {
-  dry_run?: boolean
-  imported: number
-  failed: number
-  would_create?: number
-  would_fail?: number
-  errors: ImportError[]
+// What one item did, or on a dry run would do.
+export type ImportAction =
+  | "created"
+  | "updated_draft"
+  | "updated"
+  | "new_version"
+  | "unchanged"
+  | "skipped"
+  | (string & {})
+
+export interface ImportItemResult {
+  index: number
+  // The item's conflict key (workflow_id / channel_id / connector name).
+  id: string | null
+  action: ImportAction
 }
 
-// Connector types
-export type ConnectorType = "http" | "kafka" | "db" | "cache" | "storage" | "es"
+// Since 1.0 a dry run reports in the same fields as a real run — the old
+// `would_create` / `would_fail` pair is gone.
+export interface ImportResult {
+  dry_run: boolean
+  imported: number
+  failed: number
+  // Content-identical items under on_conflict=new_version: nothing written.
+  unchanged: number
+  // Items skipped under on_conflict=skip.
+  skipped: number
+  errors: ImportError[]
+  results: ImportItemResult[]
+}
 
-// Per-operation gates on db/es connectors (v0.3). All default true server-side;
-// `read` gates data_query/db_read/mongo_read, the write flags gate the matching
-// data_write operations, and `raw_write` gates the db_write raw-SQL escape hatch.
+// Connector types. `smtp` is the sixth type, added in 1.1.
+export type ConnectorType = "http" | "kafka" | "db" | "cache" | "storage" | "es" | "smtp"
+
+/**
+ * Per-operation gates. All default true server-side except
+ * `aggregate_write_stages`, which is the one deliberate default-deny.
+ * The gate set differs per connector type — see CONNECTOR_GATES.
+ */
 export interface OperationGates {
+  // db / es
   read?: boolean
   insert?: boolean
   update?: boolean
   delete?: boolean
   upsert?: boolean
   raw_write?: boolean
+  // cache
+  write?: boolean
+  // kafka
+  publish?: boolean
+  // storage
+  presign_get?: boolean
+  presign_put?: boolean
+  head?: boolean
+  // http: an allow-list of methods, not a boolean
+  methods?: string[]
 }
+
+export type BooleanGate = Exclude<keyof OperationGates, "methods">
+
+// Which gates apply to which connector type. `http` gates by method allow-list
+// rather than by boolean, so it carries no boolean gates.
+export const CONNECTOR_GATES: Record<ConnectorType, BooleanGate[]> = {
+  db: ["read", "insert", "update", "delete", "upsert", "raw_write"],
+  es: ["read", "insert", "update", "delete", "upsert", "raw_write"],
+  cache: ["read", "write"],
+  kafka: ["publish"],
+  storage: ["presign_get", "presign_put", "head"],
+  http: [],
+  smtp: [],
+}
+
+// Why a connector failed to load, when `load_status === "failed"`.
+export type ConnectorLoadStatus = "loaded" | "failed" | "disabled"
 
 export interface Connector {
   id: string
   name: string
   connector_type: ConnectorType
-  // JSON string of the connector config, with secrets masked. Parse to display.
+  // The parsed masked config — the shape POST/PUT accept, so a read response
+  // can be edited and written straight back. Prefer this over config_json.
+  config: Record<string, unknown>
+  // The stored document verbatim as a string, secrets masked. Kept for the
+  // life of the 1.x line; a client reading it has to parse before writing back.
   config_json: string
   enabled: boolean
+  tags: string[]
+  content_hash: string
   created_at: string
   updated_at: string
+}
+
+// The list endpoint additionally reports why a connector is not serving.
+export interface ConnectorListItem extends Connector {
+  load_status: ConnectorLoadStatus
+  load_error?: string | null
+  load_error_stage?: string | null
+}
+
+// The shape /import accepts, secrets masked. Only env:// and vault://
+// references round-trip; a literal credential exports as "******" and is
+// refused on import.
+export interface ConnectorExportItem {
+  id: string
+  name: string
+  connector_type: ConnectorType
+  config: Record<string, unknown>
+  enabled: boolean
+  tags: string[]
+  content_hash: string
 }
 
 export interface ListConnectorsParams {
   limit?: number
   offset?: number
+  tag?: string
+  sort_by?: string
+  sort_order?: SortOrder
+}
+
+export interface ExportConnectorsParams {
+  tag?: string
+  limit?: number
+  offset?: number
+  sort_by?: string
+  sort_order?: SortOrder
 }
 
 export interface CreateConnectorRequest {
@@ -320,6 +634,7 @@ export interface CreateConnectorRequest {
   name: string
   connector_type: ConnectorType
   config: Record<string, unknown>
+  tags?: string[]
 }
 
 export interface UpdateConnectorRequest {
@@ -327,11 +642,37 @@ export interface UpdateConnectorRequest {
   connector_type?: ConnectorType
   config?: Record<string, unknown>
   enabled?: boolean
+  tags?: string[]
 }
 
-// Connector circuit breakers: { enabled, breakers: { "channel:connector": "closed" | "open" | "half_open" } }
+/**
+ * Connector reachability probe. A backend that cannot be reached is still a
+ * 200 — the probe ran, and `reachable: false` is its answer.
+ *
+ * `supported: false` means no probe exists for this kind (`es`, `kafka`, or a
+ * `db` connector pointing at MongoDB), so key "broken" on
+ * `supported && !reachable`, never on `reachable` alone.
+ *
+ * The `http` probe issues one genuine request with genuine credentials; a
+ * 401/403 is reported as NOT reachable, which is the failure it exists to find.
+ */
+export interface ProbeResult {
+  reachable: boolean
+  supported: boolean
+  connector_type: ConnectorType
+  // What the probe did, named plainly, e.g. "SELECT 1".
+  probe: string
+  error?: string | null
+}
+
+// Circuit breaker state is per-replica, never cluster-wide.
 export interface CircuitBreakerStatus {
   enabled: boolean
+  // Always "node".
+  scope: string
+  // Which node's map this is.
+  instance_id: string
+  // `channel:connector` -> "closed" | "open" | "half_open".
   breakers: Record<string, string>
 }
 
@@ -344,18 +685,34 @@ export interface EngineStatus {
   version: string
 }
 
+export interface EngineReloaded {
+  reloaded: boolean
+  workflows_count: number
+}
+
 export interface HealthResponse {
+  // "ok" | "degraded"
   status: string
+  // Per-subsystem state: database, engine, connectors, channels, plus kafka
+  // when enabled and cluster_redis in cluster mode.
   components: Record<string, string>
   connectors: Record<string, unknown>
   workflows_loaded: number
   uptime_seconds: number
   version: string
+  // Build provenance, served only to an admin caller.
+  git_hash?: string | null
 }
 
 // Trace types
 export type TraceStatus = "pending" | "running" | "completed" | "failed"
 
+/**
+ * One row of the trace list. Since 1.0 the list is a payload-free projection:
+ * `task_trace_json`, `input_json` and `result_json` are NOT returned here, so
+ * one request cannot dump every request's body. Fetch a single trace by id for
+ * the payload and the per-task trace.
+ */
 export interface Trace {
   id: string
   channel: string
@@ -363,14 +720,11 @@ export interface Trace {
   status: string
   mode: string
   error_message: string | null
-  result_json: string | null
-  input_json: string | null
   duration_ms: number | null
   created_at: string
   started_at: string | null
   completed_at: string | null
   updated_at: string
-  task_trace_json?: string | null
 }
 
 // Parsed workflow result stored on a completed trace (dataflow-rs 3.0 shape).
@@ -400,14 +754,41 @@ export interface TraceDetail {
 
 export type TraceSortBy = "created_at" | "updated_at" | "status" | "channel" | "mode"
 
+/**
+ * The trace list is the one endpoint that deviates from the shared pagination
+ * contract: `total` is opt-in and there is a second, keyset paging mode.
+ *
+ * Three combinations are 400s:
+ *  - `cursor` together with `offset` (two paging modes)
+ *  - `cursor` with any `sort_by` other than the default `created_at`
+ *  - a `cursor` value that did not come from a `next_cursor`
+ *
+ * Note `buildQuery` serializes `offset: 0`, so cursor mode must pass
+ * `offset: undefined` explicitly rather than relying on a falsy value.
+ */
 export interface ListTracesParams {
   limit?: number
   offset?: number
+  // Opaque; pass a next_cursor back unmodified.
+  cursor?: string
+  // Off by default: the count is a full scan of the filtered set.
+  include_total?: boolean
   status?: string
   channel?: string
   mode?: string
   sort_by?: TraceSortBy
   sort_order?: SortOrder
+}
+
+export interface TracePage {
+  data: Trace[]
+  limit: number
+  offset: number
+  // Present only with include_total=true.
+  total?: number | null
+  // Present only while a further page may exist; its absence is how you know
+  // you have reached the end. Treat the value as opaque.
+  next_cursor?: string | null
 }
 
 // Audit log types
@@ -421,11 +802,21 @@ export interface AuditLog {
   created_at: string
 }
 
-// The server's audit-logs endpoint supports pagination only; action /
-// resource-type filtering is done client-side (see pages/audit.tsx).
+/**
+ * Server-side filters, all exact-match except the time bounds. There is no
+ * `sort_by` on this endpoint, and `limit` is clamped to 1–1000.
+ */
 export interface ListAuditLogsParams {
   limit?: number
   offset?: number
+  action?: string
+  resource_type?: string
+  resource_id?: string
+  principal?: string
+  // Inclusive lower bound on created_at, RFC 3339 or a bare naive timestamp.
+  start_time?: string
+  // Exclusive upper bound.
+  end_time?: string
 }
 
 // Backups (SQLite only). POST returns the created file; GET lists the backup dir.
@@ -487,11 +878,107 @@ export interface ProfileResult {
   [key: string]: unknown
 }
 
+/**
+ * Per-task failure inside a 200. Since 1.1 `code` names the real failure
+ * instead of a flat TASK_ERROR: IO_ERROR (no connection), TIMEOUT_ERROR,
+ * FUNCTION_ERROR (refused before any socket — SSRF, a closed gate), the
+ * connector's own lower-case `circuit_open` for a shed request, and
+ * TASK_ERROR still as the fallback for an engine-owned error.
+ */
+export interface ProcessTaskError {
+  code: string
+  message: string
+  task_id?: string | null
+}
+
 export interface ProcessResponse {
   id?: string
+  // Always "ok" — task failures are reported in `errors`, not by flipping this.
   status?: string
   data?: Record<string, unknown>
-  errors?: unknown[]
+  errors?: ProcessTaskError[]
+  // Present only when `errors` is non-empty; correlates with the stored trace.
+  request_id?: string | null
   _orion?: { profile?: ProfileResult }
   [key: string]: unknown
+}
+
+/**
+ * The 202 acknowledgment from an /async submission. `trace_token` is a
+ * capability token scoping the poll to this submission — polling
+ * `admin/traces/{id}` without it needs an admin credential.
+ */
+export interface AsyncSubmitResponse {
+  trace_id: string
+  trace_token: string
+}
+
+// --- Trace dead-letter queue -----------------------------------------------
+// Only /async traffic reaches this queue: a sync request carries its own
+// failure back to the caller, with nothing left to retry.
+
+// List rows are a payload-free projection — fetch one by id for the payload.
+export interface TraceDlqSummary {
+  id: string
+  trace_id: string
+  channel: string
+  error_message: string
+  retry_count: number
+  max_retries: number
+  next_retry_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface TraceDlqEntry extends TraceDlqSummary {
+  payload_json: string
+  metadata_json: string
+}
+
+export interface ListTraceDlqParams {
+  limit?: number
+  offset?: number
+  channel?: string
+  exhausted?: boolean
+}
+
+export interface PurgeTraceDlqRequest {
+  // Exhausted entries older than this are deleted; 0 purges every exhausted
+  // entry. Live entries are never purged.
+  older_than_hours: number
+}
+
+export interface DlqPurgeResult {
+  purged: number
+  older_than_hours: number
+}
+
+// --- Package promotion receipts --------------------------------------------
+// One receipt per package version. An applied version is immutable: the same
+// version arriving with a different content hash is refused with a 409.
+
+export type PackageState = "staged" | "applied"
+
+export interface PackageReceipt {
+  name: string
+  version: string
+  content_hash: string
+  state: PackageState
+  // Who recorded this receipt (admin key id, or "anonymous").
+  principal: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PackageDetail {
+  name: string
+  // The newest applied version, or null when nothing has been applied.
+  current: PackageReceipt | null
+  // Every receipt for this package, newest first.
+  versions: PackageReceipt[]
+}
+
+export interface ListPackagesParams {
+  limit?: number
+  offset?: number
 }

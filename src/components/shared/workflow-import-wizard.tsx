@@ -13,6 +13,7 @@ import { Dialog, DialogHeader, DialogTitle, DialogBody, DialogFooter } from "@/c
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
+import { ImportSummary } from "@/components/shared/import-dialog"
 import { cn } from "@/lib/utils"
 import { stepResultBadgeClass } from "@/lib/status"
 import { AlertCircle, CheckCircle2, Play } from "lucide-react"
@@ -161,7 +162,7 @@ export function WorkflowImportWizard({ open, onClose }: WorkflowImportWizardProp
                 i === step
                   ? "border-primary bg-primary/10 text-primary"
                   : i < step
-                    ? "border-chart-2/40 text-chart-2"
+                    ? "border-success/40 text-success"
                     : "text-muted-foreground"
               )}
             >
@@ -197,7 +198,7 @@ export function WorkflowImportWizard({ open, onClose }: WorkflowImportWizardProp
                 className={cn(
                   "flex items-center gap-2 rounded-md border p-3 text-sm",
                   validation.valid
-                    ? "border-chart-2/40 text-chart-2"
+                    ? "border-success/40 text-success"
                     : "border-destructive/40 text-destructive"
                 )}
               >
@@ -236,25 +237,7 @@ export function WorkflowImportWizard({ open, onClose }: WorkflowImportWizardProp
               Import the definition as a <strong>draft</strong>. It won't receive traffic until
               you activate it.
             </p>
-            {importWorkflows.data && (
-              <div className="flex flex-wrap gap-2 rounded-md border p-3 text-sm">
-                <Badge variant="outline" className="border-chart-2/40 text-chart-2">
-                  {importWorkflows.data.imported} imported
-                </Badge>
-                {importWorkflows.data.failed > 0 && (
-                  <Badge variant="destructive">{importWorkflows.data.failed} failed</Badge>
-                )}
-              </div>
-            )}
-            {importWorkflows.data?.errors?.length ? (
-              <ul className="space-y-1 text-xs">
-                {importWorkflows.data.errors.map((e) => (
-                  <li key={e.index} className="font-mono text-destructive">
-                    [{e.index}] {e.error}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+            {importWorkflows.data && <ImportSummary result={importWorkflows.data} />}
           </div>
         )}
 
@@ -311,7 +294,7 @@ export function WorkflowImportWizard({ open, onClose }: WorkflowImportWizardProp
         {step === 4 && (
           <div className="space-y-4">
             {activated ? (
-              <div className="flex items-center gap-2 rounded-md border border-chart-2/40 p-3 text-sm text-chart-2">
+              <div className="flex items-center gap-2 rounded-lg border border-success/40 bg-success/10 p-3 text-sm text-success">
                 <CheckCircle2 className="h-4 w-4" /> Workflow activated.
               </div>
             ) : workflowId ? (
@@ -391,7 +374,7 @@ function IssueList({
         {issues.map((issue, i) => (
           <li
             key={i}
-            className={cn(tone === "error" ? "text-destructive" : "text-chart-3")}
+            className={cn(tone === "error" ? "text-destructive" : "text-warning")}
           >
             <span className="font-mono">{issue.field || "—"}</span>: {issue.message}
           </li>

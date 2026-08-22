@@ -1,11 +1,13 @@
 import { useRef, useState } from "react"
-import type { ConnectorType, OperationGates } from "@/api/types"
+import { CONNECTOR_GATES } from "@/api/types"
+import type { BooleanGate, ConnectorType, OperationGates } from "@/api/types"
 import { ConfigEditorShell } from "@/components/shared/config-editor-shell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 import { KeyRound, Plus, ShieldCheck, Trash2 } from "lucide-react"
 
 type ConfigObject = Record<string, unknown>
@@ -29,18 +31,25 @@ function isMaskedSecret(v: unknown): v is string {
 
 const isSecretKey = (key: string) => SECRET_KEY_RE.test(key)
 
-// db/es connectors carry per-operation gates (v0.3); rendered as dedicated
-// toggles instead of the generic nested-JSON control.
-const GATED_TYPES: ConnectorType[] = ["db", "es"]
-
-const OPERATION_GATES: Array<{ key: keyof OperationGates; label: string; hint: string }> = [
-  { key: "read", label: "Read", hint: "data_query / db_read / mongo_read" },
-  { key: "insert", label: "Insert", hint: "data_write insert" },
-  { key: "update", label: "Update", hint: "data_write update" },
-  { key: "delete", label: "Delete", hint: "data_write delete" },
-  { key: "upsert", label: "Upsert", hint: "data_write upsert" },
-  { key: "raw_write", label: "Raw write", hint: "db_write raw SQL" },
-]
+/**
+ * Per-operation gates, rendered as dedicated toggles instead of the generic
+ * nested-JSON control. Which gates apply depends on the connector type
+ * (CONNECTOR_GATES); `http` gates by method allow-list rather than by boolean,
+ * so it carries none of these.
+ */
+const GATE_LABELS: Record<BooleanGate, { label: string; hint: string }> = {
+  read: { label: "Read", hint: "data_query / db_read / mongo_read / mongo_aggregate, cache_read" },
+  insert: { label: "Insert", hint: "data_write insert, mongo_write insert_one / insert_many" },
+  update: { label: "Update", hint: "data_write update, mongo_write update_* / replace_one" },
+  delete: { label: "Delete", hint: "data_write delete, mongo_write delete_*" },
+  upsert: { label: "Upsert", hint: "data_write upsert, and update/replace with upsert: true" },
+  raw_write: { label: "Raw write", hint: "db_write — raw SQL cannot be classified per operation" },
+  write: { label: "Write", hint: "cache_write, plus channel stores backed by this connector" },
+  publish: { label: "Publish", hint: "publish_kafka" },
+  presign_get: { label: "Presign GET", hint: "storage_presign for reads" },
+  presign_put: { label: "Presign PUT", hint: "storage_presign for writes — off makes it read-only" },
+  head: { label: "Head", hint: "storage_head" },
+}
 
 /**
  * Structured editor for a connector's config. The shape varies per connector type
@@ -72,9 +81,17 @@ export function ConnectorConfigEditor({ value, onChange, connectorType }: Connec
     setNewKey("")
   }
 
-  const gated = GATED_TYPES.includes(connectorType)
-  // `operations` gets dedicated toggles on gated types; keep it out of the generic rows.
-  const entries = Object.entries(value).filter(([k]) => !(gated && k === "operations"))
+  const gateKeys = CONNECTOR_GATES[connectorType] ?? []
+  const gated = gateKeys.length > 0
+  // `operations` gets dedicated toggles on gated types; keep it out of the
+  // generic rows. Same for the db-only aggregate write-stage opt-in, which is
+  // the one default-DENY flag and needs to read as an opt-in, not a toggle.
+  const showAggregateWriteStages = connectorType === "db"
+  const entries = Object.entries(value).filter(
+    ([k]) =>
+      !(gated && k === "operations") &&
+      !(showAggregateWriteStages && k === "aggregate_write_stages")
+  )
 
   return (
     <ConfigEditorShell
@@ -89,8 +106,20 @@ export function ConnectorConfigEditor({ value, onChange, connectorType }: Connec
       <div className="space-y-3">
           {gated && (
             <OperationGatesEditor
+              gateKeys={gateKeys}
               gates={(value.operations ?? {}) as OperationGates}
               onChange={(next) => setKey("operations", next)}
+            />
+          )}
+
+          {showAggregateWriteStages && (
+            <AggregateWriteStagesField
+              enabled={value.aggregate_write_stages === true}
+              onChange={(next) =>
+                next === undefined
+                  ? removeKey("aggregate_write_stages")
+                  : setKey("aggregate_write_stages", next)
+              }
             />
           )}
 
@@ -112,7 +141,7 @@ export function ConnectorConfigEditor({ value, onChange, connectorType }: Connec
 
           <div className="flex items-end gap-2 rounded-md border border-dashed p-3">
             <div className="flex-1">
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Field name</label>
+              <Label className="text-xs text-muted-foreground">Field name</Label>
               <Input
                 value={newKey}
                 onChange={(e) => setNewKey(e.target.value)}
@@ -126,7 +155,7 @@ export function ConnectorConfigEditor({ value, onChange, connectorType }: Connec
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Type</label>
+              <Label className="text-xs text-muted-foreground">Type</Label>
               <Select value={newType} onChange={(e) => setNewType(e.target.value as typeof newType)}>
                 <option value="string">Text</option>
                 <option value="number">Number</option>
@@ -174,6 +203,7 @@ function ConfigRow({
         type="number"
         value={value}
         onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))}
+        aria-label={name}
       />
     )
   } else if (typeof value === "string") {
@@ -182,6 +212,7 @@ function ConfigRow({
         type={isSecretKey(name) ? "password" : "text"}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        aria-label={name}
       />
     )
   } else {
@@ -256,14 +287,55 @@ function SecretField({ masked, onReplace }: { masked: string; onReplace: (value:
 }
 
 /**
- * Per-operation gates for db/es connectors. Unset gates default to allowed
- * server-side; toggling one off writes an explicit `false` into
- * `config.operations` (e.g. delete: false makes the connector delete-proof).
+ * MongoDB `$out` / `$merge` in a `mongo_aggregate` pipeline. This is the one
+ * deliberate default-DENY flag in the connector config — every other gate
+ * defaults to allowed — so it reads as an opt-in rather than as a toggle that
+ * happens to start off. Stages are re-validated after `{"var"}` folding, so
+ * message data cannot smuggle one in.
+ */
+function AggregateWriteStagesField({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean
+  onChange: (next: boolean | undefined) => void
+}) {
+  return (
+    <label className="flex cursor-pointer items-start justify-between gap-3 rounded-md border border-dashed px-3 py-2.5">
+      <span className="space-y-0.5">
+        <span className="flex items-center gap-1.5 text-sm font-medium">
+          <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+          Allow aggregate write stages
+        </span>
+        <span className="block text-xs text-muted-foreground">
+          Permits <code className="font-mono">$out</code> and{" "}
+          <code className="font-mono">$merge</code> in mongo_aggregate pipelines. Denied by
+          default — these stages write.
+        </span>
+      </span>
+      {/* Written as an explicit true, cleared entirely when off, so the stored
+          config never claims to grant something it does not. */}
+      <Switch
+        checked={enabled}
+        onCheckedChange={(checked) => onChange(checked ? true : undefined)}
+        aria-label="Allow aggregate write stages"
+      />
+    </label>
+  )
+}
+
+/**
+ * Unset gates default to allowed server-side; toggling one off writes an
+ * explicit `false` into `config.operations` (e.g. delete: false makes the
+ * connector delete-proof). Explicit booleans rather than key deletion, so the
+ * stored config says what it means.
  */
 function OperationGatesEditor({
+  gateKeys,
   gates,
   onChange,
 }: {
+  gateKeys: BooleanGate[]
   gates: OperationGates
   onChange: (next: OperationGates) => void
 }) {
@@ -275,7 +347,9 @@ function OperationGatesEditor({
         <span className="text-xs text-muted-foreground">— all allowed unless switched off</span>
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {OPERATION_GATES.map(({ key, label, hint }) => (
+        {gateKeys.map((key) => {
+          const { label, hint } = GATE_LABELS[key]
+          return (
           <label
             key={key}
             className="flex cursor-pointer items-center justify-between gap-2 rounded-md border px-2.5 py-2"
@@ -288,7 +362,8 @@ function OperationGatesEditor({
               aria-label={`Allow ${label.toLowerCase()}`}
             />
           </label>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

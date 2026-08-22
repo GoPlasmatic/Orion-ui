@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { useAuditLogs } from "@/hooks/use-audit"
 import {
   useReactTable,
@@ -10,13 +10,14 @@ import type { AuditLog } from "@/api/types"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
+import { PaginationFooter } from "@/components/shared/pagination"
+import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
+import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
 import { formatDate } from "@/lib/utils"
-import { ChevronLeft, ChevronRight } from "lucide-react"
 
-const PAGE_SIZE = 20
 const columnHelper = createColumnHelper<AuditLog>()
 
 const columns = [
@@ -52,85 +53,105 @@ const columns = [
   }),
 ]
 
-// The server's audit endpoint only paginates (no action / resource-type
-// filters), so filtering happens client-side: with a filter active we fetch the
-// most recent window at the server's max page size and filter + paginate locally.
-const FILTER_FETCH_LIMIT = 1000
+/** `datetime-local` gives "YYYY-MM-DDTHH:mm"; the server wants RFC 3339. */
+const toRfc3339 = (local: string) => (local ? new Date(local).toISOString() : undefined)
 
 export function AuditPage() {
-  const [offset, setOffset] = useState(0)
+  const { offset, reset: resetPage, prev, next } = usePagination()
   const [actionFilter, setActionFilter] = useState("")
   const [resourceTypeFilter, setResourceTypeFilter] = useState("")
+  const [principalFilter, setPrincipalFilter] = useState("")
+  const [resourceIdFilter, setResourceIdFilter] = useState("")
+  const [startTime, setStartTime] = useState("")
+  const [endTime, setEndTime] = useState("")
 
-  const filtering = !!(actionFilter || resourceTypeFilter)
-
-  const { data, isLoading } = useAuditLogs(
-    filtering ? { limit: FILTER_FETCH_LIMIT, offset: 0 } : { limit: PAGE_SIZE, offset }
-  )
-
-  const filtered = useMemo(() => {
-    const rows = data?.data ?? []
-    if (!filtering) return rows
-    return rows.filter(
-      (log) =>
-        (!actionFilter || log.action === actionFilter) &&
-        (!resourceTypeFilter || log.resource_type === resourceTypeFilter)
-    )
-  }, [data, filtering, actionFilter, resourceTypeFilter])
-
-  const pageRows = filtering ? filtered.slice(offset, offset + PAGE_SIZE) : filtered
+  // Filtering is server-side since 1.0. It used to fetch the most recent 1000
+  // entries and filter locally, which quietly hid anything older.
+  const { data, isLoading } = useAuditLogs({
+    limit: PAGE_SIZE,
+    offset,
+    action: actionFilter || undefined,
+    resource_type: resourceTypeFilter || undefined,
+    resource_id: resourceIdFilter || undefined,
+    principal: principalFilter || undefined,
+    start_time: toRfc3339(startTime),
+    end_time: toRfc3339(endTime),
+  })
 
   const table = useReactTable({
-    data: pageRows,
+    data: data?.data ?? [],
     columns,
     getCoreRowModel: getCoreRowModel(),
   })
 
-  const total = filtering ? filtered.length : (data?.total ?? 0)
-  const hasNext = offset + PAGE_SIZE < total
-  const hasPrev = offset > 0
-  // True when the filtered view is built from a truncated window of the log.
-  const windowTruncated = filtering && (data?.total ?? 0) > FILTER_FETCH_LIMIT
+  // Any control change re-anchors paging to the first page.
+  const onFilter = <T,>(set: (v: T) => void) => (v: T) => {
+    set(v)
+    resetPage()
+  }
 
   return (
     <div className="space-y-6">
       <PageHeader title="Audit Log" description="Track administrative actions" />
 
-      <div className="flex items-center gap-3">
+      <FilterBar>
         <Select
           value={actionFilter}
-          onChange={(e) => {
-            setActionFilter(e.target.value)
-            setOffset(0)
-          }}
+          onChange={(e) => onFilter(setActionFilter)(e.target.value)}
+          aria-label="Filter by action"
+          className={FILTER_W}
         >
           <option value="">All actions</option>
           <option value="create">Create</option>
           <option value="update">Update</option>
           <option value="delete">Delete</option>
+          <option value="activate">Activate</option>
           <option value="status_change">Status Change</option>
         </Select>
         <Select
           value={resourceTypeFilter}
-          onChange={(e) => {
-            setResourceTypeFilter(e.target.value)
-            setOffset(0)
-          }}
+          onChange={(e) => onFilter(setResourceTypeFilter)(e.target.value)}
+          aria-label="Filter by resource type"
+          className={FILTER_W}
         >
           <option value="">All resources</option>
           <option value="channel">Channel</option>
           <option value="workflow">Workflow</option>
           <option value="connector">Connector</option>
+          <option value="engine">Engine</option>
           <option value="backup">Backup</option>
         </Select>
-        {windowTruncated && (
-          <p className="text-xs text-muted-foreground">
-            Filtering the most recent {FILTER_FETCH_LIMIT} entries.
-          </p>
-        )}
-      </div>
+        <Input
+          value={resourceIdFilter}
+          onChange={(e) => onFilter(setResourceIdFilter)(e.target.value)}
+          placeholder="Resource ID"
+          className="w-44"
+          aria-label="Filter by resource ID"
+        />
+        <Input
+          value={principalFilter}
+          onChange={(e) => onFilter(setPrincipalFilter)(e.target.value)}
+          placeholder="Principal"
+          className="w-40"
+          aria-label="Filter by principal"
+        />
+        <Input
+          type="datetime-local"
+          value={startTime}
+          onChange={(e) => onFilter(setStartTime)(e.target.value)}
+          className="w-52"
+          aria-label="From"
+        />
+        <Input
+          type="datetime-local"
+          value={endTime}
+          onChange={(e) => onFilter(setEndTime)(e.target.value)}
+          className="w-52"
+          aria-label="To"
+        />
+      </FilterBar>
 
-      <div className="rounded-md border">
+      <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -173,19 +194,13 @@ export function AuditPage() {
         </Table>
       </div>
 
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {total > 0 ? `${offset + 1}--${Math.min(offset + PAGE_SIZE, total)} of ${total}` : "No results"}
-        </p>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={!hasPrev} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" disabled={!hasNext} onClick={() => setOffset(offset + PAGE_SIZE)}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <PaginationFooter
+        offset={offset}
+        count={data?.data.length ?? 0}
+        total={data?.total}
+        onPrev={prev}
+        onNext={next}
+      />
     </div>
   )
 }

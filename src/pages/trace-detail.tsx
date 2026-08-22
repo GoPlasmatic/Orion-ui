@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Link, useParams } from "react-router"
+import { Link, useParams, useSearchParams } from "react-router"
 import { useTrace } from "@/hooks/use-traces"
 import type { ExecutionStep } from "@/api/types"
 import { Button } from "@/components/ui/button"
@@ -110,7 +110,10 @@ function TaskStep({ step, index, isLast }: { step: ExecutionStep; index: number;
 
 export function TraceDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { data: trace, isLoading, error } = useTrace(id ?? "")
+  // The console passes the async submission's capability token through the URL
+  // so a follow-the-trace link works without an admin credential.
+  const [searchParams] = useSearchParams()
+  const { data: trace, isLoading, error } = useTrace(id ?? "", searchParams.get("token") ?? undefined)
   const [showRaw, setShowRaw] = useState(false)
 
   if (isLoading) {
@@ -166,7 +169,7 @@ export function TraceDetailPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {trace.error && (
-            <pre className="whitespace-pre-wrap rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            <pre className="whitespace-pre-wrap rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
               {trace.error}
             </pre>
           )}

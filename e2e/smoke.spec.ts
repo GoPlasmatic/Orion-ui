@@ -11,6 +11,7 @@ import { test, expect } from "@playwright/test"
 const runId = Date.now().toString(36)
 const wfName = `smoke-wf-${runId}`
 const chName = `smoke-ch-${runId}`
+const connName = `smoke-conn-${runId}`
 let workflowId = ""
 let serverUp = false
 
@@ -51,8 +52,8 @@ test("author, validate, and activate a workflow", async ({ page }) => {
 test("create and activate a channel bound to the workflow", async ({ page }) => {
   await page.goto("/channels/new")
   await page.getByLabel("Channel name").fill(chName)
-  // v0.3 requires methods + route_pattern for REST/HTTP channels; the route
-  // also makes the Data Console exercise its REST method+path mode below.
+  // REST/HTTP channels require methods + route_pattern; the route also makes
+  // the Data Console exercise its REST method+path mode below.
   await page.getByLabel("HTTP methods").fill("POST")
   await page.getByLabel("Route pattern").fill(`/${chName}`)
   await page.getByLabel("Linked workflow ID").fill(workflowId)
@@ -68,8 +69,9 @@ test("create and activate a channel bound to the workflow", async ({ page }) => 
       async () => {
         const res = await page.request.get("/api/v1/admin/engine/status")
         if (!res.ok()) return []
+        // Every admin 2xx body puts its payload under `data` since 1.0.
         const body = await res.json()
-        return (body.channels ?? []) as string[]
+        return (body.data?.channels ?? []) as string[]
       },
       { timeout: 15_000 }
     )
@@ -100,4 +102,51 @@ test("backups can be created and listed", async ({ page }) => {
   await page.goto("/settings")
   await page.getByRole("button", { name: "Create Backup" }).click()
   await expect(page.getByText(/orion_backup_/).first()).toBeVisible({ timeout: 10_000 })
+})
+
+test("workflow dependencies come from the server, not client-side parsing", async ({ page }) => {
+  await page.goto(`/workflows/${workflowId}`)
+  await page.getByRole("tab", { name: "Dependencies" }).click()
+  // The seeded pipeline is a single map task, so it references no connectors —
+  // the panel must say so rather than render empty.
+  await expect(page.getByText("No connector-backed tasks.")).toBeVisible()
+})
+
+test("a connector can be created and probed", async ({ page }) => {
+  await page.goto("/connectors/new")
+  await page.getByPlaceholder("my-connector").fill(connName)
+
+  // Server-side validation, not a client guess: an http connector with no url
+  // is refused, and the field-level reason is rendered.
+  await page.getByRole("button", { name: "Validate" }).click()
+  await expect(page.getByText(/missing field `url`/)).toBeVisible()
+
+  await page.getByPlaceholder("host").fill("url")
+  await page.getByRole("button", { name: "Add" }).click()
+  // exact: aria-label "url" also substring-matches the row's "Remove url" button.
+  await page.getByLabel("url", { exact: true }).fill("https://example.com")
+
+  await page.getByRole("button", { name: "Validate" }).click()
+  await expect(page.getByText("Connector is valid.")).toBeVisible()
+
+  await page.getByRole("button", { name: "Save" }).click()
+  await page.waitForURL(/\/connectors\/(?!new$)[^/]+$/)
+
+  await page.getByRole("button", { name: "Test" }).click()
+  await page.getByRole("button", { name: "Run probe" }).click()
+  // An http connector with no URL cannot be reached; "not reachable" is a
+  // legitimate 200 answer, so the dialog must render an outcome either way.
+  await expect(page.getByText(/Reachable|Not reachable|No probe available/)).toBeVisible({
+    timeout: 15_000,
+  })
+})
+
+test("the trace DLQ renders its empty state", async ({ page }) => {
+  await page.goto("/trace-dlq")
+  await expect(page.getByText("Nothing in the dead-letter queue")).toBeVisible()
+})
+
+test("the packages page renders its empty state", async ({ page }) => {
+  await page.goto("/packages")
+  await expect(page.getByText("No package receipts")).toBeVisible()
 })

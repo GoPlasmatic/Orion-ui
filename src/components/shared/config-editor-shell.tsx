@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 import { Braces, SlidersHorizontal } from "lucide-react"
 
 interface ConfigEditorShellProps<T> {
@@ -47,7 +48,7 @@ export function ConfigEditorShell<T>({ value, onChange, label, children }: Confi
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <label className="text-sm font-medium">{label}</label>
+        <Label className="mb-0">{label}</Label>
         <div className="flex gap-1 rounded-md border p-0.5">
           <Button
             type="button"

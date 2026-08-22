@@ -1,8 +1,9 @@
 import { Button } from "@/components/ui/button"
-import type { EntityStatus } from "@/api/types"
-import { Play, Archive, GitBranch, Trash2 } from "lucide-react"
+import type { EntityStatus, ValidationResponse } from "@/api/types"
+import { Play, Archive, GitBranch, Trash2, ShieldCheck } from "lucide-react"
 import { useState } from "react"
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
+import { ValidationResults } from "@/components/shared/validation-results"
 
 interface LifecycleActionsProps {
   status: EntityStatus
@@ -11,6 +12,15 @@ interface LifecycleActionsProps {
   onNewVersion?: () => void
   onDelete?: () => void
   isPending?: boolean
+  /**
+   * Pre-flight the activation. Runs every gate the real transition runs —
+   * draft existence, connector existence, route collisions, and (for channels)
+   * the workflow-active gate — and reports the findings without writing.
+   * Omit to keep the plain Activate button.
+   */
+  onPreflight?: () => void
+  preflight?: ValidationResponse | null
+  preflightPending?: boolean
 }
 
 export function LifecycleActions({
@@ -20,12 +30,21 @@ export function LifecycleActions({
   onNewVersion,
   onDelete,
   isPending,
+  onPreflight,
+  preflight,
+  preflightPending,
 }: LifecycleActionsProps) {
   const [confirmAction, setConfirmAction] = useState<"archive" | "delete" | null>(null)
 
   return (
     <>
       <div className="flex items-center gap-2">
+        {status === "draft" && onPreflight && (
+          <Button size="sm" variant="outline" onClick={onPreflight} disabled={preflightPending}>
+            <ShieldCheck className="h-3.5 w-3.5" />
+            {preflightPending ? "Checking..." : "Pre-flight"}
+          </Button>
+        )}
         {status === "draft" && onActivate && (
           <Button size="sm" onClick={onActivate} disabled={isPending}>
             <Play className="h-3.5 w-3.5" />
@@ -61,6 +80,12 @@ export function LifecycleActions({
           </Button>
         )}
       </div>
+
+      {preflight && (
+        <div className="mt-3">
+          <ValidationResults result={preflight} validLabel="Ready to activate." />
+        </div>
+      )}
 
       {confirmAction === "archive" && onArchive && (
         <ConfirmDialog

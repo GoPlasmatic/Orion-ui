@@ -1,7 +1,7 @@
 {
   "name": "orion-ui",
   "private": true,
-  "version": "0.3.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,12 +11,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "generate:api": "openapi-typescript contracts/openapi.json -o src/api/schema.d.ts",
-    "check:contract": "openapi-typescript contracts/openapi.json -o .contract-check.d.ts && diff .contract-check.d.ts src/api/schema.d.ts && rm .contract-check.d.ts"
+    "generate:api": "node contracts/patch-spec.mjs && openapi-typescript contracts/openapi.json -o src/api/schema.d.ts",
+    "check:contract": "openapi-typescript contracts/openapi.json -o .contract-check.d.ts && diff .contract-check.d.ts src/api/schema.d.ts && rm .contract-check.d.ts",
+    "patch:api": "node contracts/patch-spec.mjs"
   },
   "dependencies": {
-    "@goplasmatic/dataflow-ui": "^3.0.3",
-    "@goplasmatic/datalogic-ui": "^5.1.0",
+    "@goplasmatic/dataflow-ui": "^3.5.0",
+    "@goplasmatic/datalogic-ui": "^5.2.0",
     "@tailwindcss/vite": "^4.2.2",
     "@tanstack/react-query": "^5.97.0",
     "@tanstack/react-table": "^8.21.3",

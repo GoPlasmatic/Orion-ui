@@ -3,6 +3,7 @@ import { toast } from "sonner"
 import { workflowsApi } from "@/api/workflows"
 import type {
   CreateWorkflowRequest,
+  ImportOptions,
   ListWorkflowsParams,
   StatusChangeRequest,
   UpdateWorkflowRequest,
@@ -95,17 +96,41 @@ export function useTestWorkflow() {
   })
 }
 
+/**
+ * What the workflow's tasks reference, per the server rather than per
+ * client-side task parsing — see lib/topology.ts for why that distinction
+ * matters.
+ */
+export function useWorkflowDependencies(id: string) {
+  return useQuery({
+    queryKey: ["workflows", id, "dependencies"],
+    queryFn: () => workflowsApi.dependencies(id),
+    enabled: !!id,
+  })
+}
+
 export function useValidateWorkflow() {
   return useMutation({
     mutationFn: (req: unknown) => workflowsApi.validate(req),
   })
 }
 
+/**
+ * Pre-flight a status transition. Untoasted: the findings render inline, and a
+ * "failure" here is information, not an error.
+ */
+export function useWorkflowStatusDryRun() {
+  return useMutation({
+    mutationFn: ({ id, req }: { id: string; req: StatusChangeRequest }) =>
+      workflowsApi.changeStatusDryRun(id, req),
+  })
+}
+
 export function useImportWorkflows() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ items, dryRun }: { items: unknown[]; dryRun: boolean }) =>
-      workflowsApi.import(items, dryRun),
+    mutationFn: ({ items, ...opts }: { items: unknown[] } & ImportOptions) =>
+      workflowsApi.import(items, opts),
     onSuccess: (result, { dryRun }) => {
       if (dryRun) return
       queryClient.invalidateQueries({ queryKey: ["workflows"] })

@@ -1,5 +1,12 @@
 import { useParams, Link, useNavigate } from "react-router"
-import { useChannel, useChannelVersions, useChangeChannelStatus, useCreateChannelVersion, useDeleteChannel } from "@/hooks/use-channels"
+import {
+  useChannel,
+  useChannelVersions,
+  useChangeChannelStatus,
+  useCreateChannelVersion,
+  useDeleteChannel,
+  useChannelStatusDryRun,
+} from "@/hooks/use-channels"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -17,6 +24,7 @@ export function ChannelDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { data: channel, isLoading, error } = useChannel(id ?? "")
+  const statusDryRun = useChannelStatusDryRun()
   const { data: versions, isLoading: versionsLoading } = useChannelVersions(id ?? "")
   const changeStatus = useChangeChannelStatus()
   const createVersion = useCreateChannelVersion()
@@ -69,6 +77,11 @@ export function ChannelDetailPage() {
             </Button>
           )}
           <LifecycleActions
+            onPreflight={() =>
+              statusDryRun.mutate({ id: channel.channel_id, req: { status: "active" } })
+            }
+            preflight={statusDryRun.data ?? null}
+            preflightPending={statusDryRun.isPending}
             status={channel.status}
             isPending={isPending}
             onActivate={() => changeStatus.mutate({ id: channel.channel_id, req: { status: "active" } })}
@@ -176,8 +189,8 @@ export function ChannelDetailPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Max Concurrent</span>
-                    <span>{channel.config.backpressure.max_concurrent}</span>
+                    <span className="text-muted-foreground">Max concurrent / node</span>
+                    <span>{channel.config.backpressure.max_concurrent_per_node}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -241,16 +254,20 @@ export function ChannelDetailPage() {
               </Card>
             )}
 
-            {channel.config.cors && (
+            {channel.config.origin_allow_list && (
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm">CORS</CardTitle>
+                  <CardTitle className="text-sm">Origin allow list</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="flex flex-wrap gap-1">
-                    {channel.config.cors.allowed_origins?.map((origin) => (
-                      <Badge key={origin} variant="outline" className="text-xs">{origin}</Badge>
-                    )) ?? <span className="text-sm text-muted-foreground">None configured</span>}
+                    {channel.config.origin_allow_list.length > 0 ? (
+                      channel.config.origin_allow_list.map((origin) => (
+                        <Badge key={origin} variant="outline" className="text-xs">{origin}</Badge>
+                      ))
+                    ) : (
+                      <span className="text-sm text-muted-foreground">None configured</span>
+                    )}
                   </div>
                 </CardContent>
               </Card>

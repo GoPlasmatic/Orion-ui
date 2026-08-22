@@ -41,3 +41,16 @@ export function parseJson(value: string | null | undefined): unknown {
     return value
   }
 }
+/**
+ * Hand the browser a JSON file. `filename` gets today's date appended, matching
+ * the export naming the CLI uses.
+ */
+export function downloadJson(data: unknown, basename: string): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = `${basename}-${new Date().toISOString().slice(0, 10)}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}

@@ -1,65 +1,100 @@
 import { useState } from "react"
 import { Link, useNavigate, useParams } from "react-router"
-import { useConnector, useCreateConnector, useUpdateConnector } from "@/hooks/use-connectors"
-import type { Connector, ConnectorType } from "@/api/types"
+import {
+  useConnector,
+  useCreateConnector,
+  useUpdateConnector,
+  useValidateConnector,
+} from "@/hooks/use-connectors"
+import type {
+  Connector,
+  ConnectorType,
+  CreateConnectorRequest,
+  ValidationResponse,
+} from "@/api/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Label } from "@/components/ui/label"
+import { Callout } from "@/components/ui/callout"
 import { PageHeader } from "@/components/shared/page-header"
 import { ConnectorConfigEditor } from "@/components/shared/connector-config-editor"
-import { parseJson } from "@/lib/utils"
-import { ArrowLeft, Save } from "lucide-react"
+import { ValidationResults } from "@/components/shared/validation-results"
+import { ArrowLeft, Save, ShieldCheck } from "lucide-react"
 
+// The server returns `config` already parsed, in the shape POST/PUT accept, so
+// a read round-trips straight back. `config_json` is the same document as a
+// string and needs no second parse.
 function initialConfig(existing?: Connector): Record<string, unknown> {
-  if (!existing) return {}
-  const parsed = parseJson(existing.config_json)
-  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-    ? (parsed as Record<string, unknown>)
-    : {}
+  const cfg = existing?.config
+  return cfg && typeof cfg === "object" && !Array.isArray(cfg) ? cfg : {}
 }
 
-const CONNECTOR_TYPES: ConnectorType[] = ["http", "kafka", "db", "cache", "storage", "es"]
+const CONNECTOR_TYPES: ConnectorType[] = ["http", "kafka", "db", "cache", "storage", "es", "smtp"]
 
 function ConnectorForm({ existing }: { existing?: Connector }) {
   const isEdit = !!existing
   const navigate = useNavigate()
   const createConnector = useCreateConnector()
   const updateConnector = useUpdateConnector()
+  const validateConnector = useValidateConnector()
 
   const [name, setName] = useState(existing?.name ?? "")
   const [type, setType] = useState<ConnectorType>(existing?.connector_type ?? "http")
   const [enabled, setEnabled] = useState(existing?.enabled ?? true)
   const [config, setConfig] = useState<Record<string, unknown>>(() => initialConfig(existing))
   const [error, setError] = useState<string | null>(null)
+  const [validation, setValidation] = useState<ValidationResponse | null>(null)
 
   const backTo = existing ? `/connectors/${existing.id}` : "/connectors"
 
-  const handleSubmit = () => {
-    setError(null)
+  /**
+   * Shared by Save and Validate so Validate checks exactly what Save sends.
+   * `validate` runs the same validator `POST admin/connectors` runs, which is
+   * where grant-conditional rules (oauth2) and per-type field requirements are
+   * adjudicated — the client does not re-implement them.
+   */
+  const buildPayload = (): CreateConnectorRequest | null => {
     if (!name.trim()) {
       setError("Name is required")
-      return
+      return null
     }
+    return { name, connector_type: type, config }
+  }
+
+  const handleValidate = () => {
+    setError(null)
+    setValidation(null)
+    const payload = buildPayload()
+    if (!payload) return
+    validateConnector.mutate(payload, {
+      onSuccess: setValidation,
+      onError: (e) => setError(e instanceof Error ? e.message : "Validation failed"),
+    })
+  }
+
+  const handleSubmit = () => {
+    setError(null)
+    setValidation(null)
+    const payload = buildPayload()
+    if (!payload) return
 
     if (existing) {
       updateConnector.mutate(
-        { id: existing.id, req: { name, connector_type: type, config, enabled } },
+        { id: existing.id, req: { ...payload, enabled } },
         {
           onSuccess: () => navigate(`/connectors/${existing.id}`),
           onError: (e) => setError(e instanceof Error ? e.message : "Update failed"),
         }
       )
     } else {
-      createConnector.mutate(
-        { name, connector_type: type, config },
-        {
-          onSuccess: (c) => navigate(`/connectors/${c.id}`),
-          onError: (e) => setError(e instanceof Error ? e.message : "Create failed"),
-        }
-      )
+      createConnector.mutate(payload, {
+        onSuccess: (c) => navigate(`/connectors/${c.id}`),
+        onError: (e) => setError(e instanceof Error ? e.message : "Create failed"),
+      })
     }
   }
 
@@ -84,12 +119,12 @@ function ConnectorForm({ existing }: { existing?: Connector }) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">Name</label>
+            <Label>Name</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="my-connector" />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium">Type</label>
+            <Label>Type</Label>
             <Select value={type} onChange={(e) => setType(e.target.value as ConnectorType)}>
               {CONNECTOR_TYPES.map((t) => (
                 <option key={t} value={t}>{t.toUpperCase()}</option>
@@ -106,15 +141,25 @@ function ConnectorForm({ existing }: { existing?: Connector }) {
 
           <ConnectorConfigEditor connectorType={type} value={config} onChange={setConfig} />
 
+          {validation && <ValidationResults result={validation} validLabel="Connector is valid." />}
+
           {error && (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            <Callout variant="destructive">
               {error}
-            </div>
+            </Callout>
           )}
 
           <div className="flex justify-end gap-2">
             <Button variant="outline" asChild>
               <Link to={backTo}>Cancel</Link>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleValidate}
+              disabled={validateConnector.isPending}
+            >
+              <ShieldCheck className="h-4 w-4" />
+              {validateConnector.isPending ? "Validating..." : "Validate"}
             </Button>
             <Button onClick={handleSubmit} disabled={isPending}>
               <Save className="h-4 w-4" />
