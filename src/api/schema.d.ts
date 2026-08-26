@@ -1542,11 +1542,25 @@ export interface components {
          */
         DataEnvelope_Vec_FunctionSchemaItem: {
             data: {
-                /** @description `connector`, `control`, `transform`, … */
+                /**
+                 * @description Other accepted spellings — `validation` carries `validate`. Omitted
+                 *     when there are none.
+                 */
+                aliases?: string[];
+                /** @description `connector`, `control`, `data`, or `utility`. */
                 category: string;
                 description: string;
-                input_fields: unknown[];
+                /**
+                 * @description **Absent** for an engine built-in, which declares no input schema and
+                 *     is therefore not input-validated at create time.
+                 */
+                input_fields?: unknown[] | null;
                 name: string;
+                /**
+                 * @description `orion` for a handler Orion implements and input-schema validates,
+                 *     `engine` for a dataflow-rs built-in the engine executes itself.
+                 */
+                source: string;
             }[];
         };
         /**
@@ -1769,13 +1783,27 @@ export interface components {
         ErrorResponse: {
             error: components["schemas"]["ErrorDetail"];
         };
-        /** @description One task-function input schema from `GET /api/v1/admin/functions`. */
+        /** @description One entry of the function catalogue from `GET /api/v1/admin/functions`. */
         FunctionSchemaItem: {
-            /** @description `connector`, `control`, `transform`, … */
+            /**
+             * @description Other accepted spellings — `validation` carries `validate`. Omitted
+             *     when there are none.
+             */
+            aliases?: string[];
+            /** @description `connector`, `control`, `data`, or `utility`. */
             category: string;
             description: string;
-            input_fields: unknown[];
+            /**
+             * @description **Absent** for an engine built-in, which declares no input schema and
+             *     is therefore not input-validated at create time.
+             */
+            input_fields?: unknown[] | null;
             name: string;
+            /**
+             * @description `orion` for a handler Orion implements and input-schema validates,
+             *     `engine` for a dataflow-rs built-in the engine executes itself.
+             */
+            source: string;
         };
         /** @description A liveness / readiness / health probe body. */
         HealthStatus: {

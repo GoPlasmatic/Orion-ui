@@ -47,5 +47,11 @@ playwright-report
 test-results
 .contract-check.d.ts
 
+# Local orion-server state — the embedded SQLite DB an `orion-server` run in
+# this directory creates (the e2e suite needs a live server alongside the UI).
+orion.db
+orion.db-shm
+orion.db-wal
+
 # Planning docs (kept out of the public repo)
 improvements.md

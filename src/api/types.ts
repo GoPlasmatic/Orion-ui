@@ -357,7 +357,33 @@ export interface Task {
   condition?: JsonLogicValue
   function: TaskFunction
   continue_on_error?: boolean
+  // End the workflow once this task has run (dataflow-rs 3.6+). A statement
+  // about *position*, not outcome: a false `condition` does not halt, but a
+  // task that failed under `continue_on_error` still does.
+  terminal?: boolean
 }
+
+/**
+ * A contiguous run of tasks sharing one condition — the guard clause
+ * (*if this, answer and stop*), new in Orion 1.2 / dataflow-rs 3.6.
+ *
+ * In a workflow's `tasks` array a group is an element carrying its own `tasks`
+ * key; a plain task carries `function`. The condition is evaluated **once, on
+ * entry** — a false result skips the whole span without evaluating the
+ * members' own conditions. Groups nest up to 8 deep and their ids share the
+ * task id namespace.
+ */
+export interface TaskGroup {
+  id: string
+  name?: string
+  description?: string
+  condition?: JsonLogicValue
+  terminal?: boolean
+  tasks: Step[]
+}
+
+/** One element of a workflow's `tasks` array: a task, or a group of them. */
+export type Step = Task | TaskGroup
 
 export interface Workflow {
   workflow_id: string
@@ -370,7 +396,9 @@ export interface Workflow {
   status: EntityStatus
   version: number
   rollout_percentage?: number
-  tasks: Task[]
+  // Each element is a `Task` or a `TaskGroup` — use `flattenSteps` for the
+  // leaf tasks the engine actually runs.
+  tasks: Step[]
   // The engine-managed loop over `tasks`, absent for a workflow that runs its
   // tasks once.
   loop?: unknown
@@ -833,7 +861,13 @@ export interface BackupFile {
   modified_at: string
 }
 
-// Workflow function registry (GET admin/functions) — per-function input schemas.
+// Workflow function catalogue (GET admin/functions).
+//
+// Since 1.2 this is *every* name a workflow may use, not just the schema
+// registry: the nine engine built-ins (`map`, `filter`, `log`, `parse_json`,
+// `parse_xml`, `validation`, `publish_json`, `publish_xml`, …) now appear
+// alongside the Orion handlers. The two are told apart by `source`, which is
+// also what explains an absent `input_fields`.
 export type FunctionFieldKind = "string" | "number" | "bool" | "object" | "array" | "any"
 
 export interface FunctionFieldSchema {
@@ -843,11 +877,26 @@ export interface FunctionFieldSchema {
   required: boolean
 }
 
+// `orion` — a handler Orion implements and input-schema validates at create
+// time. `engine` — a dataflow-rs built-in the engine executes itself, which
+// declares no input schema.
+export type FunctionSource = "orion" | "engine" | (string & {})
+
 export interface FunctionSchema {
   name: string
   description: string
+  // `connector` | `control` | `data` | `utility` — open, so unmapped values
+  // must degrade rather than throw.
   category: string
-  input_fields: FunctionFieldSchema[]
+  source: FunctionSource
+  // **Absent** for an engine built-in — omitted rather than nulled, because
+  // absence is the honest encoding of "declares no input schema". Never index
+  // this without a guard.
+  input_fields?: FunctionFieldSchema[] | null
+  // Other accepted spellings — `validation` carries `validate`. Omitted when
+  // there are none, so the catalogue lists one row per function rather than
+  // telling a completion tool there are two.
+  aliases?: string[]
 }
 
 // Data types

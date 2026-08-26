@@ -7,7 +7,15 @@ import {
   useUpdateWorkflow,
   useValidateWorkflow,
 } from "@/hooks/use-workflows"
-import type { JsonLogicValue, ValidationResponse, Workflow } from "@/api/types"
+import type { JsonLogicValue, Step, ValidationResponse, Workflow } from "@/api/types"
+import {
+  countGroups,
+  countLeafSteps,
+  groupMembers,
+  isTaskGroup,
+  lintSteps,
+  type StepIssue,
+} from "@/lib/workflow-steps"
 import { useTheme } from "@/lib/use-theme"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -19,18 +27,78 @@ import { Label } from "@/components/ui/label"
 import { Callout } from "@/components/ui/callout"
 import { PageHeader } from "@/components/shared/page-header"
 import { ValidationResults } from "@/components/shared/validation-results"
-import { ArrowLeft, Braces, Network, Plus, Save, ShieldCheck, Trash2 } from "lucide-react"
+import { ArrowLeft, Braces, Layers, Network, Plus, Save, ShieldCheck, Trash2 } from "lucide-react"
 
+/** One task, as inserted by "Add task". */
+const SAMPLE_TASK = `{
+  "id": "task-1",
+  "name": "My first task",
+  "function": {
+    "name": "map",
+    "input": { "mappings": [] }
+  }
+}`
+
+/** The starting document for a new workflow: a single task. */
 const SAMPLE_TASKS = `[
-  {
-    "id": "task-1",
-    "name": "My first task",
-    "function": {
-      "name": "map",
-      "input": { "mappings": [] }
+${SAMPLE_TASK.split("\n").map((l) => "  " + l).join("\n")}
+]`
+
+/**
+ * A task group — the guard clause, new in Orion 1.2 (dataflow-rs 3.6).
+ *
+ * One condition gates a contiguous run of tasks, evaluated **once on entry**,
+ * and `terminal` ends the workflow after the group runs. Together they remove
+ * the hand-written negation every later task would otherwise have to restate.
+ */
+const SAMPLE_GROUP = `{
+  "id": "reject-unverified",
+  "name": "Reject unverified callers",
+  "condition": { "!": [{ "var": "data.verified" }] },
+  "terminal": true,
+  "tasks": [
+    {
+      "id": "deny",
+      "name": "Answer 403",
+      "function": {
+        "name": "map",
+        "input": { "mappings": [] }
+      }
+    }
+  ]
+}`
+
+/** Every id already in use, across tasks and groups alike. */
+function collectIds(steps: Step[]): Set<string> {
+  const ids = new Set<string>()
+  const walk = (list: Step[]) => {
+    for (const step of list) {
+      if (!step || typeof step !== "object") continue
+      if (typeof step.id === "string") ids.add(step.id)
+      if (isTaskGroup(step)) walk(groupMembers(step))
     }
   }
-]`
+  walk(Array.isArray(steps) ? steps : [])
+  return ids
+}
+
+/**
+ * Rename a snippet's ids so none collides with `taken`, suffixing `-2`, `-3`, …
+ * Mutates the freshly-parsed snippet, which no one else holds a reference to.
+ */
+function uniquifyIds(step: unknown, taken: Set<string>): unknown {
+  if (!step || typeof step !== "object") return step
+  const node = step as Record<string, unknown>
+  if (typeof node.id === "string") {
+    let candidate = node.id
+    let n = 1
+    while (taken.has(candidate)) candidate = `${node.id}-${++n}`
+    node.id = candidate
+    taken.add(candidate)
+  }
+  if (Array.isArray(node.tasks)) node.tasks.forEach((child) => uniquifyIds(child, taken))
+  return node
+}
 
 /**
  * Trigger-condition editor: visual JSONLogic canvas with a JSON escape hatch.
@@ -161,25 +229,66 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
     existing ? JSON.stringify(existing.tasks ?? [], null, 2) : SAMPLE_TASKS
   )
   const [tasksError, setTasksError] = useState<string | null>(null)
+  const [taskIssues, setTaskIssues] = useState<StepIssue[]>([])
   const [validation, setValidation] = useState<ValidationResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const backTo = existing ? `/workflows/${existing.workflow_id}` : "/workflows"
   const editLocked = existing ? existing.status !== "draft" : false
 
+  /**
+   * Parse the tasks editor and run the client-side shape lint.
+   *
+   * The lint is advisory — `POST /workflows/validate` is the authority and
+   * checks the things only the server can (function names against the real
+   * registry, connector closure, JSONLogic compilation). Reporting the
+   * structural problems here means the ones Orion 1.2 turned into create-time
+   * 400s — a group with no `id`, an id colliding across the shared task/group
+   * namespace, an empty `tasks` — surface without a round trip. Issues do not
+   * block Save: the server has the final word, and a lint that refuses to
+   * submit would be a second, disagreeing validator.
+   */
   const parseTasks = (): unknown[] | null => {
+    let parsed: unknown
     try {
-      const parsed = JSON.parse(tasksText)
-      if (!Array.isArray(parsed)) {
-        setTasksError("Tasks must be a JSON array")
-        return null
-      }
-      setTasksError(null)
-      return parsed
+      parsed = JSON.parse(tasksText)
     } catch {
       setTasksError("Tasks are not valid JSON")
+      setTaskIssues([])
       return null
     }
+    if (!Array.isArray(parsed)) {
+      setTasksError("Tasks must be a JSON array")
+      setTaskIssues([])
+      return null
+    }
+    setTasksError(null)
+    setTaskIssues(lintSteps(parsed))
+    return parsed
+  }
+
+  /**
+   * Append a snippet to the step array, renaming its ids so a second insert
+   * does not collide with the first. Ids share one namespace across tasks and
+   * groups, and a duplicate is a create-time 400 — so the editor should not
+   * manufacture one every time the button is pressed.
+   */
+  const appendStep = (snippet: string) => {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(tasksText)
+    } catch {
+      setTasksError("Fix the JSON before inserting a step")
+      return
+    }
+    if (!Array.isArray(parsed)) {
+      setTasksError("Tasks must be a JSON array")
+      return
+    }
+    const next = [...parsed, uniquifyIds(JSON.parse(snippet), collectIds(parsed as Step[]))]
+    setTasksText(JSON.stringify(next, null, 2))
+    setTasksError(null)
+    setTaskIssues(lintSteps(next))
   }
 
   const buildPayload = () => {
@@ -239,6 +348,26 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
   }
 
   const isPending = createWorkflow.isPending || updateWorkflow.isPending
+
+  // Live shape summary for the editor. Parsed on every keystroke, but the
+  // document is a hand-authored task list — small enough that memoizing would
+  // cost more than it saves.
+  const stepSummary = (() => {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(tasksText)
+    } catch {
+      return null
+    }
+    if (!Array.isArray(parsed)) return null
+    const steps = parsed as Step[]
+    const tasks = countLeafSteps(steps)
+    const groups = countGroups(steps)
+    const taskLabel = `${tasks} ${tasks === 1 ? "task" : "tasks"}`
+    return groups > 0
+      ? `${taskLabel} in ${groups} ${groups === 1 ? "group" : "groups"}`
+      : taskLabel
+  })()
 
   return (
     <div className="space-y-6">
@@ -310,7 +439,7 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
 
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <Label className="mb-0">Tasks</Label>
+              <Label className="mb-0">Steps</Label>
               <Link
                 to="/functions"
                 target="_blank"
@@ -319,18 +448,46 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
                 Function reference
               </Link>
             </div>
-            <p className="mb-1 text-xs text-muted-foreground">
-              Ordered JSON array of tasks; each task calls one function. Use Validate to check
-              function names and inputs against the server registry.
+            <p className="mb-2 text-xs text-muted-foreground">
+              Ordered JSON array. An element carrying <code className="font-mono">function</code> is
+              a task; one carrying its own <code className="font-mono">tasks</code> is a{" "}
+              <strong>group</strong> — a single condition gating that whole run, evaluated once on
+              entry. Any step may set <code className="font-mono">terminal: true</code> to end the
+              workflow after it. Use Validate to check function names and inputs against the
+              server registry.
             </p>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => appendStep(SAMPLE_TASK)}>
+                <Plus className="h-3.5 w-3.5" /> Add task
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => appendStep(SAMPLE_GROUP)}>
+                <Layers className="h-3.5 w-3.5" /> Add guard clause
+              </Button>
+              {stepSummary && (
+                <span className="text-xs text-muted-foreground">{stepSummary}</span>
+              )}
+            </div>
             <Textarea
               value={tasksText}
-              onChange={(e) => setTasksText(e.target.value)}
+              onChange={(e) => {
+                setTasksText(e.target.value)
+                setTasksError(null)
+                setTaskIssues([])
+              }}
               rows={14}
               className="font-mono text-sm"
-              aria-label="Tasks JSON"
+              aria-label="Steps JSON"
             />
             {tasksError && <p className="mt-1 text-xs text-destructive">{tasksError}</p>}
+            {taskIssues.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {taskIssues.map((issue, i) => (
+                  <Callout key={i} variant="warning" icon={false} className="px-3.5 py-2">
+                    <span className="font-mono text-xs">{issue.path}</span> — {issue.message}
+                  </Callout>
+                ))}
+              </div>
+            )}
           </div>
 
           {validation && <ValidationResults result={validation} validLabel="Workflow is valid." />}

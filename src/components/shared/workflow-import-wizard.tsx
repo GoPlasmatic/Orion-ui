@@ -32,6 +32,21 @@ interface WorkflowImportWizardProps {
  * test/status endpoints are id-scoped, and `import` returns only counts); if the
  * pasted definition omits an id, those steps are skipped with a note.
  */
+// An empty `tasks` is refused at create since Orion 1.2 (it used to be accepted
+// and then fail the whole engine build on activation), so the placeholder shows
+// a workflow that would actually import.
+const PLACEHOLDER = `{
+  "workflow_id": "my-workflow",
+  "name": "My Workflow",
+  "tasks": [
+    {
+      "id": "task-1",
+      "name": "Shape the payload",
+      "function": { "name": "map", "input": { "mappings": [] } }
+    }
+  ]
+}`
+
 export function WorkflowImportWizard({ open, onClose }: WorkflowImportWizardProps) {
   const { resolvedTheme } = useTheme()
   const validate = useValidateWorkflow()
@@ -185,7 +200,7 @@ export function WorkflowImportWizard({ open, onClose }: WorkflowImportWizardProp
               onChange={(e) => setText(e.target.value)}
               rows={16}
               className="font-mono text-sm"
-              placeholder='{ "workflow_id": "my-workflow", "name": "My Workflow", "tasks": [] }'
+              placeholder={PLACEHOLDER}
             />
             {parseError && <p className="text-xs text-destructive">{parseError}</p>}
           </div>

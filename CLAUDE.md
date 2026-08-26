@@ -50,11 +50,11 @@ real server container (`ghcr.io/goplasmatic/orion`, tag-pinned to the targeted v
 
 ## Architecture
 
-Orion UI is a React 19 dashboard for the Orion workflow engine. It uses Vite 7, TypeScript (strict), Tailwind CSS v4, and TanStack Query/Table.
+Orion UI is a React 19 dashboard for the Orion workflow engine. It uses Vite 8, TypeScript (strict), Tailwind CSS v4, and TanStack Query/Table.
 
 ### Core Domain
 
-Targets the Orion **v1.1** API (dataflow-rs 3.5 / datalogic-rs 5.2). Three primitives with
+Targets the Orion **v1.2** API (dataflow-rs 3.7 / datalogic-rs 5.3). Three primitives with
 Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
 
 - **Channels** — Service endpoints (sync/async, REST/HTTP/Kafka). Config covers `auth`
@@ -62,16 +62,21 @@ Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
   dedup, caching, `origin_allow_list`, `request`, `response`, `validation_logic` and `tracing`;
   `transport_config` is a JSON editor shown for Kafka. Full CRUD (create/edit forms, server-side
   Validate, bulk import, export). `methods` is `string[] | null`.
-- **Workflows** — Task pipelines with JSONLogic conditions. Full authoring via `workflow-form.tsx`
-  (visual condition editor + tasks JSON + server-side Validate), plus import wizard, dry-run test,
-  export, canary rollout (`PATCH /{id}/rollout`), and a **Dependencies** tab backed by
+- **Workflows** — Step pipelines with JSONLogic conditions. A step is a **task** (carries
+  `function`) or, since 1.2, a **task group** (carries its own `tasks`) — one condition gating a
+  contiguous run, plus `terminal` to end the workflow after a step. Full authoring via
+  `workflow-form.tsx` (visual condition editor + steps JSON with a client-side shape lint and
+  task/guard-clause snippets + server-side Validate), plus import wizard, dry-run test, export,
+  canary rollout (`PATCH /{id}/rollout`), and a **Dependencies** tab backed by
   `GET admin/workflows/{id}/dependencies`. Uses `@goplasmatic/dataflow-ui` `WorkflowVisualizer`
   and `@goplasmatic/datalogic-ui` `DataLogicEditor`.
 - **Connectors** — External system connections: `http`, `kafka`, `db`, `cache`, `es`, `storage`,
   **`smtp`**. Full CRUD + Validate + **Test** (reachability probe) + export. Keyed by `id` (a UUID,
   distinct from `name`).
-- **Functions** — Read-only reference page (`/functions`) rendering the server's per-function
-  input-schema registry (`GET admin/functions`).
+- **Functions** — Read-only reference page (`/functions`) rendering the server's function
+  catalogue (`GET admin/functions`). Since 1.2 this is *every* valid function name, not just the
+  schema registry: entries carry `source` (`orion` | `engine`), optional `aliases`, and
+  `input_fields` is **absent** for an engine built-in.
 - **Trace DLQ** — Operator view of the async dead-letter queue (`/trace-dlq`): inspect, requeue,
   purge.
 - **Packages** — Read-only promotion receipts (`/packages`). `PUT admin/packages/{name}` is
@@ -82,6 +87,17 @@ Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
 - **Envelope:** every admin 2xx body puts its payload under `data`. List endpoints add
   `limit`/`offset` alongside, and `total` where the endpoint computes it. `unwrap()` in
   `client.ts` is the helper; `/health` is not an admin route and is *not* wrapped.
+- **Workflow `tasks` is a tree, not a list.** An element carrying its own `tasks` key is a
+  **task group** (the engine's own test — presence of the key, nothing else); one carrying
+  `function` is a task. Any step may set `terminal: true`. Groups nest 8 deep and group ids share
+  the task id namespace. Anything asking "what does this workflow run / reference / cost" must
+  descend — use `flattenSteps`/`countLeafSteps` from `lib/workflow-steps.ts`, never
+  `tasks.length`. `"tasks": []` is a 400 at create since 1.2.
+- **The function catalogue is two lists in one.** `GET admin/functions` serves all 27 valid names.
+  `source: "orion"` rows carry `input_fields` and are input-schema validated at create;
+  `source: "engine"` rows (dataflow-rs built-ins — `map`, `filter`, `log`, `parse_json`, …) **omit**
+  `input_fields` entirely. Never index it without a guard. `validation` carries `validate` in
+  `aliases` rather than appearing twice.
 - **Errors:** non-2xx bodies are `{ error: { code, message, details?, request_id? } }`.
   `client.ts` parses all four onto `ApiError`. `details[]` entries are
   `{ path, code, message, expected?, got? }` — `UNKNOWN_FIELD` is how a retired key spelling
@@ -132,6 +148,18 @@ Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
 - **REST channels:** sync channels with a `route_pattern` are invoked by method + concrete path via
   the data-plane catch-all (`api.send()`); routes match byte-exactly. GET/HEAD send no body.
 - **Async submissions** answer 202 `{ trace_id, trace_token }`.
+- **Metrics carry the `orion_` prefix and every `*_seconds` family is a histogram.** The whole set
+  was renamed in 1.0, and `metrics.rs` sets explicit `LATENCY_BUCKETS` on the `_seconds` suffix
+  *deliberately* — without them the exporter renders a histogram as a summary with per-replica
+  quantiles that cannot be aggregated across a cluster. So there is no `quantile` label to read:
+  latency comes from `_bucket`/`_sum`/`_count` via `histogramQuantile()`/`histogramMean()` in
+  `api/metrics.ts`. `orion_messages_total{status}` is `ok` | `error` | `timeout` | `duplicate`; a
+  duplicate was suppressed by the dedup guard, never processed, so it is kept out of the error-rate
+  denominator.
+- **Per-workflow cost (1.2):** `orion_workflow_duration_seconds{workflow}` measures a whole run and
+  `orion_task_duration_seconds{workflow,task,function}` its task bodies, so the difference is the
+  engine's own overhead (condition evaluation, group gating, loop bookkeeping, audit writes). A
+  workflow its condition or rollout gate rejected is not recorded; a looping workflow records once.
 
 ### Layers
 
@@ -150,7 +178,14 @@ Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
 - **`src/lib/utils.ts`** — `cn()` (clsx + tailwind-merge), `formatDate()`, `formatDuration()`, `parseJson()` (safe parse; returns the *raw string* on failure, not null), `downloadJson()` (the shared export blob helper).
 - **`src/lib/use-pagination.ts`** — `usePagination()` + `PAGE_SIZE`, paired with `PaginationFooter`. Lives in `lib/` because the fast-refresh lint rule forbids non-component exports from component files.
 - **`src/lib/topology.ts`** — client-side channel/workflow/connector graph inference for the *bulk* views (system map, reverse sweeps). For a single workflow prefer `workflowsApi.dependencies()`, which is the server's own answer and also reports dynamic `channel_call` targets.
-- **`src/lib/workflow-mapper.ts`** — Maps API `Workflow` (has `workflow_id`) to `@goplasmatic/dataflow-ui` `Workflow` type (has `id`).
+- **`src/lib/workflow-steps.ts`** — Reading a workflow's step tree: `isTaskGroup`, `groupMembers`,
+  `flattenSteps`, `countLeafSteps`, `countGroups`, `countTerminal`, `groupDepth`, plus `lintSteps`
+  (client-side shape check reporting at the coordinate the author typed). Mirrors the server's
+  `engine/steps.rs`; re-implemented rather than imported from `dataflow-ui` so the API layer does
+  not depend on the visualizer package.
+- **`src/lib/workflow-mapper.ts`** — Maps API `Workflow` (has `workflow_id`) to
+  `@goplasmatic/dataflow-ui` `Workflow` type (has `id`). Walks the step tree rather than casting:
+  the visualizer requires `function.input`, which the API type leaves optional.
 
 ### Routing
 

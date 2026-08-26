@@ -5,6 +5,7 @@ import { useWorkflows } from "@/hooks/use-workflows"
 import { workflowsApi } from "@/api/workflows"
 import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
 import { listTableFeatures } from "@/lib/table"
+import { countLeafSteps } from "@/lib/workflow-steps"
 import type { Workflow, EntityStatus } from "@/api/types"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
@@ -56,7 +57,9 @@ const columns = columnHelper.columns([
   }),
   columnHelper.accessor("tasks", {
     header: "Tasks",
-    cell: (info) => <span className="text-muted-foreground">{info.getValue()?.length ?? 0}</span>,
+    // Leaf count, not `tasks.length`: a task group is one array element holding
+    // a whole span, so the raw length under-reports a grouped workflow.
+    cell: (info) => <span className="text-muted-foreground">{countLeafSteps(info.getValue())}</span>,
   }),
   columnHelper.accessor("updated_at", {
     header: "Updated",

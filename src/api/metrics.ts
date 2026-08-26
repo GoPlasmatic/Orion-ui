@@ -98,29 +98,98 @@ export function sumByLabel(
   return out
 }
 
-// Read a precomputed quantile from a Prometheus summary, e.g.
-// `message_duration_seconds{channel="payments",quantile="0.95"}`. `q` is the
-// quantile label string ("0.5", "0.95", ...). Returns the value (point-in-time)
-// or null if the series is absent.
-export function summaryQuantile(
+// Distinct values a label takes across one metric family, in first-seen order.
+export function labelValues(
   snap: MetricsSnapshot,
   name: string,
-  q: string,
+  label: string,
+  filter?: LabelFilter,
+): string[] {
+  const seen = new Set<string>()
+  for (const l of snap.lines) {
+    if (!matches(l, name, filter)) continue
+    const v = l.labels[label]
+    if (v !== undefined) seen.add(v)
+  }
+  return [...seen]
+}
+
+/**
+ * Estimate a quantile from a Prometheus **histogram**, the way
+ * `histogram_quantile()` does: find the bucket the rank falls in and
+ * interpolate linearly within it.
+ *
+ * Orion sets explicit buckets on every `*_seconds` family
+ * (`metrics.rs::LATENCY_BUCKETS`), deliberately — without them
+ * `metrics-exporter-prometheus` renders a `histogram!` as a *summary* with
+ * pre-computed quantiles, which cannot be aggregated across replicas. So the
+ * wire carries `<name>_bucket{le="…"}`, `<name>_sum` and `<name>_count`, and
+ * there is no `quantile` label anywhere to read.
+ *
+ * Returns null when the family is absent or has observed nothing. Resolution is
+ * bounded by the bucket edges: a value in the open top bucket reports the
+ * highest finite edge rather than +Inf, which is what Prometheus does too.
+ */
+export function histogramQuantile(
+  snap: MetricsSnapshot,
+  name: string,
+  q: number,
   filter?: LabelFilter,
 ): number | null {
+  const bucketName = `${name}_bucket`
+  // Cumulative counts keyed by upper bound. A family split across labels the
+  // filter does not pin (e.g. per-task rows) sums into one aggregate histogram,
+  // which is valid precisely because the buckets are shared.
+  const cumulative = new Map<number, number>()
   for (const l of snap.lines) {
-    if (l.name !== name || l.labels.quantile !== q) continue
-    if (filter) {
-      let ok = true
-      for (const k in filter) {
-        if (l.labels[k] !== filter[k]) {
-          ok = false
-          break
-        }
-      }
-      if (!ok) continue
-    }
-    return l.value
+    if (!matches(l, bucketName, filter)) continue
+    const le = parseValue(l.labels.le ?? "")
+    if (Number.isNaN(le)) continue
+    cumulative.set(le, (cumulative.get(le) ?? 0) + l.value)
   }
-  return null
+  if (cumulative.size === 0) return null
+
+  const edges = [...cumulative.entries()].sort(([a], [b]) => a - b)
+  const total = edges[edges.length - 1][1]
+  if (!(total > 0)) return null
+
+  const rank = q * total
+  let prevEdge = 0
+  let prevCount = 0
+  for (const [le, count] of edges) {
+    if (count >= rank) {
+      if (!Number.isFinite(le)) {
+        // The rank sits in the open top bucket; report the highest finite edge.
+        return prevEdge > 0 ? prevEdge : null
+      }
+      const span = count - prevCount
+      if (span <= 0) return le
+      return prevEdge + ((rank - prevCount) / span) * (le - prevEdge)
+    }
+    prevEdge = Number.isFinite(le) ? le : prevEdge
+    prevCount = count
+  }
+  return prevEdge > 0 ? prevEdge : null
+}
+
+/**
+ * Mean of a histogram over a window, in seconds: Δ_sum / Δ_count between two
+ * scrapes, falling back to the cumulative mean when there is no prior sample.
+ */
+export function histogramMean(
+  prev: MetricsSnapshot | null,
+  cur: MetricsSnapshot | null,
+  name: string,
+  filter?: LabelFilter,
+): number | null {
+  if (!cur) return null
+  const sum = `${name}_sum`
+  const count = `${name}_count`
+  if (prev) {
+    const dSum = counterTotal(cur, sum, filter) - counterTotal(prev, sum, filter)
+    const dCount = counterTotal(cur, count, filter) - counterTotal(prev, count, filter)
+    if (dCount > 0) return dSum / dCount
+  }
+  const n = counterTotal(cur, count, filter)
+  return n > 0 ? counterTotal(cur, sum, filter) / n : null
 }

@@ -1,3 +1,4 @@
+import { flattenSteps } from "@/lib/workflow-steps"
 import type { Channel, Workflow, Connector, EntityStatus } from "@/api/types"
 
 // Pure relationship-graph builder. Operates on already-fetched entity lists (no
@@ -108,7 +109,11 @@ function connectorNameFromInput(input?: Record<string, unknown>): string | undef
 
 export function workflowConnectorRefs(workflow: Workflow): string[] {
   const names = new Set<string>()
-  for (const task of workflow.tasks ?? []) {
+  // `flattenSteps` descends into task groups. Iterating `tasks` directly would
+  // miss every task inside a guard clause — a connector referenced only from
+  // one would render as unreferenced on the system map and survive the
+  // connector-deletion reverse sweep.
+  for (const task of flattenSteps(workflow.tasks)) {
     if (!task.function || !CONNECTOR_FUNCTIONS.has(task.function.name)) continue
     const name = connectorNameFromInput(task.function.input)
     if (name) names.add(name)
@@ -118,7 +123,7 @@ export function workflowConnectorRefs(workflow: Workflow): string[] {
 
 function channelCallTargets(workflow: Workflow): string[] {
   const targets: string[] = []
-  for (const task of workflow.tasks ?? []) {
+  for (const task of flattenSteps(workflow.tasks)) {
     if (task.function?.name !== "channel_call") continue
     const target = task.function.input?.channel
     if (typeof target === "string") targets.push(target)

@@ -28,7 +28,8 @@ import { JsonViewer } from "@/components/shared/json-viewer"
 import { RelationshipGraph } from "@/components/graph/relationship-graph"
 import { WorkflowDependencies } from "@/components/shared/workflow-dependencies"
 import { stepResultBadgeClass } from "@/lib/status"
-import { ArrowLeft, AlertCircle, Pencil, Percent, Play } from "lucide-react"
+import { ArrowLeft, AlertCircle, CircleStop, Layers, Pencil, Percent, Play } from "lucide-react"
+import { countGroups, countLeafSteps, countTerminal } from "@/lib/workflow-steps"
 import type { WorkflowTestResponse } from "@/api/types"
 
 export function WorkflowDetailPage() {
@@ -73,6 +74,12 @@ export function WorkflowDetailPage() {
 
   const isPending = changeStatus.isPending || createVersion.isPending || deleteWorkflow.isPending
 
+  // Orion 1.2 / dataflow-rs 3.6: a `tasks` element carrying its own `tasks` key
+  // is a task group, so the array length is not the number of tasks that run.
+  const taskCount = countLeafSteps(workflow.tasks)
+  const groupCount = countGroups(workflow.tasks)
+  const terminalCount = countTerminal(workflow.tasks)
+
   const handleTest = () => {
     setTestError(null)
     setTestResult(null)
@@ -116,8 +123,20 @@ export function WorkflowDetailPage() {
               </div>
             )}
             <span className="text-sm text-muted-foreground">
-              {workflow.tasks?.length ?? 0} tasks
+              {taskCount} {taskCount === 1 ? "task" : "tasks"}
             </span>
+            {groupCount > 0 && (
+              <Badge variant="outline" className="text-xs" title="Guard clauses — one condition gating a contiguous run of tasks">
+                <Layers className="mr-1 h-3 w-3" />
+                {groupCount} {groupCount === 1 ? "group" : "groups"}
+              </Badge>
+            )}
+            {terminalCount > 0 && (
+              <Badge variant="outline" className="text-xs" title="Steps that end the workflow once they have run">
+                <CircleStop className="mr-1 h-3 w-3" />
+                {terminalCount} terminal
+              </Badge>
+            )}
             {workflow.status === "active" && (
               <Badge variant="outline" className="text-xs">
                 <Percent className="mr-1 h-3 w-3" />

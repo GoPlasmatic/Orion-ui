@@ -14,6 +14,7 @@ import { useHealth } from "@/hooks/use-health"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useTraces } from "@/hooks/use-traces"
 import { useCircuitBreakers } from "@/hooks/use-connectors"
+import { useWorkflows } from "@/hooks/use-workflows"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -97,6 +98,10 @@ export function OperationsPage() {
   const { data: engine } = useEngineStatus()
   const { data: health } = useHealth()
   const metrics = useMetrics()
+  // `orion_workflow_duration_seconds{workflow}` labels by workflow *id* (the
+  // authored id, never a caller-supplied value — that is what bounds the label
+  // cardinality). Join against the list so the table reads as names.
+  const { data: workflowList } = useWorkflows({ limit: 200 })
   const { data: breakers } = useCircuitBreakers({ refetchInterval: 15_000 })
   const { data: recentTraces } = useTraces(
     { limit: 6, sort_by: "created_at", sort_order: "desc" },
@@ -121,6 +126,7 @@ export function OperationsPage() {
 
   // ---- Outcome distribution (generic per-channel terminal status mix) ----
   const outcome = metrics.outcomeByChannel.filter((c) => c.channel)
+  const workflowNames = new Map((workflowList?.data ?? []).map((w) => [w.workflow_id, w.name]))
   const outcomeStatuses = Array.from(
     new Set(outcome.flatMap((c) => c.segments.map((s) => s.status))),
   )
@@ -379,6 +385,85 @@ export function OperationsPage() {
         </CardContent>
       </Card>
       </div>
+
+      {/* Workflow cost — new in Orion 1.2. `orion_workflow_duration_seconds`
+          measures a whole run and `orion_task_duration_seconds` its task
+          bodies, so the difference is the engine's own overhead. Before 1.2
+          this existed only as a residual inside the opt-in per-request
+          profile, where it absorbed everything else unmeasured. */}
+      <Card>
+        <CardHeader className="flex h-[3.25rem] flex-row items-center justify-between pb-2">
+          <CardTitle>Workflow cost</CardTitle>
+          <Button variant="ghost" size="sm" onClick={() => navigate("/workflows")}>
+            View all
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {metrics.workflows.length === 0 ? (
+            <p className="py-4 text-sm text-muted-foreground">
+              No workflow runs recorded yet. A workflow skipped by its condition or rollout gate is
+              not measured.
+            </p>
+          ) : (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Workflow</TableHead>
+                    <TableHead className="text-right">Runs</TableHead>
+                    <TableHead className="text-right">Mean</TableHead>
+                    <TableHead className="text-right">p95</TableHead>
+                    <TableHead className="text-right">Engine</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {metrics.workflows.slice(0, 8).map((w) => (
+                    <TableRow
+                      key={w.workflow}
+                      className={workflowNames.has(w.workflow) ? "cursor-pointer" : undefined}
+                      onClick={
+                        workflowNames.has(w.workflow)
+                          ? () => navigate(`/workflows/${w.workflow}`)
+                          : undefined
+                      }
+                    >
+                      <TableCell className="font-medium" title={w.workflow}>
+                        {workflowNames.get(w.workflow) ?? w.workflow}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">
+                        {w.runs.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatDuration(w.meanMs)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">
+                        {formatDuration(w.p95Ms)}
+                      </TableCell>
+                      <TableCell
+                        className="text-right tabular-nums text-muted-foreground"
+                        title={
+                          w.taskMs == null
+                            ? undefined
+                            : `${formatDuration(w.taskMs)} in ${w.taskCount} task${w.taskCount === 1 ? "" : "s"}, ${formatDuration(w.overheadMs)} in the engine`
+                        }
+                      >
+                        {formatDuration(w.overheadMs)}
+                        {w.overheadPct != null && (
+                          <span className="ml-1 text-xs">({w.overheadPct.toFixed(0)}%)</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <p className="mt-3 text-xs text-muted-foreground">
+                <span className="font-medium">Engine</span> is the run minus its task bodies —
+                condition evaluation, group gating, loop bookkeeping and audit writes.
+              </p>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }
