@@ -724,12 +724,37 @@ export interface HealthResponse {
   // Per-subsystem state: database, engine, connectors, channels, plus kafka
   // when enabled and cluster_redis in cluster mode.
   components: Record<string, string>
-  connectors: Record<string, unknown>
+  /**
+   * Connector health. `failed_to_load` names connectors the engine could not
+   * bring up, so every task using one is failing right now.
+   *
+   * The spec's `HealthStatus` schema declares only status/version/
+   * uptime_seconds/components — the rest of this body is served but
+   * undocumented, which is why these are optional and the index signature
+   * stays. Verified against a live 1.2.0 server.
+   */
+  connectors: {
+    circuit_breaker_scope?: string
+    circuit_breakers?: Record<string, string>
+    failed_to_load?: string[]
+    [key: string]: unknown
+  }
+  /**
+   * `quarantined` names channels the engine refused to serve — most often an
+   * unresolved `env://` reference in the config. The route simply does not
+   * exist, on a server that still reports healthy, which is exactly the
+   * silent-success failure worth surfacing loudly.
+   */
+  channels?: {
+    quarantined?: string[]
+    [key: string]: unknown
+  }
   workflows_loaded: number
   uptime_seconds: number
   version: string
   // Build provenance, served only to an admin caller.
   git_hash?: string | null
+  build_timestamp?: string | null
 }
 
 // Trace types
