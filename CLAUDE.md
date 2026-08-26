@@ -93,6 +93,23 @@ Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
   the task id namespace. Anything asking "what does this workflow run / reference / cost" must
   descend — use `flattenSteps`/`countLeafSteps` from `lib/workflow-steps.ts`, never
   `tasks.length`. `"tasks": []` is a 400 at create since 1.2.
+- **Three identifier spaces, and `channel_call` uses the third.** `channel.channel_id` is a
+  **UUID**; `channel.name` is the slug; `workflow.workflow_id` is a slug equal to the channel's
+  `workflow_id`, while `workflow.name` is a human title ("Auth - login"). A `channel_call` task's
+  `input.channel` names the channel **by `name`**, and `orion_messages_total{channel}` is labelled
+  the same way. Resolve a call target through `channelsByName` — `channelsById` is UUID-keyed and
+  misses every time, which is how the relationship graphs used to render every callee as a dashed
+  "missing" node and stop the walk one hop in.
+- **`orion_messages_total` counts ingress, not execution.** A channel reached only by
+  `channel_call` — every `internal-*` route in a fan-out design — is dispatched inside the engine
+  and gets **no series at all**, in that family or in `orion_workflow_duration_seconds`. So the
+  busiest dependency in a system reads as permanently idle unless load is inferred from its
+  callers (`deriveLoad` in `lib/traffic-encoding.ts`). Nothing attributes an arrival to a
+  particular caller either, so per-edge volume is an upper bound, never a measurement.
+- **`status` on `orion_messages_total` gained `unauthorized` in 1.2**, beyond the documented
+  `ok` | `error` | `timeout` | `duplicate`. It is refused at the edge and never runs a workflow,
+  so counting it as an error reports a correctly-guarded channel as broken, while folding it into
+  "ok" hides a channel serving nothing but 401s. `use-metrics.ts` keeps it out of both.
 - **The function catalogue is two lists in one.** `GET admin/functions` serves all 27 valid names.
   `source: "orion"` rows carry `input_fields` and are input-schema validated at create;
   `source: "engine"` rows (dataflow-rs built-ins — `map`, `filter`, `log`, `parse_json`, …) **omit**
@@ -177,7 +194,24 @@ Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
 - **`src/components/layout/`** — `AppLayout`, `Sidebar`, `Header`.
 - **`src/lib/utils.ts`** — `cn()` (clsx + tailwind-merge), `formatDate()`, `formatDuration()`, `parseJson()` (safe parse; returns the *raw string* on failure, not null), `downloadJson()` (the shared export blob helper).
 - **`src/lib/use-pagination.ts`** — `usePagination()` + `PAGE_SIZE`, paired with `PaginationFooter`. Lives in `lib/` because the fast-refresh lint rule forbids non-component exports from component files.
-- **`src/lib/topology.ts`** — client-side channel/workflow/connector graph inference for the *bulk* views (system map, reverse sweeps). For a single workflow prefer `workflowsApi.dependencies()`, which is the server's own answer and also reports dynamic `channel_call` targets.
+- **`src/lib/topology.ts`** — client-side channel/workflow/connector graph inference for the
+  *per-entity* neighbourhoods embedded on the detail pages (`RelationshipGraph`). For a single
+  workflow prefer `workflowsApi.dependencies()`, which is the server's own answer and also reports
+  dynamic `channel_call` targets. Call targets resolve through `channelsByName` — see the
+  identifier note above.
+- **`src/lib/system-graph.ts`** — the *whole* system as one graph, for the System Map:
+  `buildSystemGraph` (one node per channel with its workflow folded in, edges from `channel_call`,
+  plus fan-in/fan-out, tier and connector fan-in) and `neighbourhood` (bidirectional blast
+  radius). Channels are keyed by **name**, because that is what calls and metrics both use.
+  Connectors are deliberately not nodes: one used by 51 of 62 workflows adds an edge everywhere
+  and distinguishes nothing, so they ride the referencing node and render as a rail.
+- **`src/lib/traffic-encoding.ts`** — how telemetry becomes shape and colour: health thresholds,
+  the sqrt dot scale (a dot reads as an *area*), and `deriveLoad`, which propagates load in tier
+  order to the channels the exporter cannot see.
+- **`src/lib/elk-layout.ts`** — ELK layered layout for the map, dynamically imported so ~1.4 MB of
+  layout engine stays off every other route's critical path. Channels with no calls in either
+  direction are grid-packed rather than layered: a layered algorithm puts all of them in the first
+  layer, as one very tall column whose height means nothing.
 - **`src/lib/workflow-steps.ts`** — Reading a workflow's step tree: `isTaskGroup`, `groupMembers`,
   `flattenSteps`, `countLeafSteps`, `countGroups`, `countTerminal`, `groupDepth`, plus `lintSteps`
   (client-side shape check reporting at the coordinate the author typed). Mirrors the server's

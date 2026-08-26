@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import {
   fetchMetrics,
@@ -132,6 +132,204 @@ export interface WorkflowMetric {
   /** Overhead as a share of the run. Null when there is nothing to divide by. */
   overheadPct: number | null
   taskCount: number
+}
+
+/**
+ * Per-channel traffic over a *sliding window*, for the System Map.
+ *
+ * `useMetrics` reports cumulative-since-server-start plus a one-poll-delta rate.
+ * A traffic map needs neither: it needs "what has this channel been doing over
+ * the last N seconds", which is the delta between the newest snapshot and the
+ * oldest one still inside the window. That is what the module-scope ring buffer
+ * is already accumulating, so this reads the same buffer and issues no extra
+ * request — the query key is shared, so TanStack dedupes it against `useMetrics`
+ * rather than starting a second poller.
+ *
+ * The window is bounded by the buffer: MAX_SAMPLES at the poll interval, and by
+ * however long the page has been open. `spanSec` reports what was actually
+ * covered so the UI can say so instead of implying a full window it does not
+ * have.
+ */
+export interface ChannelTraffic {
+  channel: string
+  /** Requests per minute across the window. Null until two samples exist. */
+  ratePerMin: number | null
+  /** Requests observed inside the window. */
+  windowed: number
+  ok: number
+  /** `error` + `timeout` — the engine actually ran and it went wrong. */
+  failed: number
+  /**
+   * Statuses that are neither ok, failure nor duplicate — 1.2 added
+   * `unauthorized`, which is refused at the edge and never reaches a workflow.
+   * Counting it as an error reports a correctly-guarded channel as broken;
+   * dropping it reports a channel serving nothing but 401s as perfectly healthy.
+   * So it is its own category.
+   */
+  rejected: number
+  /** Suppressed by the dedup guard — never processed, never an error. */
+  duplicate: number
+  /** failed / (ok + failed). Null when nothing was processed in the window. */
+  errorPct: number | null
+  /** rejected / windowed. Null when there was no traffic. */
+  rejectedPct: number | null
+  /** The most common non-ok status in the window, for labelling. */
+  dominantIssue: string | null
+  /** Cumulative p95 since server start: the histogram is not windowable here. */
+  p95Ms: number | null
+  /** Cumulative requests since server start. */
+  total: number
+}
+
+export interface TrafficWindow {
+  isLoading: boolean
+  isError: boolean
+  available: boolean
+  /** Seconds actually covered — may be short of the requested window. */
+  spanSec: number
+  /** True once two samples exist, i.e. once a rate can be computed at all. */
+  hasRate: boolean
+  lastUpdated: number | null
+  channels: ChannelTraffic[]
+  byChannel: Map<string, ChannelTraffic>
+  totalRatePerMin: number | null
+  /** Channels that saw any traffic inside the window. */
+  activeCount: number
+}
+
+function statusesByChannel(snap: MetricsSnapshot): Map<string, Map<string, number>> {
+  const out = new Map<string, Map<string, number>>()
+  for (const l of snap.lines) {
+    if (l.name !== MESSAGES) continue
+    const channel = l.labels.channel
+    if (!channel) continue
+    const inner = out.get(channel) ?? new Map<string, number>()
+    inner.set(l.labels.status ?? "unknown", (inner.get(l.labels.status ?? "unknown") ?? 0) + l.value)
+    out.set(channel, inner)
+  }
+  return out
+}
+
+export function useChannelTraffic(windowSec: number, paused = false): TrafficWindow {
+  const query = useQuery({
+    queryKey: ["metrics"],
+    queryFn: fetchMetrics,
+    refetchInterval: paused ? false : 10_000,
+  })
+
+  const t = query.data?.t
+  useEffect(() => {
+    if (query.data) pushSample(query.data)
+  }, [t]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const cur = query.data ?? null
+
+  return useMemo(() => {
+    const empty: TrafficWindow = {
+      isLoading: query.isLoading,
+      isError: query.isError,
+      available: false,
+      spanSec: 0,
+      hasRate: false,
+      lastUpdated: cur?.t ?? null,
+      channels: [],
+      byChannel: new Map(),
+      totalRatePerMin: null,
+      activeCount: 0,
+    }
+    if (!cur || cur.lines.length === 0) return empty
+
+    // Oldest sample still inside the window. Strictly older than `cur` so the
+    // span is non-zero; absent on the very first poll, which is what leaves
+    // every rate null rather than reporting a fabricated zero.
+    const floor = cur.t - windowSec * 1000
+    let base: MetricsSnapshot | null = null
+    for (const s of history) {
+      if (s.t >= cur.t) break
+      if (s.t >= floor) {
+        base = s
+        break
+      }
+    }
+    // Nothing inside the window but something before it: fall back to the most
+    // recent older sample so a long window still reports a rate early on.
+    if (!base) {
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].t < cur.t) {
+          base = history[i]
+          break
+        }
+      }
+    }
+
+    const spanSec = base ? (cur.t - base.t) / 1000 : 0
+    const hasRate = spanSec > 0
+    const curByCh = statusesByChannel(cur)
+    const baseByCh = base ? statusesByChannel(base) : new Map<string, Map<string, number>>()
+
+    const channels: ChannelTraffic[] = []
+    for (const [channel, statuses] of curByCh) {
+      const before = baseByCh.get(channel)
+      let ok = 0
+      let failed = 0
+      let rejected = 0
+      let duplicate = 0
+      let total = 0
+      const issues = new Map<string, number>()
+
+      for (const [status, value] of statuses) {
+        total += value
+        // A restarted server resets its counters; a negative delta is that, not
+        // negative traffic.
+        const delta = Math.max(0, value - (before?.get(status) ?? 0))
+        if (delta > 0 && status !== "ok") issues.set(status, delta)
+        if (SUCCESS_STATUSES.has(status)) ok += delta
+        else if (FAILURE_STATUSES.has(status)) failed += delta
+        else if (status === "duplicate") duplicate += delta
+        else rejected += delta
+      }
+
+      const windowed = ok + failed + rejected + duplicate
+      const processed = ok + failed
+      const p95s = histogramQuantile(cur, DURATION, P95, { channel })
+      const dominantIssue =
+        [...issues.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
+
+      channels.push({
+        channel,
+        ratePerMin: hasRate ? (windowed / spanSec) * 60 : null,
+        windowed,
+        ok,
+        failed,
+        rejected,
+        duplicate,
+        errorPct: processed > 0 ? (failed / processed) * 100 : null,
+        rejectedPct: windowed > 0 ? (rejected / windowed) * 100 : null,
+        dominantIssue,
+        p95Ms: p95s == null ? null : p95s * 1000,
+        total,
+      })
+    }
+
+    channels.sort((a, b) => b.windowed - a.windowed || a.channel.localeCompare(b.channel))
+    const byChannel = new Map(channels.map((c) => [c.channel, c]))
+    const totalRate = hasRate
+      ? channels.reduce((sum, c) => sum + (c.ratePerMin ?? 0), 0)
+      : null
+
+    return {
+      isLoading: query.isLoading,
+      isError: query.isError,
+      available: true,
+      spanSec,
+      hasRate,
+      lastUpdated: cur.t,
+      channels,
+      byChannel,
+      totalRatePerMin: totalRate,
+      activeCount: channels.filter((c) => c.windowed > 0).length,
+    }
+  }, [cur, windowSec, query.isLoading, query.isError])
 }
 
 export function useMetrics() {

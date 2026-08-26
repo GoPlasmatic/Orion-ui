@@ -121,7 +121,15 @@ export function workflowConnectorRefs(workflow: Workflow): string[] {
   return [...names]
 }
 
-function channelCallTargets(workflow: Workflow): string[] {
+/**
+ * Channel names targeted by `channel_call` tasks.
+ *
+ * These are **names**, not `channel_id`s — `input.channel` names the channel the
+ * way an author writes it. Resolving one therefore goes through
+ * `channelsByName`; looking it up in `channelsById` (a UUID map on a real
+ * server) silently misses every time.
+ */
+export function channelCallTargets(workflow: Workflow): string[] {
   const targets: string[] = []
   for (const task of flattenSteps(workflow.tasks)) {
     if (task.function?.name !== "channel_call") continue
@@ -222,8 +230,16 @@ export function buildChannelTopology(rootChannelId: string, idx: EntityIndex): T
           b.addEdge(wfNode.id, node.id, "uses")
         }
         for (const target of channelCallTargets(wf)) {
-          b.addEdge(wfNode.id, `channel:${target}`, "calls")
-          queue.push({ channelId: target, depth: depth + 2 })
+          // `target` is a channel NAME. Feeding it to the id-keyed queue made
+          // every call target resolve to `undefined`, render as a dashed
+          // "missing" node, and stop the walk one hop in — so a map of a
+          // channel that calls others showed neither the callee nor anything
+          // beyond it.
+          const callee = idx.channelsByName.get(target)
+          const node = channelNode(callee, callee?.channel_id ?? target, depth + 2)
+          b.addNode(node)
+          b.addEdge(wfNode.id, node.id, "calls")
+          if (callee) queue.push({ channelId: callee.channel_id, depth: depth + 2 })
         }
       }
     }
@@ -253,7 +269,9 @@ export function buildWorkflowNeighborhood(workflowId: string, idx: EntityIndex):
       b.addEdge(wfNode.id, node.id, "uses")
     }
     for (const target of channelCallTargets(wf)) {
-      const node = channelNode(idx.channelsById.get(target), target, 2)
+      // Targets are names — see channelCallTargets.
+      const callee = idx.channelsByName.get(target)
+      const node = channelNode(callee, callee?.channel_id ?? target, 2)
       b.addNode(node)
       b.addEdge(wfNode.id, node.id, "calls")
     }

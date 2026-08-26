@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useNavigate } from "react-router"
+import { useNavigate, useSearchParams } from "react-router"
 import { useTraces } from "@/hooks/use-traces"
 import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
 import { listTableFeatures } from "@/lib/table"
@@ -68,12 +68,26 @@ const sortableColumns: Record<string, TraceSortBy> = {
 
 export function TracesPage() {
   const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
   const { offset, reset: resetPage, prev, next } = usePagination()
   const [sortBy, setSortBy] = useState<TraceSortBy>("created_at")
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc")
-  const [statusFilter, setStatusFilter] = useState("")
-  const [channelFilter, setChannelFilter] = useState("")
+  const [statusFilter, setStatusFilter] = useState(() => params.get("status") ?? "")
+  // Seeded from the URL so the System Map (and any other page) can hand off a
+  // channel and land here already filtered to it, rather than dropping the
+  // operator into an unfiltered list and asking them to retype the name.
+  const [channelFilter, setChannelFilter] = useState(() => params.get("channel") ?? "")
   const [modeFilter, setModeFilter] = useState("")
+
+  // Keep the URL in step so the filtered view is linkable and survives a reload.
+  function updateChannelFilter(value: string) {
+    setChannelFilter(value)
+    const next = new URLSearchParams(params)
+    if (value) next.set("channel", value)
+    else next.delete("channel")
+    setParams(next, { replace: true })
+    resetPage()
+  }
 
   // This page shows a count, so it opts into the total explicitly — every other
   // trace read (analytics, the operations dashboard) leaves it off and does not
@@ -145,10 +159,7 @@ export function TracesPage() {
         <Input
           placeholder="Filter by channel..."
           value={channelFilter}
-          onChange={(e) => {
-            setChannelFilter(e.target.value)
-            resetPage()
-          }}
+          onChange={(e) => updateChannelFilter(e.target.value)}
           className="w-48"
         />
         <Select
