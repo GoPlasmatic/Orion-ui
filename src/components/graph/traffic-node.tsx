@@ -132,8 +132,9 @@ export function TrafficNode({ data, selected }: NodeProps) {
     return (
       <div
         style={{ width: COMPACT_W, height: COMPACT_H }}
+        title={node.name}
         className={cn(
-          "flex items-center gap-2 rounded-lg border bg-card px-2.5 shadow-xs transition-opacity",
+          "flex items-center gap-2 rounded-lg border border-border/70 bg-card/80 px-2.5 shadow-xs transition-opacity",
           node.unresolved && "border-dashed",
           isSelected && "border-primary ring-2 ring-ring/60",
           dimmed && "opacity-30",
@@ -146,7 +147,7 @@ export function TrafficNode({ data, selected }: NodeProps) {
             derived ? "border-2 border-primary" : healthDot[level],
           )}
         />
-        <p className="truncate text-xs font-medium">{node.name}</p>
+        <p className="truncate text-xs font-medium text-foreground/80">{node.name}</p>
         {node.unresolved && <HelpCircle className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />}
       </div>
     )
@@ -155,6 +156,7 @@ export function TrafficNode({ data, selected }: NodeProps) {
   return (
     <div
       style={{ width: NODE_W, height: NODE_H }}
+      title={node.name}
       className={cn(
         "flex items-center gap-1.5 rounded-xl border bg-card px-2 py-1.5 shadow-xs transition-opacity",
         node.unresolved && "border-dashed",

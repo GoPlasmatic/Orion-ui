@@ -208,10 +208,14 @@ Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
 - **`src/lib/traffic-encoding.ts`** — how telemetry becomes shape and colour: health thresholds,
   the sqrt dot scale (a dot reads as an *area*), and `deriveLoad`, which propagates load in tier
   order to the channels the exporter cannot see.
-- **`src/lib/elk-layout.ts`** — ELK layered layout for the map, dynamically imported so ~1.4 MB of
-  layout engine stays off every other route's critical path. Channels with no calls in either
-  direction are grid-packed rather than layered: a layered algorithm puts all of them in the first
-  layer, as one very tall column whose height means nothing.
+- **`src/lib/map-layout.ts`** — the map's layout: one lane per call tier, with **every** channel
+  nothing calls in the entry lane whether or not it calls anything itself (an entry channel that
+  makes no calls is reached over its route — it is not an orphan, and the old ELK-plus-leftover-grid
+  layout that banded such channels as "not reached by any call" was wrong about that). Entries
+  sharing one dependency set (3+) are drawn as a **cluster** box with a single edge per callee, so
+  eighteen routes that all call `internal-session-check` are one line, not eighteen; the call-less
+  entries are just another cluster ("no calls out"). Barycenter ordering keeps a hub among its
+  callers. Pure, synchronous, no dependency.
 - **`src/lib/workflow-steps.ts`** — Reading a workflow's step tree: `isTaskGroup`, `groupMembers`,
   `flattenSteps`, `countLeafSteps`, `countGroups`, `countTerminal`, `groupDepth`, plus `lintSteps`
   (client-side shape check reporting at the coordinate the author typed). Mirrors the server's

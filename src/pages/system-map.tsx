@@ -57,7 +57,7 @@ const WINDOWS = [
   { value: 600, label: "10 min" },
 ]
 
-type ViewMode = "traffic" | "all"
+type LifecycleFilter = "active" | "all"
 
 function formatSpan(seconds: number): string {
   if (seconds <= 0) return "waiting for a second sample"
@@ -81,7 +81,7 @@ export function SystemMapPage() {
 
   const [windowSec, setWindowSec] = useState(300)
   const [paused, setPaused] = useState(false)
-  const [view, setView] = useState<ViewMode>("traffic")
+  const [lifecycle, setLifecycle] = useState<LifecycleFilter>("active")
   const [sizeMetric, setSizeMetric] = useState<SizeMetric>("rate")
   const [colorMetric, setColorMetric] = useState<ColorMetric>("health")
   const [search, setSearch] = useState("")
@@ -110,20 +110,20 @@ export function SystemMapPage() {
   const load = useMemo(() => deriveLoad(graph, traffic.byChannel), [graph, traffic.byChannel])
 
   /**
-   * What the canvas draws.
+   * What the canvas draws: every live channel, by default. Traffic is a
+   * highlight, not a filter — hiding the idle channels used to make the map
+   * collapse to whichever three routes had been hit, with no sense of where
+   * they sat in the system.
    *
-   * In traffic view the active channels are the subject and their direct call
-   * neighbours come along as context — an edge with one end missing tells you
-   * nothing. Search and tag narrow the same way, so filtering never severs a
-   * call from the thing on the other side of it.
+   * Whatever the filters keep, its direct call neighbours come along as
+   * context — an edge with one end missing tells you nothing — so filtering
+   * never severs a call from the thing on the other side of it.
    */
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase()
     let seeds = graph.nodes
 
-    if (view === "traffic" && traffic.activeCount > 0) {
-      seeds = seeds.filter((n) => (traffic.byChannel.get(n.id)?.windowed ?? 0) > 0)
-    }
+    if (lifecycle === "active") seeds = seeds.filter((n) => n.status === "active")
     if (tag) seeds = seeds.filter((n) => n.tags.includes(tag))
     if (term) {
       seeds = seeds.filter(
@@ -140,7 +140,7 @@ export function SystemMapPage() {
       for (const other of [...node.callers, ...node.callees]) ids.add(other)
     }
     return ids
-  }, [graph.nodes, view, tag, search, traffic.activeCount, traffic.byChannel])
+  }, [graph.nodes, lifecycle, tag, search])
 
   const selected = selectedId ? (graph.byId.get(selectedId) ?? null) : null
 
@@ -182,7 +182,7 @@ export function SystemMapPage() {
     <div className="flex h-full flex-col gap-3">
       <PageHeader
         title="System Map"
-        description="Live traffic across the channel call graph — dot size is throughput, colour is health"
+        description="Every live channel, entry points on the left and what they call to the right — dot size is throughput, colour is health"
       >
         <Button
           variant={paused ? "outline" : "secondary"}
@@ -217,13 +217,13 @@ export function SystemMapPage() {
           />
         </div>
         <Select
-          value={view}
-          onChange={(e) => setView(e.target.value as ViewMode)}
+          value={lifecycle}
+          onChange={(e) => setLifecycle(e.target.value as LifecycleFilter)}
           className="w-full sm:w-40"
-          aria-label="View"
+          aria-label="Lifecycle"
         >
-          <option value="traffic">Carrying traffic</option>
-          <option value="all">All channels</option>
+          <option value="active">Live channels</option>
+          <option value="all">All lifecycles</option>
         </Select>
         {graph.tags.length > 0 && (
           <Select
@@ -296,10 +296,9 @@ export function SystemMapPage() {
         </Callout>
       )}
 
-      {view === "traffic" && traffic.activeCount === 0 && (
+      {traffic.activeCount === 0 && (
         <Callout variant="muted" className="py-2 text-xs">
-          No channel has carried traffic since this page opened, so the whole call graph is shown.
-          Send a request from the{" "}
+          No channel has carried traffic in the {spanLabel}. Send a request from the{" "}
           <Link to="/console" className="underline underline-offset-2">
             Data Console
           </Link>{" "}
@@ -320,8 +319,8 @@ export function SystemMapPage() {
             onSelect={(node) => setSelectedId(node?.id ?? null)}
           />
           <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border bg-card/90 px-2 py-1 text-[10px] text-muted-foreground shadow-xs backdrop-blur">
-            {visible.size} of {graph.nodes.length} channels · {traffic.activeCount} active ·{" "}
-            {spanLabel}
+            {visible.size} of {graph.nodes.length} channels · {traffic.activeCount} carrying
+            traffic · {spanLabel}
           </div>
         </Card>
 
