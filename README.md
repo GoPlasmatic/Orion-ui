@@ -11,7 +11,7 @@
   [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
   [![React](https://img.shields.io/badge/react-19-blue.svg)](https://react.dev)
   [![TypeScript](https://img.shields.io/badge/typescript-5.9-blue.svg)](https://www.typescriptlang.org)
-  [![Vite](https://img.shields.io/badge/vite-7-purple.svg)](https://vite.dev)
+  [![Vite](https://img.shields.io/badge/vite-8-purple.svg)](https://vite.dev)
 </div>
 
 <table>
@@ -26,9 +26,9 @@
     <td width="50%" align="center">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="media/ui-system-map-dark.png">
-        <img src="media/ui-system-map-light.png" alt="System Map — a channel traced through its workflow and connectors as a topology graph">
+        <img src="media/ui-system-map-light.png" alt="System Map — every live channel laid out by role: entry channels on the left, the channels they call to the right, with live traffic lighting up the ones serving requests">
       </picture>
-      <em>System Map</em>
+      <em>System Map — live traffic across the call graph</em>
     </td>
   </tr>
   <tr>
@@ -49,10 +49,11 @@
   </tr>
 </table>
 
-All screenshots are generated from a live instance by the
+All screenshots are captured from a live instance seeded with the main repo's
+[example packages](https://github.com/GoPlasmatic/Orion/tree/main/examples/packages), following the
 [recording pipeline](https://github.com/GoPlasmatic/Orion/tree/main/docs/recordings)
-in the main repo — the ~50-second console walkthrough GIF there shows this UI taking
-a service from nothing to live without writing code.
+there — whose ~50-second console walkthrough shows this UI taking a service from
+nothing to live without writing code.
 
 ---
 
@@ -102,7 +103,7 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 | Feature | Description |
 |---------|-------------|
 | **Operations** | Live KPIs at a glance — requests/min, error rate, average and p95 latency, and a "what needs attention" feed |
-| **System Map** | Topology view: trace any channel through its workflow, downstream channels, and connectors |
+| **System Map** | Every live channel on one canvas, laid out by role — entry channels, then what they call, tier by tier — with live traffic, health and latency drawn on the nodes and edges; click any channel for its blast radius |
 | **Channels** | Full lifecycle management — create, edit, version, activate/archive, bulk import, structured config editor (rate limits with key logic, cache, dedup, CORS, validation logic, tracing, Kafka transport) |
 | **Workflows** | Full authoring — create/edit drafts with a visual JSONLogic condition editor, server-side validation, dry-run testing, import/export, version compare, and canary rollout controls; visual DAG (tree/flow/graph views) |
 | **Connectors** | Create and manage HTTP, database, Kafka, cache, storage, and Elasticsearch connectors — including per-operation gates on db/es (make a connector delete-proof with one toggle) |
@@ -119,13 +120,15 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 | Route | Description |
 |-------|-------------|
 | `/` | Operations dashboard — live KPIs and attention feed |
-| `/system-map` | Channel → workflow → connector topology graph |
+| `/system-map` | Live traffic map of the channel call graph |
 | `/channels`, `/channels/new`, `/channels/:id`, `/channels/:id/edit` | Channel list, creation, detail, editing |
 | `/workflows`, `/workflows/new`, `/workflows/:id`, `/workflows/:id/edit` | Workflow list, authoring, visual DAG detail with dry-run and rollout |
-| `/functions` | Workflow function reference (input schemas) |
+| `/functions` | Workflow function reference (input schemas, incl. which fields take a `{"secret": …}`) |
+| `/packages` | Promotion receipts (read-only) |
 | `/connectors`, `/connectors/new`, `/connectors/:id`, `/connectors/:id/edit` | Connector management |
 | `/circuit-breakers` | Circuit breaker status and reset |
 | `/traces`, `/traces/:id` | Execution traces and per-task drill-down |
+| `/trace-dlq` | Async dead-letter queue — inspect, requeue, purge |
 | `/audit` | Audit log |
 | `/console` | Data console for test requests (channel or REST method + path) |
 | `/settings` | Engine reload, backups, and API docs |
