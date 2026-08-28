@@ -24,7 +24,7 @@ fixed everything. When that happens, delete both this file and the script.
 
 ## Patch 1 — missing `OnConflict` / `ReloadMode` components
 
-**Server version affected:** 1.1.0
+**Server version affected:** 1.1.0 — still present in 1.3.1
 **Status:** open upstream — not yet reported
 
 Six query parameters `$ref` these two schema components, but neither is

@@ -36,6 +36,13 @@ export type ErrorFieldCode =
   | "DUPLICATE_FIELD"
   | "DUPLICATE_TASK_ID"
   | "UNKNOWN_FUNCTION"
+  // 1.2.1: the document still carries a definition-set authoring convenience
+  // (`$from`, `use`) that only `orion-server compile` resolves.
+  | "UNCOMPILED_SOURCE"
+  // 1.3: an `env://` / `vault://` reference in a field that does not resolve
+  // one, so it would be sent on as literal text. Reported at create, update
+  // and validate; a stored workflow carrying one keeps running.
+  | "UNRESOLVED_SECRET_REF"
   | (string & {})
 
 export interface ErrorFieldDetail {
@@ -718,6 +725,11 @@ export interface EngineReloaded {
   workflows_count: number
 }
 
+export interface ChannelLoadIssue {
+  channel: string
+  reason: string
+}
+
 export interface HealthResponse {
   // "ok" | "degraded"
   status: string
@@ -746,7 +758,12 @@ export interface HealthResponse {
    * silent-success failure worth surfacing loudly.
    */
   channels?: {
-    quarantined?: string[]
+    /**
+     * `{ channel, reason }` per refused channel — not bare names. Since 1.3 a
+     * workflow reading a secret where it would be recorded, or naming one the
+     * instance does not declare, quarantines its channel with that reason.
+     */
+    quarantined?: ChannelLoadIssue[]
     [key: string]: unknown
   }
   workflows_loaded: number
@@ -900,6 +917,21 @@ export interface FunctionFieldSchema {
   description: string
   kind: FunctionFieldKind
   required: boolean
+  // The handler folds `{"var": "..."}` nodes in this field against the
+  // message at execution.
+  resolvable: boolean
+  /**
+   * Where inside the field the handler reads key material (1.3): `[]` means
+   * nowhere; `[""]` means the field's own value takes `{"secret": "name"}` in
+   * place of a literal (`crypto.key`, `jwt_sign.key`, `jwt_verify.issuer` /
+   * `audience`); `["[].key"]` means each array element's `key` does
+   * (`jwt_verify.keys`). These are also the only paths where an `env://` or
+   * `vault://` string is resolved rather than sent on verbatim — anywhere else
+   * it is an `UNRESOLVED_SECRET_REF`.
+   */
+  secret_at: string[]
+  // Another accepted spelling of the field name, or null.
+  alias: string | null
 }
 
 // `orion` — a handler Orion implements and input-schema validates at create

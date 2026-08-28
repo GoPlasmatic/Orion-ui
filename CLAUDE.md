@@ -54,7 +54,7 @@ Orion UI is a React 19 dashboard for the Orion workflow engine. It uses Vite 8, 
 
 ### Core Domain
 
-Targets the Orion **v1.2** API (dataflow-rs 3.7 / datalogic-rs 5.3). Three primitives with
+Targets the Orion **v1.3** API (dataflow-rs 3.8 / datalogic-rs 5.3). Three primitives with
 Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
 
 - **Channels** — Service endpoints (sync/async, REST/HTTP/Kafka). Config covers `auth`
@@ -110,11 +110,22 @@ Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
   `ok` | `error` | `timeout` | `duplicate`. It is refused at the edge and never runs a workflow,
   so counting it as an error reports a correctly-guarded channel as broken, while folding it into
   "ok" hides a channel serving nothing but 401s. `use-metrics.ts` keeps it out of both.
-- **The function catalogue is two lists in one.** `GET admin/functions` serves all 27 valid names.
+- **The function catalogue is two lists in one.** `GET admin/functions` serves all 26 valid names.
   `source: "orion"` rows carry `input_fields` and are input-schema validated at create;
   `source: "engine"` rows (dataflow-rs built-ins — `map`, `filter`, `log`, `parse_json`, …) **omit**
   `input_fields` entirely. Never index it without a guard. `validation` carries `validate` in
-  `aliases` rather than appearing twice.
+  `aliases` rather than appearing twice. The field shape is **not in the OpenAPI spec** (hand-typed
+  from a live server): each field carries `kind`, `required`, `resolvable` (folds `{"var": …}`),
+  `alias`, and since 1.3 `secret_at` — the paths inside the field that take `{"secret": "name"}`
+  (`[""]` = the value itself, `["[].key"]` = each element's `key`). Those are also the only places an
+  `env://` / `vault://` string resolves; anywhere else it is refused as `UNRESOLVED_SECRET_REF`.
+- **`[vars]` and `[secrets]` (1.3) have no admin endpoint.** Both are server config. A var is
+  stamped into every message's `metadata.vars` at ingress (HTTP, Kafka *and* the workflow test
+  endpoint) and is recorded in traces on purpose; `channel`, `cookies` and `vars` are
+  platform-owned metadata keys a caller cannot supply. A secret is held by the engine, read as
+  `{"secret": "name"}` in the five `secret_at` fields, and never appears in a trace or response.
+  Misusing one quarantines the channel — `health.channels.quarantined` is `[{ channel, reason }]`,
+  objects, not names.
 - **Errors:** non-2xx bodies are `{ error: { code, message, details?, request_id? } }`.
   `client.ts` parses all four onto `ApiError`. `details[]` entries are
   `{ path, code, message, expected?, got? }` — `UNKNOWN_FIELD` is how a retired key spelling

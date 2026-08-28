@@ -93,6 +93,27 @@ function FunctionCard({ fn }: { fn: FunctionSchema }) {
                       required
                     </Badge>
                   )}
+                  {field.resolvable && (
+                    <Badge
+                      variant="outline"
+                      className="text-xs"
+                      title={`Folds {"var": "..."} nodes against the message at execution`}
+                    >
+                      resolvable
+                    </Badge>
+                  )}
+                  {field.secret_at?.length > 0 && (
+                    <Badge
+                      variant="info"
+                      className="text-xs"
+                      title={secretHint(field.secret_at)}
+                    >
+                      secret
+                    </Badge>
+                  )}
+                  {field.alias && (
+                    <span className="text-xs text-muted-foreground">alias: {field.alias}</span>
+                  )}
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">{field.description}</p>
               </div>
@@ -102,6 +123,20 @@ function FunctionCard({ fn }: { fn: FunctionSchema }) {
       </CardContent>
     </Card>
   )
+}
+
+/**
+ * Where a field reads key material (1.3). `""` is the field's own value —
+ * `{"secret": "name"}` stands in for the literal; any other path names the
+ * member inside it that does, e.g. `[].key` for `jwt_verify.keys`.
+ */
+function secretHint(paths: string[]): string {
+  const inside = paths.filter((p) => p !== "")
+  const own = paths.includes("")
+  const parts: string[] = []
+  if (own) parts.push(`takes {"secret": "name"} in place of a literal`)
+  if (inside.length) parts.push(`takes {"secret": "name"} at ${inside.join(", ")}`)
+  return `${parts.join("; ")} — read from the instance's [secrets] store, never recorded in a trace`
 }
 
 export function FunctionsPage() {

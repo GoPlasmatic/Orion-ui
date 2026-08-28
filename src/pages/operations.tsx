@@ -174,13 +174,15 @@ export function OperationsPage() {
   // Severity first, then name, so a poll every 15s does not reshuffle the list
   // under the pointer.
   const alerts: Alert[] = [
-    ...quarantined.map((channel) => ({
+    ...quarantined.map(({ channel, reason }) => ({
       key: `quarantine-${channel}`,
       severity: 0,
       tone: "destructive" as const,
       icon: <ShieldAlert className="h-4 w-4 text-destructive" />,
       label: `Quarantined: ${channel}`,
-      detail: "Refused at load — the route is not being served",
+      // The engine names why — an unresolved reference, a secret read where
+      // it would be recorded — and that is the whole remedy.
+      detail: reason || "Refused at load — the route is not being served",
       onClick: () => navigate("/channels"),
     })),
     ...failedConnectors.map((connector) => ({
