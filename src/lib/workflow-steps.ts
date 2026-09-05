@@ -92,6 +92,16 @@ export function countTerminal(steps: Step[] | null | undefined): number {
   return n
 }
 
+/**
+ * Tasks that end the workflow when they fail (`halt_on: "failure"`, Orion
+ * 1.6 / dataflow-rs 3.10) — the outcome axis to `terminal`'s position axis.
+ */
+export function countHaltOnFailure(steps: Step[] | null | undefined): number {
+  let n = 0
+  for (const task of flattenSteps(steps)) if (task.halt_on === "failure") n++
+  return n
+}
+
 /** How deeply groups nest, counting enclosing groups the way the engine does. */
 export function groupDepth(steps: Step[] | null | undefined): number {
   let deepest = 0
@@ -179,6 +189,10 @@ export function lintSteps(steps: unknown): StepIssue[] {
 
       if (raw.terminal !== undefined && typeof raw.terminal !== "boolean") {
         issues.push({ path: `${path}.terminal`, message: "must be true or false" })
+      }
+      // 1.6: the outcome axis. Only these two spellings exist.
+      if (raw.halt_on !== undefined && raw.halt_on !== "failure" && raw.halt_on !== "never") {
+        issues.push({ path: `${path}.halt_on`, message: 'must be "failure" or "never"' })
       }
 
       // Presence of `tasks` is what makes it a group — the engine's own test.

@@ -7,6 +7,7 @@ import {
   countLeafSteps,
   countGroups,
   countTerminal,
+  countHaltOnFailure,
   groupDepth,
   lintSteps,
 } from "@/lib/workflow-steps"
@@ -156,5 +157,31 @@ describe("lintSteps", () => {
     let inner: Step = task("leaf")
     for (let i = 0; i < 8; i++) inner = { id: `g${i}`, tasks: [inner] }
     expect(lintSteps([inner])).toEqual([])
+  })
+})
+
+describe("halt_on (Orion 1.6 / dataflow-rs 3.10)", () => {
+  it("counts the tasks that end the workflow when they fail, descending groups", () => {
+    const steps: Step[] = [
+      { ...task("check"), halt_on: "failure" },
+      task("map"),
+      {
+        id: "guard",
+        tasks: [{ ...task("inner"), halt_on: "failure" }, { ...task("noop"), halt_on: "never" }],
+      },
+    ]
+    expect(countHaltOnFailure(steps)).toBe(2)
+    expect(countHaltOnFailure([])).toBe(0)
+    expect(countHaltOnFailure(undefined)).toBe(0)
+  })
+
+  it("lints the spelling: only failure and never exist", () => {
+    const issues = lintSteps([
+      { ...task("a"), halt_on: "failure" },
+      { ...task("b"), halt_on: "never" },
+      { ...task("c"), halt_on: "error" },
+      { ...task("d"), halt_on: true },
+    ])
+    expect(issues.map((i) => i.path)).toEqual(["tasks[2].halt_on", "tasks[3].halt_on"])
   })
 })

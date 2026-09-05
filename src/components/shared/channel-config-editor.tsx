@@ -1,8 +1,10 @@
 import { BUILTIN_KEY_HEADERS } from "@/api/types"
-import type { ChannelConfig, JsonLogicValue } from "@/api/types"
+import type { ChannelConfig, ChannelProtocol, JsonLogicValue } from "@/api/types"
 import { useTheme } from "@/lib/use-theme"
+import { CRON_REFUSED_CONFIG_KEYS } from "@/lib/cron"
 import { ConfigEditorShell } from "@/components/shared/config-editor-shell"
 import { ChannelAuthEditor } from "@/components/shared/channel-auth-editor"
+import { OAuth2LoginEditor } from "@/components/shared/oauth2-login-editor"
 import { Callout } from "@/components/ui/callout"
 import {
   ConfigSection,
@@ -17,6 +19,12 @@ import {
 interface ChannelConfigEditorProps {
   value: ChannelConfig
   onChange: (next: ChannelConfig) => void
+  /**
+   * The channel's protocol decides which guards exist. A `cron` channel has no
+   * caller, so everything caller-shaped is refused at authoring time rather
+   * than stored and ignored — those sections are hidden rather than offered.
+   */
+  protocol?: ChannelProtocol
 }
 
 const TRACING_MODES = [
@@ -86,8 +94,15 @@ function findUndeclaredKeyHeaders(
  * single source of truth; the JSON view edits the same object and syncs back on
  * every valid parse. Empty sub-objects are pruned so unset config keys stay unset.
  */
-export function ChannelConfigEditor({ value, onChange }: ChannelConfigEditorProps) {
+export function ChannelConfigEditor({ value, onChange, protocol }: ChannelConfigEditorProps) {
   const { resolvedTheme } = useTheme()
+  const isCron = protocol === "cron"
+  // Keys the server refuses on a cron channel but that are still set — a
+  // protocol switch on a draft, or a JSON paste. Named so the author can act
+  // before the 400 does.
+  const cronLeftovers = isCron
+    ? CRON_REFUSED_CONFIG_KEYS.filter((key) => value[key] !== undefined)
+    : []
 
   const setTop = <K extends keyof ChannelConfig>(key: K, val: ChannelConfig[K] | undefined) => {
     const next = { ...value }
@@ -123,10 +138,113 @@ export function ChannelConfigEditor({ value, onChange }: ChannelConfigEditorProp
     rateLimit.key_headers
   )
 
+  if (isCron) {
+    return (
+      <ConfigEditorShell value={value} onChange={onChange} label="Configuration">
+        <div className="space-y-4">
+          <Callout variant="muted" className="text-xs">
+            A cron channel is started by a clock, so the caller-shaped guards — authentication,
+            origins, rate limiting, deduplication, caching, request and response shaping, OAuth2
+            sign-in — are refused at save rather than stored and ignored. Timeout, backpressure,
+            validation logic and tracing still apply.
+          </Callout>
+          {cronLeftovers.length > 0 && (
+            <Callout variant="destructive" icon={false} className="px-3 py-2 text-xs">
+              Still set and refused on a cron channel:{" "}
+              {cronLeftovers.map((k) => (
+                <code key={k} className="mr-1 font-mono">{k}</code>
+              ))}
+              — remove them in Advanced (JSON), or they will be dropped on Save.
+            </Callout>
+          )}
+
+          <ConfigSection title="Timeout" description="Bounds one occurrence's run; a scheduled job may need far more than a request would.">
+            <NumberField
+              label="Run timeout"
+              unit="ms"
+              value={value.timeout_ms}
+              onChange={(v) => setTop("timeout_ms", v)}
+              placeholder="1800000"
+            />
+          </ConfigSection>
+
+          <ConfigSection
+            title="Backpressure"
+            description="Bound concurrent occurrences on this node; excess waits in the ledger."
+          >
+            <NumberField
+              label="Max concurrent per node"
+              value={backpressure.max_concurrent_per_node}
+              onChange={(v) => setSub("backpressure", "max_concurrent_per_node", v)}
+            />
+          </ConfigSection>
+
+          <ConfigSection title="Tracing" description="Per-channel trace capture; a scheduled run follows the /async contract.">
+            <SelectField
+              label="Mode"
+              value={tracing.mode}
+              onChange={(v) => setSub("tracing", "mode", v)}
+              options={TRACING_MODES}
+              includeEmpty="Default"
+            />
+            <NumberField
+              label="Sample rate"
+              value={tracing.sample_rate}
+              onChange={(v) => setSub("tracing", "sample_rate", v)}
+              placeholder="0.0 – 1.0"
+              min={0}
+              max={1}
+              step={0.05}
+            />
+            <ToggleField
+              label="Errors only"
+              description="Only persist traces for failed runs."
+              checked={tracing.errors_only ?? false}
+              onCheckedChange={(c) => setSub("tracing", "errors_only", c || undefined)}
+            />
+            <ToggleField
+              label="Task details"
+              description="Capture the per-task execution trace."
+              checked={tracing.task_details ?? false}
+              onCheckedChange={(c) => setSub("tracing", "task_details", c || undefined)}
+            />
+          </ConfigSection>
+
+          <ConfigSection
+            title="Validation logic"
+            description="JSONLogic over {data, metadata} evaluated before the run; a falsy result fails the occurrence."
+          >
+            <LogicField
+              logic={value.validation_logic}
+              onChange={(v) => setTop("validation_logic", v)}
+              addLabel="Add validation logic"
+              starter={{ "!!": [{ var: "data" }] }}
+              theme={resolvedTheme}
+            />
+          </ConfigSection>
+        </div>
+      </ConfigEditorShell>
+    )
+  }
+
   return (
     <ConfigEditorShell value={value} onChange={onChange} label="Configuration">
       <div className="space-y-4">
         <ChannelAuthEditor value={value.auth} onChange={(v) => setTop("auth", v)} />
+
+        <OAuth2LoginEditor value={value.oauth2_login} onChange={(v) => setTop("oauth2_login", v)} />
+        {value.oauth2_login && protocol && protocol !== "rest" && (
+          <Callout variant="destructive" icon={false} className="px-3 py-2 text-xs">
+            OAuth2 sign-in needs a REST channel with a route pattern: both legs are routes, and a
+            channel reachable only by name has nowhere for the provider to send the browser back to.
+          </Callout>
+        )}
+        {value.oauth2_login && value.cache && (
+          <Callout variant="destructive" icon={false} className="px-3 py-2 text-xs">
+            <code className="font-mono">cache</code> alongside OAuth2 sign-in is refused: a cached
+            authorize 302 would replay one browser's state cookie to the next visitor.
+          </Callout>
+        )}
 
         <ConfigSection title="Rate limiting" description="Throttle inbound requests.">
             <div className="grid grid-cols-2 gap-4">
@@ -235,6 +353,12 @@ export function ChannelConfigEditor({ value, onChange }: ChannelConfigEditorProp
               <strong>Replaces</strong> the default allowlist rather than extending it, so a
               channel can narrow it as well as widen it. Case-insensitive.
             </p>
+            <ToggleField
+              label="Cookies"
+              description="Let the workflow set cookies declaratively through data._orion.response.cookies — name, value, path, max_age, same_site, http_only, secure — validated rather than hand-assembled. A response that sets one is never cached."
+              checked={response.cookies ?? false}
+              onCheckedChange={(c) => setSub("response", "cookies", c || undefined)}
+            />
           </ConfigSection>
 
           <ConfigSection title="Timeout">
@@ -284,6 +408,22 @@ export function ChannelConfigEditor({ value, onChange }: ChannelConfigEditorProp
               onChange={(v) => setSub("cache", "cache_key_fields", v)}
               placeholder="user_id, amount"
             />
+            <div>
+              <p className="mb-1 text-sm font-medium">Key logic</p>
+              <p className="mb-2 text-xs text-muted-foreground">
+                The general form of the key fields: JSONLogic over {"{data, metadata}"} that
+                replaces the payload-derived half of the key, so a key can depend on a header or
+                the authenticated subject. Takes precedence over the fields above; one that does
+                not compile quarantines the channel rather than falling back to the payload hash.
+              </p>
+              <LogicField
+                logic={cache.key_logic}
+                onChange={(v) => setSub("cache", "key_logic", v)}
+                addLabel="Add key logic"
+                starter={{ cat: [{ var: "metadata.auth.subject" }, "|", { var: "data.id" }] }}
+                theme={resolvedTheme}
+              />
+            </div>
           </ConfigSection>
 
           <ConfigSection title="Deduplication">

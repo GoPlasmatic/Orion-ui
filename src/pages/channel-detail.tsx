@@ -6,7 +6,11 @@ import {
   useCreateChannelVersion,
   useDeleteChannel,
   useChannelStatusDryRun,
+  useTriggerChannel,
 } from "@/hooks/use-channels"
+import { useCronOccurrences, useRetryOccurrence } from "@/hooks/use-cron"
+import { OccurrencesTable } from "@/components/shared/occurrences-table"
+import { cronTransport, MISFIRE_POLICIES } from "@/lib/cron"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -18,7 +22,7 @@ import { VersionHistory } from "@/components/shared/version-history"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { RelationshipGraph } from "@/components/graph/relationship-graph"
 import { formatDate } from "@/lib/utils"
-import { ArrowLeft, AlertCircle, Pencil } from "lucide-react"
+import { ArrowLeft, AlertCircle, CalendarClock, Pencil, Play } from "lucide-react"
 
 export function ChannelDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -29,6 +33,16 @@ export function ChannelDetailPage() {
   const changeStatus = useChangeChannelStatus()
   const createVersion = useCreateChannelVersion()
   const deleteChannel = useDeleteChannel()
+  const trigger = useTriggerChannel()
+  const retry = useRetryOccurrence()
+
+  // A cron channel's recent occurrences. Keyed by the stable id, and only
+  // fetched for a cron channel — the ledger has nothing to say about a route.
+  const schedule = cronTransport(channel)
+  const { data: occurrences, isLoading: occurrencesLoading } = useCronOccurrences(
+    { channel_id: id ?? "", limit: 10 },
+    { enabled: !!schedule, refetchInterval: 15_000 },
+  )
 
   if (isLoading) {
     return (
@@ -76,6 +90,18 @@ export function ChannelDetailPage() {
               </Link>
             </Button>
           )}
+          {schedule && channel.status === "active" && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={trigger.isPending}
+              onClick={() => trigger.mutate(channel.channel_id)}
+              title="Run now, through the same claim and singleton path a scheduled occurrence takes"
+            >
+              <Play className="h-3.5 w-3.5" />
+              {trigger.isPending ? "Triggering..." : "Trigger now"}
+            </Button>
+          )}
           <LifecycleActions
             onPreflight={() =>
               statusDryRun.mutate({ id: channel.channel_id, req: { status: "active" } })
@@ -95,12 +121,70 @@ export function ChannelDetailPage() {
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          {schedule && <TabsTrigger value="occurrences">Occurrences</TabsTrigger>}
           <TabsTrigger value="config">Configuration</TabsTrigger>
           <TabsTrigger value="relationships">Relationships</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
+          <div className="space-y-4">
+          {schedule && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                  Schedule
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm md:grid-cols-4">
+                  <div>
+                    <dt className="text-muted-foreground">Expression</dt>
+                    <dd className="mt-0.5 font-mono text-xs">{schedule.schedule}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Time zone</dt>
+                    <dd className="mt-0.5">{schedule.timezone ?? "UTC"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Misfire policy</dt>
+                    <dd className="mt-0.5" title={MISFIRE_POLICIES.find((p) => p.value === (schedule.misfire_policy ?? "latest"))?.hint}>
+                      {schedule.misfire_policy ?? "latest"}
+                      {schedule.misfire_policy === "catch_up" && schedule.max_catch_up != null && (
+                        <span className="text-muted-foreground"> · up to {schedule.max_catch_up}</span>
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Concurrency</dt>
+                    <dd className="mt-0.5">
+                      {schedule.concurrency?.policy ?? "allow"}
+                      {schedule.concurrency?.policy === "forbid" && (
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {" "}· {schedule.concurrency.key ?? channel.channel_id}
+                        </span>
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+                {schedule.payload && Object.keys(schedule.payload).length > 0 && (
+                  <div className="mt-4">
+                    <JsonViewer data={schedule.payload} label="Payload" maxHeight="12rem" />
+                  </div>
+                )}
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Not reachable at <code className="font-mono">data/{channel.name}</code> or by{" "}
+                  <code className="font-mono">channel_call</code>: the schedule — or Trigger now —
+                  is the only thing that starts it, so every run is in the{" "}
+                  <Link to={`/schedules?channel_id=${encodeURIComponent(channel.channel_id)}`} className="underline underline-offset-2">
+                    occurrence ledger
+                  </Link>
+                  .
+                </p>
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardHeader>
               <CardTitle>Channel Details</CardTitle>
@@ -119,6 +203,8 @@ export function ChannelDetailPage() {
                   <dt className="text-muted-foreground">Protocol</dt>
                   <dd className="mt-0.5"><Badge variant="outline" className="uppercase">{channel.protocol}</Badge></dd>
                 </div>
+                {!schedule && (
+                  <>
                 <div>
                   <dt className="text-muted-foreground">Route Pattern</dt>
                   <dd className="font-mono text-xs mt-0.5">{channel.route_pattern ?? "--"}</dd>
@@ -133,6 +219,8 @@ export function ChannelDetailPage() {
                       : "--"}
                   </dd>
                 </div>
+                  </>
+                )}
                 <div>
                   <dt className="text-muted-foreground">Linked Workflow</dt>
                   <dd className="mt-0.5">
@@ -154,7 +242,37 @@ export function ChannelDetailPage() {
               </dl>
             </CardContent>
           </Card>
+          </div>
         </TabsContent>
+
+        {schedule && (
+          <TabsContent value="occurrences">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">
+                  The ten most recent occurrences. A retry is another attempt at the same one.
+                </p>
+                <Button variant="ghost" size="sm" asChild>
+                  <Link to={`/schedules?channel_id=${encodeURIComponent(channel.channel_id)}`}>
+                    Full ledger
+                  </Link>
+                </Button>
+              </div>
+              <OccurrencesTable
+                rows={occurrences?.data ?? []}
+                isLoading={occurrencesLoading}
+                showChannel={false}
+                onRetry={(occId) => retry.mutate(occId)}
+                retryPending={retry.isPending}
+                emptyDescription={
+                  channel.status === "active"
+                    ? "Nothing has been due yet. The first occurrence is materialised within a poll interval of the schedule's next instant."
+                    : "Occurrences are materialised only while the channel is active."
+                }
+              />
+            </div>
+          </TabsContent>
+        )}
 
         <TabsContent value="config">
           <div className="space-y-4">
@@ -227,7 +345,84 @@ export function ChannelDetailPage() {
                         <span>{channel.config.cache.ttl_secs}s</span>
                       </div>
                     )}
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Key</span>
+                      <span className="font-mono text-xs">
+                        {channel.config.cache.key_logic !== undefined
+                          ? "key_logic"
+                          : channel.config.cache.cache_key_fields?.length
+                            ? channel.config.cache.cache_key_fields.join(", ")
+                            : "whole payload"}
+                      </span>
+                    </div>
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {channel.config.response && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Response</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Mode</span>
+                      <span>{channel.config.response.mode ?? "envelope"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Cookies</span>
+                      <span>{channel.config.response.cookies ? "Workflow may set" : "Off"}</span>
+                    </div>
+                    {channel.config.response.allowed_headers && (
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">Allowed headers</span>
+                        <span className="text-right font-mono text-xs">
+                          {channel.config.response.allowed_headers.join(", ")}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {channel.config.oauth2_login && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">OAuth2 sign-in</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">Authorize</span>
+                      <span className="truncate font-mono text-xs">{channel.config.oauth2_login.authorize_url}</span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">Callback</span>
+                      <span className="font-mono text-xs">{channel.config.oauth2_login.callback_path}</span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">Scopes</span>
+                      <span className="font-mono text-xs">
+                        {channel.config.oauth2_login.scopes?.join(" ") || "—"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">PKCE</span>
+                      <span>{channel.config.oauth2_login.pkce === false ? "Off" : "S256"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">id_token</span>
+                      <span>{channel.config.oauth2_login.id_token ? "Verified (OIDC)" : "Not verified"}</span>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    The grant reaches the workflow at{" "}
+                    <code className="font-mono">metadata.oauth</code>; the authorize leg is the route
+                    pattern, the callback the path above.
+                  </p>
                 </CardContent>
               </Card>
             )}

@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react"
+import { Link, useSearchParams } from "react-router"
 import { useFunctions } from "@/hooks/use-functions"
 import type { FunctionSchema } from "@/api/types"
+import { RetrySafetyBadge } from "@/components/shared/retry-safety-badge"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -30,6 +32,12 @@ function categoryRank(category: string): number {
   return i === -1 ? CATEGORY_ORDER.length : i
 }
 
+const SOURCE_HINT: Record<string, string> = {
+  engine: "A dataflow-rs built-in the engine executes itself",
+  orion: "A handler Orion implements and input-schema validates at create time",
+  plugin: "Declared by an active WebAssembly plugin; its field table comes from the plugin's manifest",
+}
+
 /**
  * One catalogue entry.
  *
@@ -38,9 +46,11 @@ function categoryRank(category: string): number {
  * itself and declares no input schema, so Orion does not input-validate it at
  * create time. Saying "no input fields" for both would tell an author the
  * function takes no configuration, which is false for `map` and `filter`.
+ *
+ * A `plugin` row (1.6) carries the version and digest serving it, so the card
+ * links to the plugin the function came from.
  */
 function FunctionCard({ fn }: { fn: FunctionSchema }) {
-  const isEngine = fn.source === "engine"
   const fields = fn.input_fields ?? null
 
   return (
@@ -52,14 +62,20 @@ function FunctionCard({ fn }: { fn: FunctionSchema }) {
           <Badge
             variant="outline"
             className="font-sans text-xs"
-            title={
-              isEngine
-                ? "A dataflow-rs built-in the engine executes itself"
-                : "A handler Orion implements and input-schema validates at create time"
-            }
+            title={SOURCE_HINT[fn.source] ?? fn.source}
           >
-            {isEngine ? "engine" : "orion"}
+            {fn.source}
           </Badge>
+          <RetrySafetyBadge value={fn.retry_safety} />
+          {fn.plugin && (
+            <Link
+              to={`/plugins/${encodeURIComponent(fn.plugin.id)}`}
+              className="font-sans text-xs text-muted-foreground underline-offset-2 hover:underline"
+              title={`Served by ${fn.plugin.id} v${fn.plugin.version} (${fn.plugin.digest})`}
+            >
+              {fn.plugin.id} v{fn.plugin.version}
+            </Link>
+          )}
           {fn.aliases?.map((alias) => (
             <Badge
               key={alias}
@@ -102,6 +118,15 @@ function FunctionCard({ fn }: { fn: FunctionSchema }) {
                       resolvable
                     </Badge>
                   )}
+                  {field.template_at && field.template_at.length > 0 && (
+                    <Badge
+                      variant="outline"
+                      className="text-xs"
+                      title={templateHint(field.template_at)}
+                    >
+                      expression
+                    </Badge>
+                  )}
                   {field.secret_at?.length > 0 && (
                     <Badge
                       variant="info"
@@ -130,6 +155,21 @@ function FunctionCard({ fn }: { fn: FunctionSchema }) {
  * `{"secret": "name"}` stands in for the literal; any other path names the
  * member inside it that does, e.g. `[].key` for `jwt_verify.keys`.
  */
+/**
+ * Where a field is JSONLogic (1.5): `""` is the field's own value — compiled
+ * once when the workflow loads and evaluated per message, so an object there
+ * may be an operator call rather than a literal; any other path names the
+ * member inside it that is.
+ */
+function templateHint(paths: string[]): string {
+  const inside = paths.filter((p) => p !== "")
+  const own = paths.includes("")
+  const parts: string[] = []
+  if (own) parts.push("the value is a JSONLogic expression, evaluated per message")
+  if (inside.length) parts.push(`JSONLogic at ${inside.join(", ")}`)
+  return `${parts.join("; ")} — a literal is JSONLogic for itself, so the static spelling still works`
+}
+
 function secretHint(paths: string[]): string {
   const inside = paths.filter((p) => p !== "")
   const own = paths.includes("")
@@ -141,7 +181,9 @@ function secretHint(paths: string[]): string {
 
 export function FunctionsPage() {
   const { data: functions, isLoading, error } = useFunctions()
-  const [query, setQuery] = useState("")
+  // A plugin page links here with `?q=<function>` to land on one row.
+  const [params] = useSearchParams()
+  const [query, setQuery] = useState(() => params.get("q") ?? "")
   const [source, setSource] = useState("")
 
   const all = useMemo(() => functions ?? [], [functions])
@@ -171,6 +213,7 @@ export function FunctionsPage() {
   }, [all, query, source])
 
   const engineCount = all.filter((fn) => fn.source === "engine").length
+  const pluginCount = all.filter((fn) => fn.source === "plugin").length
   const shown = grouped.reduce((n, [, fns]) => n + fns.length, 0)
 
   return (
@@ -185,10 +228,20 @@ export function FunctionsPage() {
           differently, and that is exactly what the `engine` badge marks. */}
       {!isLoading && !error && engineCount > 0 && (
         <Callout variant="info">
-          <span className="font-medium">{all.length} functions</span> — {all.length - engineCount}{" "}
-          Orion handlers, which are input-schema validated when a workflow is created, and{" "}
-          {engineCount} dataflow-rs engine built-ins, which the engine executes itself and which
-          declare no input schema.
+          <span className="font-medium">{all.length} functions</span> —{" "}
+          {all.length - engineCount - pluginCount} Orion handlers, which are input-schema validated
+          when a workflow is created, {engineCount} dataflow-rs engine built-ins, which the engine
+          executes itself and which declare no input schema
+          {pluginCount > 0 ? (
+            <>
+              , and {pluginCount} from active{" "}
+              <Link to="/plugins" className="underline underline-offset-2">
+                plugins
+              </Link>
+              , validated against their manifests
+            </>
+          ) : null}
+          . Every entry says what a retry costs.
         </Callout>
       )}
 
@@ -209,6 +262,7 @@ export function FunctionsPage() {
           <option value="">All sources</option>
           <option value="orion">Orion handlers</option>
           <option value="engine">Engine built-ins</option>
+          <option value="plugin">Plugin functions</option>
         </Select>
         {(query || source) && (
           <span className="self-center text-xs text-muted-foreground">

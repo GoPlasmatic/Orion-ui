@@ -31,6 +31,23 @@ const WORKFLOW_DURATION = "orion_workflow_duration_seconds"
 const TASK_DURATION = "orion_task_duration_seconds"
 const P95 = 0.95
 
+// Orion 1.6 scheduler metrics. Occurrences are counted by status, deliberately
+// unlabelled by channel — the label set has to stay bounded, and "which
+// schedule is failing?" is the ledger's question, answered with the reason.
+const CRON_OCCURRENCES = "orion_cron_occurrences_total"
+const CRON_PENDING = "orion_cron_pending_occurrences"
+// `started_at - scheduled_for`: the scheduler's core service-level signal. A
+// rising value means occurrences are produced faster than they are run, which
+// no liveness check catches because every component is working.
+const CRON_LAG = "orion_cron_schedule_lag_seconds"
+const CRON_LEASE_FAILURES = "orion_cron_lease_renewal_failures_total"
+const CRON_EXECUTION = "orion_cron_execution_duration_seconds"
+
+// Orion 1.6 plugin metrics, labelled by plugin and function.
+const PLUGIN_INVOCATIONS = "orion_plugin_invocations_total"
+const PLUGIN_FAILURES = "orion_plugin_failures_total"
+const PLUGIN_DURATION = "orion_plugin_invocation_duration_seconds"
+
 // `orion_messages_total{status}` is one of `ok`, `error`, `timeout` or
 // `duplicate`. A duplicate was suppressed by the dedup guard, never processed —
 // counting it as a failure would report a working channel as broken, so it is
@@ -499,4 +516,106 @@ export function useMetrics() {
     outcomeByChannel,
     workflows,
   }
+}
+
+export interface CronMetrics {
+  available: boolean
+  /** Occurrences waiting for a worker, as of the last reconciliation pass. */
+  pending: number | null
+  /** Cumulative occurrences by status since the server started. */
+  byStatus: { status: string; value: number }[]
+  /** p95 of how late an occurrence began, in seconds. */
+  lagP95Sec: number | null
+  /** Running attempts that lost their lease and were cancelled mid-run. */
+  leaseRenewalFailures: number
+  /** Per-channel execution p95, in ms, keyed by channel name. */
+  executionP95Ms: Map<string, number>
+}
+
+/**
+ * The scheduler as the exporter sees it. Reads the shared `["metrics"]` query,
+ * so a page showing both this and `useMetrics` issues one poll.
+ */
+export function useCronMetrics(): CronMetrics {
+  const query = useQuery({
+    queryKey: ["metrics"],
+    queryFn: fetchMetrics,
+    refetchInterval: 15_000,
+  })
+  const snap = query.data ?? null
+  return useMemo(() => {
+    if (!snap || snap.lines.length === 0) {
+      return {
+        available: false,
+        pending: null,
+        byStatus: [],
+        lagP95Sec: null,
+        leaseRenewalFailures: 0,
+        executionP95Ms: new Map(),
+      }
+    }
+    const pendingLines = snap.lines.filter((l) => l.name === CRON_PENDING)
+    const pending = pendingLines.length ? pendingLines.reduce((n, l) => n + l.value, 0) : null
+    const byStatus = [...sumByLabel(snap, CRON_OCCURRENCES, "status").entries()]
+      .map(([status, value]) => ({ status, value }))
+      .filter((s) => s.status)
+      .sort((a, b) => a.status.localeCompare(b.status))
+    const executionP95Ms = new Map<string, number>()
+    for (const channel of labelValues(snap, `${CRON_EXECUTION}_count`, "channel")) {
+      const p95 = histogramQuantile(snap, CRON_EXECUTION, P95, { channel })
+      if (p95 != null) executionP95Ms.set(channel, p95 * 1000)
+    }
+    return {
+      available: pendingLines.length > 0 || byStatus.length > 0,
+      pending,
+      byStatus,
+      lagP95Sec: histogramQuantile(snap, CRON_LAG, P95),
+      leaseRenewalFailures: counterTotal(snap, CRON_LEASE_FAILURES),
+      executionP95Ms,
+    }
+  }, [snap])
+}
+
+export interface PluginFunctionMetric {
+  function: string
+  invocations: number
+  errors: number
+  /** Failures by category — `timeout`, `fuel`, `memory`, `permit`, `instances`, sizes. */
+  failures: { category: string; value: number }[]
+  p95Ms: number | null
+}
+
+/** One plugin's invocation counters, per function, since the server started. */
+export function usePluginMetrics(pluginId: string): {
+  available: boolean
+  functions: PluginFunctionMetric[]
+} {
+  const query = useQuery({
+    queryKey: ["metrics"],
+    queryFn: fetchMetrics,
+    refetchInterval: 15_000,
+  })
+  const snap = query.data ?? null
+  return useMemo(() => {
+    if (!snap || !pluginId) return { available: false, functions: [] }
+    const filter = { plugin: pluginId }
+    const names = new Set<string>([
+      ...labelValues(snap, PLUGIN_INVOCATIONS, "function", filter),
+      ...labelValues(snap, PLUGIN_FAILURES, "function", filter),
+    ])
+    const functions: PluginFunctionMetric[] = [...names].sort().map((fn) => {
+      const f = { ...filter, function: fn }
+      const p95 = histogramQuantile(snap, PLUGIN_DURATION, P95, f)
+      return {
+        function: fn,
+        invocations: counterTotal(snap, PLUGIN_INVOCATIONS, f),
+        errors: counterTotal(snap, PLUGIN_INVOCATIONS, { ...f, outcome: "error" }),
+        failures: [...sumByLabel(snap, PLUGIN_FAILURES, "category", f).entries()]
+          .map(([category, value]) => ({ category, value }))
+          .filter((x) => x.value > 0),
+        p95Ms: p95 == null ? null : p95 * 1000,
+      }
+    })
+    return { available: functions.length > 0, functions }
+  }, [snap, pluginId])
 }

@@ -6,7 +6,7 @@
     "license": {
       "name": "Apache-2.0"
     },
-    "version": "1.3.1"
+    "version": "1.6.0"
   },
   "paths": {
     "/api/v1/admin/audit-logs": {
@@ -1103,6 +1103,95 @@
         ]
       }
     },
+    "/api/v1/admin/channels/{id}/trigger": {
+      "post": {
+        "tags": [
+          "Cron"
+        ],
+        "operationId": "trigger_channel",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Channel id of an active cron channel",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "An occurrence was created; a worker picks it up on its next poll. It runs through the same claim, singleton and execution path a scheduled occurrence does",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_CronOccurrenceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not an active cron channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An occurrence already exists for this instant — retry in a second",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/channels/{id}/versions": {
       "get": {
         "tags": [
@@ -2136,6 +2225,318 @@
         ]
       }
     },
+    "/api/v1/admin/cron/occurrences": {
+      "get": {
+        "tags": [
+          "Cron"
+        ],
+        "operationId": "list_occurrences",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "query",
+            "description": "Stable channel id, not the name — an occurrence outlives the name it was\nmaterialised under.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "One status, spelled as the column stores it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Inclusive lower bound on `scheduled_for`.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "description": "Inclusive upper bound on `scheduled_for`.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated occurrences, newest first. Summaries only — fetch one by id for the failure reason, the trace id and the lease detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedEnvelope_CronOccurrenceSummaryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/cron/occurrences/{id}": {
+      "get": {
+        "tags": [
+          "Cron"
+        ],
+        "operationId": "get_occurrence",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Occurrence id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One occurrence in full",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_CronOccurrenceResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such occurrence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/cron/occurrences/{id}/retry": {
+      "post": {
+        "tags": [
+          "Cron"
+        ],
+        "operationId": "retry_occurrence",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Occurrence id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Occurrence reset to `pending`; the next worker poll picks it up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_CronOccurrenceResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such occurrence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The occurrence is not in a retryable state — `completed` work is re-run by triggering the channel, not by retrying a finished occurrence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/cron/status": {
+      "get": {
+        "tags": [
+          "Cron"
+        ],
+        "operationId": "cron_status",
+        "responses": {
+          "200": {
+            "description": "One row per active cron channel: its schedule, where its cursor has got to, its most recent occurrence and its backlog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_Vec_CronScheduleStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/engine/reload": {
       "post": {
         "tags": [
@@ -2526,6 +2927,1081 @@
         ]
       }
     },
+    "/api/v1/admin/plugins": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "list_plugins",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "description": "Column to sort by: plugin_id (default), status, created_at, updated_at.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "description": "Sort direction: asc (default) or desc.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_artifacts",
+            "in": "query",
+            "description": "Export only: carry each component as base64 under `component`.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of plugins",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedEnvelope_PluginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "create_plugin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePluginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Plugin created as draft. The manifest was validated, the component hashed, compiled in the sandbox and every declared function probed before the row was written, so the draft is already known to load.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_PluginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid manifest, component, or digest; or plugins are disabled on this node",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Plugin id already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/plugins/export": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "export_plugins",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "description": "Column to sort by: plugin_id (default), status, created_at, updated_at.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "description": "Sort direction: asc (default) or desc.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_artifacts",
+            "in": "query",
+            "description": "Export only: carry each component as base64 under `component`.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exported plugins, importable as they are. With `?include_artifacts=true` each item also carries its component as base64 under `component`; without it the item names only the digest, which an import accepts when the target already holds the artifact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_Vec_PluginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/plugins/import": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "import_plugins",
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "description": "When true, validate each item and report what would happen without\nwriting. Probes for conflicts against stored rows and for duplicates\nwithin the batch (R15), and under `on_conflict=new_version` reports\nthe per-item action the real import would take (K2).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "on_conflict",
+            "in": "query",
+            "description": "What an already-stored conflict key means: `fail` (default — the item\nis refused), `skip`, or `new_version` (upsert: update the draft in\nplace, or cut a new draft version over an active entity; identical\ncontent is a no-op). K2.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/OnConflict"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CreatePluginRequest"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Import results with counts (or would-be results when ?dry_run=true). Each item is handled independently. An item may carry its component inline (base64) or name a digest this instance already holds — what an export produces with and without `?include_artifacts=true`. `?on_conflict=new_version` upserts: an existing draft is replaced, an active plugin whose content differs gets a new draft version, identical content is reported `unchanged`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ImportResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/plugins/validate": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "validate_plugin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePluginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Validation result: `valid: true` means `POST /plugins` would accept this payload on this node — the manifest parses, the component compiles and every declared function answers a probe.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/plugins/{id}": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "get_plugin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Plugin ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The latest version, with this node's load state under `health`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_PluginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plugin not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "update_plugin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Plugin ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePluginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Draft plugin updated; an absent field keeps its stored value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_PluginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plugin not found, or it has no draft version to update",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "delete_plugin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Plugin ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Plugin deleted (all versions), and any component nothing names any more"
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plugin not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An active workflow still calls one of its functions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/plugins/{id}/dependencies": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "plugin_dependencies",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Plugin ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The functions the latest version declares and the active workflows calling them",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_PluginDependencies"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plugin not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/plugins/{id}/status": {
+      "patch": {
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "change_plugin_status",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Plugin ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "description": "When true, run the transition's gates and report findings without\nwriting. The response body is the `/validate` envelope, not the\nentity.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "reload",
+            "in": "query",
+            "description": "`now` (default) reloads the engine as part of this request; `defer`\ncommits the row and leaves the reload to a later\n`POST /engine/reload` (K4).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ReloadMode"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated. Activating supersedes the previously active version in the same transaction, so a function name resolves to one digest per generation; it is refused while an active workflow calls one of the version's functions with an input its schema does not accept. Archiving is refused while an active workflow calls one of the plugin's functions. `?dry_run=true` reports every gate without writing; `?reload=defer` commits without rebuilding the engine.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_PluginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid status transition, or plugins are disabled on this node",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plugin not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An active workflow still calls one of its functions, or calls one with an input the version being activated does not accept",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/plugins/{id}/versions": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "list_plugin_versions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Plugin ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, clamped to [1, 1000] (default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Pagination offset (default 0).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated version history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedEnvelope_PluginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plugin not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "operationId": "create_new_plugin_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Plugin ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "New draft version copied from the latest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_PluginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Draft already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected internal error (`INTERNAL_ERROR`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "admin_bearer": []
+          },
+          {
+            "admin_api_key": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/trace-dlq": {
       "get": {
         "tags": [
@@ -2868,7 +4344,7 @@
           {
             "name": "mode",
             "in": "query",
-            "description": "Filter by mode: sync, async.",
+            "description": "Filter by mode: `sync`, `async` or `kafka` — the transport the\nmessage arrived on.",
             "required": false,
             "schema": {
               "type": "string"
@@ -2988,7 +4464,7 @@
         "tags": [
           "Traces"
         ],
-        "description": "Fetch one trace. Access follows a two-lane rule (R12): present either a valid admin credential, or — for async submissions — the `trace_token` returned with the 202, via the `x-trace-token` header or `?token=` query parameter. Traces without a token (sync traces, DLQ retries, rows from before 1.0.0) are admin-plane only when admin auth is enabled.",
+        "description": "Fetch one trace. Access follows a two-lane rule (R12): present either a valid admin credential, or — for async submissions — the `trace_token` returned with the 202, in the `x-trace-token` header. Traces without a token (sync traces, DLQ retries, rows from before 1.0.0) are admin-plane only when admin auth is enabled.\n\nThe `?token=` query parameter is a **deprecated** alternative for clients that cannot set headers. Prefer the header: a URL is not a private place, and the token leaks into browser history, proxy and CDN logs, `Referer` headers and anywhere a link is pasted. Reads authorised that way answer with a `Deprecation` header.\n\nEvery response carries `Cache-Control: no-store` — the body is the submission's result and the capability is not an `Authorization` header, so nothing else stops a shared cache storing it.",
         "operationId": "get_trace",
         "parameters": [
           {
@@ -3003,7 +4479,7 @@
           {
             "name": "token",
             "in": "query",
-            "description": "The capability token returned with the async 202. Alternative to the\n`x-trace-token` header for clients that cannot set headers.",
+            "description": "**Deprecated.** The capability token returned with the async 202. Use\nthe `x-trace-token` header instead: a URL is not a private place. It\nreaches browser history, reverse-proxy and CDN access logs, analytics,\n`Referer` headers on anything the page loads next, and every chat\nwindow a support ticket is pasted into — none of which the header\ntouches. Still accepted for clients that cannot set headers; responses\nthat authorise this way carry a `Deprecation` header, and\n`orion_trace_token_query_reads_total` counts them so an operator can\nsee whether anything still depends on it.",
             "required": false,
             "schema": {
               "type": "string"
@@ -4709,7 +6185,7 @@
           "Operational"
         ],
         "summary": "Readiness probe",
-        "description": "Readiness probe. Reports `ready` only when the database responds, startup has completed, — in cluster mode — the shared Redis answers `PING`, and — with Kafka enabled — the ingest consumer is not degraded. The `components.engine` field is a constant `\"ok\"` kept for response-shape stability: the engine snapshot is lock-free and cannot be unavailable once the process serves. Both conditional checks matter because those degradations are otherwise silent: without Redis, deduplication fails open, the shared response cache misses, and cluster rate limiting stops enforcing; with the consumer down, no message is ingested — all while the data plane keeps returning 200s.\n\nThe `components.cluster_redis` field is present only in cluster mode, and `components.kafka` only when `kafka.enabled` is true. Unauthenticated, so probes work without provisioning an admin key.",
+        "description": "Readiness probe. Reports `ready` only when the database responds, startup has completed, every background task the node cannot work without is still running, — in cluster mode — the shared Redis answers `PING`, and — with Kafka enabled — the ingest consumer is not degraded. The `components.engine` field is a constant `\"ok\"` kept for response-shape stability: the engine snapshot is lock-free and cannot be unavailable once the process serves. Both conditional checks matter because those degradations are otherwise silent: without Redis, deduplication fails open, the shared response cache misses, and cluster rate limiting stops enforcing; with the consumer down, no message is ingested — all while the data plane keeps returning 200s.\n\nThe `components.background_tasks` is `error` when a required task — the trace dispatcher, the persistence workers, the audit writer, the DLQ retry consumer, the cluster epoch watcher — has stopped for good; each of those fails silently otherwise, dropping traces or audit rows while the data plane keeps answering 200s. The `components.cluster_redis` field is present only in cluster mode, and `components.kafka` only when `kafka.enabled` is true. Unauthenticated, so probes work without provisioning an admin key.",
         "operationId": "readiness_probe",
         "responses": {
           "200": {
@@ -4858,7 +6334,8 @@
         "enum": [
           "rest",
           "http",
-          "kafka"
+          "kafka",
+          "cron"
         ]
       },
       "ChannelResponse": {
@@ -5205,7 +6682,7 @@
       },
       "ConnectorType": {
         "type": "string",
-        "description": "Typed enum for the connector `type` field on create/update requests.\nWire format is lowercase (\"http\", \"kafka\", \"db\", \"cache\", \"es\");\ndeserialization is case-insensitive so \"HTTP\" or \"Kafka\" also parse.\n\n`\"storage\"` was accepted through the whole 0.x line with no handler behind\nit and was removed in 1.0 (proposal F15); `load_from_repo` reports stored\nrows as a load issue naming the removal.",
+        "description": "Typed enum for the connector `type` field on create/update requests.\nWire format is lowercase (\"http\", \"kafka\", \"db\", \"cache\", \"es\");\ndeserialization is case-insensitive so \"HTTP\" or \"Kafka\" also parse.\n\n`\"storage\"` was accepted through the whole 0.x line with no handler behind\nit and was removed in 1.0 (proposal F15). It came back in #265 with\n`storage_presign` and `storage_head` behind it — presign and metadata only,\nno data path — so the variant is live again and the removal note applies\nonly to rows stored by a 0.x server.",
         "enum": [
           "http",
           "kafka",
@@ -5329,6 +6806,50 @@
           }
         }
       },
+      "CreatePluginRequest": {
+        "type": "object",
+        "description": "What `POST /plugins` and the import accept.\n\n`manifest` is either the TOML text (a string) or the manifest as a JSON\nobject — the CLI sends the file it read, an export round-trips the\nobject. `component` is the component bytes as base64; it may be omitted\nwhen `digest` names an artifact this instance already holds, which is\nwhat an export without `?include_artifacts=true` produces.",
+        "required": [
+          "manifest"
+        ],
+        "properties": {
+          "component": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The component, base64-encoded."
+          },
+          "digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`sha256:…` of a component already stored, when `component` is absent."
+          },
+          "manifest": {},
+          "plugin_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Must equal the manifest's `name` when given; the manifest is the\nsource of truth for the id."
+          },
+          "signature": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A detached Ed25519 signature over the digest string, base64. Required\nwhen the node's `[plugins.trust]` names public keys; ignored, but\nstored, when it does not."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "CreateWorkflowRequest": {
         "type": "object",
         "required": [
@@ -5368,6 +6889,253 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "CronOccurrenceResponse": {
+        "type": "object",
+        "description": "One occurrence in full: `GET /api/v1/admin/cron/occurrences/{id}`.\n\nAdds what the summary leaves out — the failure reason, the trace to read the\nrun in, and the lease bookkeeping that answers \"which node has it, and until\nwhen?\".",
+        "required": [
+          "id",
+          "channel_id",
+          "channel_name",
+          "channel_version",
+          "trigger",
+          "scheduled_for",
+          "status",
+          "attempt",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "channel_name": {
+            "type": "string"
+          },
+          "channel_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The channel version that materialised this occurrence…"
+          },
+          "claimed_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The instance holding this occurrence, and until when. Both `null` unless\nan attempt is in flight."
+          },
+          "claimed_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "error_message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "executing_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "…and the one that claimed it. They differ when the channel gained a\nversion between the two, which is expected: a pending occurrence follows\nthe active generation at claim time, exactly as a queued async trace\ndoes. `null` until claimed."
+          },
+          "fencing_token": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The acquisition generation this attempt holds its key under. Diagnostic:\nOrion's connectors do not accept a fencing token, so it bounds Orion's\nown writes rather than a downstream side effect."
+          },
+          "id": {
+            "type": "string"
+          },
+          "scheduled_for": {
+            "type": "string"
+          },
+          "singleton_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "trace_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The trace this attempt wrote, readable at\n`GET /api/v1/admin/traces/{id}`. `null` before admission, and when trace\nstorage dropped the row — the occurrence is kept either way, because it\nis scheduling correctness state rather than optional observability."
+          },
+          "trigger": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "workflow_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CronOccurrenceSummaryResponse": {
+        "type": "object",
+        "description": "One row of `GET /api/v1/admin/cron/occurrences`.\n\nThe list projection: what happened and when, without the diagnostic detail.\nNarrower than [`CronOccurrenceResponse`] for readability rather than for\ncost — an occurrence carries no payload column, unlike a trace — so a page\nof a hundred reads as a schedule's history instead of as a wall of lease\nbookkeeping.",
+        "required": [
+          "id",
+          "channel_id",
+          "channel_name",
+          "trigger",
+          "scheduled_for",
+          "status",
+          "attempt",
+          "created_at"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "channel_name": {
+            "type": "string",
+            "description": "The channel's name when this occurrence was materialised, not its name\nnow — renaming a channel does not rewrite what already ran."
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "scheduled_for": {
+            "type": "string",
+            "description": "The immutable UTC instant this occurrence was due."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending`, `claimed`, `running`, `completed`, `failed`,\n`skipped_misfire` or `skipped_singleton`. An open string on the wire:\ntolerate a value you do not know."
+          },
+          "trigger": {
+            "type": "string",
+            "description": "`cron` or `manual`."
+          }
+        }
+      },
+      "CronScheduleStatusResponse": {
+        "type": "object",
+        "description": "One channel's schedule as the runtime sees it right now:\n`GET /api/v1/admin/cron/status`.\n\nDeliberately a separate response rather than fields on the channel. The\nchannel row is an immutable authored definition; where its cursor has got to\nis runtime state that changes every minute, and writing it into the active\nrow would make an immutable record mutable.",
+        "required": [
+          "channel_id",
+          "channel_name",
+          "schedule",
+          "timezone",
+          "pending"
+        ],
+        "properties": {
+          "channel_id": {
+            "type": "string"
+          },
+          "channel_name": {
+            "type": "string"
+          },
+          "last_completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_scheduled_for": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The most recent occurrence's status and instant, so one read answers\n\"is this schedule healthy?\"."
+          },
+          "next_fire_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The next UTC instant this schedule will materialise. `null` when the\nreconciler has not yet seen the channel — it appears within one poll\ninterval of activation."
+          },
+          "paused_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Set when the channel has left the active set. Its history is kept; it\nsimply stops producing occurrences."
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Occurrences waiting for a worker. A number that only grows is the signal\nthat this schedule is producing work faster than the instance runs it."
+          },
+          "schedule": {
+            "type": "string",
+            "description": "The authored expression and zone, echoed so a status read answers\n\"what is scheduled?\" without a second request."
+          },
+          "timezone": {
+            "type": "string"
           }
         }
       },
@@ -5640,6 +7408,135 @@
           }
         }
       },
+      "DataEnvelope_CronOccurrenceResponse": {
+        "type": "object",
+        "description": "The `{\"data\": …}` envelope every admin 2xx carries (R17).\n\nGeneric so each resource gets a described response without a hand-written\nwrapper struct per endpoint. utoipa inlines the type parameter, so\n`DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44\nof the 48 2xx responses had no `content` block at all.",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "description": "One occurrence in full: `GET /api/v1/admin/cron/occurrences/{id}`.\n\nAdds what the summary leaves out — the failure reason, the trace to read the\nrun in, and the lease bookkeeping that answers \"which node has it, and until\nwhen?\".",
+            "required": [
+              "id",
+              "channel_id",
+              "channel_name",
+              "channel_version",
+              "trigger",
+              "scheduled_for",
+              "status",
+              "attempt",
+              "created_at",
+              "updated_at"
+            ],
+            "properties": {
+              "attempt": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "channel_id": {
+                "type": "string"
+              },
+              "channel_name": {
+                "type": "string"
+              },
+              "channel_version": {
+                "type": "integer",
+                "format": "int64",
+                "description": "The channel version that materialised this occurrence…"
+              },
+              "claimed_by": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The instance holding this occurrence, and until when. Both `null` unless\nan attempt is in flight."
+              },
+              "claimed_until": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "completed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "error_message": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "executing_version": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "description": "…and the one that claimed it. They differ when the channel gained a\nversion between the two, which is expected: a pending occurrence follows\nthe active generation at claim time, exactly as a queued async trace\ndoes. `null` until claimed."
+              },
+              "fencing_token": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "description": "The acquisition generation this attempt holds its key under. Diagnostic:\nOrion's connectors do not accept a fencing token, so it bounds Orion's\nown writes rather than a downstream side effect."
+              },
+              "id": {
+                "type": "string"
+              },
+              "scheduled_for": {
+                "type": "string"
+              },
+              "singleton_key": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "started_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "status": {
+                "type": "string"
+              },
+              "trace_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The trace this attempt wrote, readable at\n`GET /api/v1/admin/traces/{id}`. `null` before admission, and when trace\nstorage dropped the row — the occurrence is kept either way, because it\nis scheduling correctness state rather than optional observability."
+              },
+              "trigger": {
+                "type": "string"
+              },
+              "updated_at": {
+                "type": "string"
+              },
+              "workflow_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      },
       "DataEnvelope_DlqPurgeResult": {
         "type": "object",
         "description": "The `{\"data\": …}` envelope every admin 2xx carries (R17).\n\nGeneric so each resource gets a described response without a hand-written\nwrapper struct per endpoint. utoipa inlines the type parameter, so\n`DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44\nof the 48 2xx responses had no `content` block at all.",
@@ -5893,6 +7790,134 @@
               },
               "version": {
                 "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "DataEnvelope_PluginDependencies": {
+        "type": "object",
+        "description": "The `{\"data\": …}` envelope every admin 2xx carries (R17).\n\nGeneric so each resource gets a described response without a hand-written\nwrapper struct per endpoint. utoipa inlines the type parameter, so\n`DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44\nof the 48 2xx responses had no `content` block at all.",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "description": "What depends on a plugin: the active workflows calling its functions.",
+            "required": [
+              "plugin_id",
+              "version",
+              "functions",
+              "workflows"
+            ],
+            "properties": {
+              "functions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "plugin_id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "workflows": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Active workflows whose tasks call any of `functions` — the ones an\narchive or delete is refused for."
+              }
+            }
+          }
+        }
+      },
+      "DataEnvelope_PluginResponse": {
+        "type": "object",
+        "description": "The `{\"data\": …}` envelope every admin 2xx carries (R17).\n\nGeneric so each resource gets a described response without a hand-written\nwrapper struct per endpoint. utoipa inlines the type parameter, so\n`DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44\nof the 48 2xx responses had no `content` block at all.",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "description": "One version of a plugin, as every plugin endpoint returns it.\n\n`manifest` is the validated manifest as JSON — what was uploaded, with\nnothing the server inferred added to it. `functions` is the list of\nnames it declares, repeated at the top level so a client need not walk\nthe manifest to learn what the plugin adds to the vocabulary. `health` is\npresent only on the single-entity read, and only when the serving node\nhas an opinion: it says whether *this node* loaded the digest.",
+            "required": [
+              "plugin_id",
+              "version",
+              "status",
+              "digest",
+              "abi",
+              "plugin_version",
+              "manifest",
+              "functions",
+              "tags",
+              "content_hash",
+              "created_at",
+              "updated_at"
+            ],
+            "properties": {
+              "abi": {
+                "type": "string",
+                "description": "The WIT package version the component was built against."
+              },
+              "content_hash": {
+                "type": "string",
+                "description": "`sha256:…` over the importable content (manifest, digest, tags) — the\nsame projection the upsert import compares."
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "digest": {
+                "type": "string",
+                "description": "`sha256:…` of the component bytes — the identity a generation, a\ntrace, a package and the catalogue all name the artifact by."
+              },
+              "functions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "health": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PluginHealth",
+                    "description": "This node's load state for the version, on the single-entity read."
+                  }
+                ]
+              },
+              "manifest": {},
+              "plugin_id": {
+                "type": "string"
+              },
+              "plugin_version": {
+                "type": "string",
+                "description": "The author's own version string from the manifest, informational."
+              },
+              "signature": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The detached Ed25519 signature over `digest` the upload carried, base64,\nwhen there was one. Not part of the content hash: the digest is the\nidentity, and the signature only attests to it."
+              },
+              "status": {
+                "type": "string"
+              },
+              "tags": {},
+              "updated_at": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer",
+                "format": "int64"
               }
             }
           }
@@ -6223,6 +8248,86 @@
           }
         }
       },
+      "DataEnvelope_Vec_CronScheduleStatusResponse": {
+        "type": "object",
+        "description": "The `{\"data\": …}` envelope every admin 2xx carries (R17).\n\nGeneric so each resource gets a described response without a hand-written\nwrapper struct per endpoint. utoipa inlines the type parameter, so\n`DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44\nof the 48 2xx responses had no `content` block at all.",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One channel's schedule as the runtime sees it right now:\n`GET /api/v1/admin/cron/status`.\n\nDeliberately a separate response rather than fields on the channel. The\nchannel row is an immutable authored definition; where its cursor has got to\nis runtime state that changes every minute, and writing it into the active\nrow would make an immutable record mutable.",
+              "required": [
+                "channel_id",
+                "channel_name",
+                "schedule",
+                "timezone",
+                "pending"
+              ],
+              "properties": {
+                "channel_id": {
+                  "type": "string"
+                },
+                "channel_name": {
+                  "type": "string"
+                },
+                "last_completed_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "last_scheduled_for": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "last_status": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The most recent occurrence's status and instant, so one read answers\n\"is this schedule healthy?\"."
+                },
+                "next_fire_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "The next UTC instant this schedule will materialise. `null` when the\nreconciler has not yet seen the channel — it appears within one poll\ninterval of activation."
+                },
+                "paused_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "Set when the channel has left the active set. Its history is kept; it\nsimply stops producing occurrences."
+                },
+                "pending": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Occurrences waiting for a worker. A number that only grows is the signal\nthat this schedule is producing work faster than the instance runs it."
+                },
+                "schedule": {
+                  "type": "string",
+                  "description": "The authored expression and zone, echoed so a status read answers\n\"what is scheduled?\" without a second request."
+                },
+                "timezone": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
       "DataEnvelope_Vec_FunctionSchemaItem": {
         "type": "object",
         "description": "The `{\"data\": …}` envelope every admin 2xx carries (R17).\n\nGeneric so each resource gets a described response without a hand-written\nwrapper struct per endpoint. utoipa inlines the type parameter, so\n`DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44\nof the 48 2xx responses had no `content` block at all.",
@@ -6239,7 +8344,8 @@
                 "name",
                 "description",
                 "category",
-                "source"
+                "source",
+                "retry_safety"
               ],
               "properties": {
                 "aliases": {
@@ -6267,9 +8373,102 @@
                 "name": {
                   "type": "string"
                 },
+                "retry_safety": {
+                  "description": "What a second run of this function does, as\n`{\"kind\": \"...\"}` — `pure`, `read`, `idempotent_write`, `unsafe_write`,\nor `depends_on` with the `input` that decides it (`http_call` on its\n`method`, `data_write` on its `op`).\n\nA different question from whether an *error* was transient: this is\nwhat a retry costs when it is. Orion retries tasks in several places —\nthe trace DLQ, a Kafka redelivery, `http_call`'s transport retry — and\nthis is how an author or a tool knows which of those are safe over a\ngiven function."
+                },
                 "source": {
                   "type": "string",
                   "description": "`orion` for a handler Orion implements and input-schema validates,\n`engine` for a dataflow-rs built-in the engine executes itself."
+                }
+              }
+            }
+          }
+        }
+      },
+      "DataEnvelope_Vec_PluginResponse": {
+        "type": "object",
+        "description": "The `{\"data\": …}` envelope every admin 2xx carries (R17).\n\nGeneric so each resource gets a described response without a hand-written\nwrapper struct per endpoint. utoipa inlines the type parameter, so\n`DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44\nof the 48 2xx responses had no `content` block at all.",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One version of a plugin, as every plugin endpoint returns it.\n\n`manifest` is the validated manifest as JSON — what was uploaded, with\nnothing the server inferred added to it. `functions` is the list of\nnames it declares, repeated at the top level so a client need not walk\nthe manifest to learn what the plugin adds to the vocabulary. `health` is\npresent only on the single-entity read, and only when the serving node\nhas an opinion: it says whether *this node* loaded the digest.",
+              "required": [
+                "plugin_id",
+                "version",
+                "status",
+                "digest",
+                "abi",
+                "plugin_version",
+                "manifest",
+                "functions",
+                "tags",
+                "content_hash",
+                "created_at",
+                "updated_at"
+              ],
+              "properties": {
+                "abi": {
+                  "type": "string",
+                  "description": "The WIT package version the component was built against."
+                },
+                "content_hash": {
+                  "type": "string",
+                  "description": "`sha256:…` over the importable content (manifest, digest, tags) — the\nsame projection the upsert import compares."
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string",
+                  "description": "`sha256:…` of the component bytes — the identity a generation, a\ntrace, a package and the catalogue all name the artifact by."
+                },
+                "functions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "health": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PluginHealth",
+                      "description": "This node's load state for the version, on the single-entity read."
+                    }
+                  ]
+                },
+                "manifest": {},
+                "plugin_id": {
+                  "type": "string"
+                },
+                "plugin_version": {
+                  "type": "string",
+                  "description": "The author's own version string from the manifest, informational."
+                },
+                "signature": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The detached Ed25519 signature over `digest` the upload carried, base64,\nwhen there was one. Not part of the content hash: the digest is the\nidentity, and the signature only attests to it."
+                },
+                "status": {
+                  "type": "string"
+                },
+                "tags": {},
+                "updated_at": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer",
+                  "format": "int64"
                 }
               }
             }
@@ -6390,6 +8589,20 @@
               "has_dynamic_channel_calls": {
                 "type": "boolean",
                 "description": "True when a `channel_call` resolves its target with `channel_logic`\nat runtime — the static `channels` list is then incomplete by\nconstruction, and closure tooling must treat this workflow as having\nunknowable channel dependencies."
+              },
+              "plugins": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PluginDependency"
+                },
+                "description": "The plugins whose functions the tasks name, resolved against this\nnode's generation: the active version and digest each function\ncurrently comes from. A function this generation does not dispatch\nappears under `unresolved_functions` instead — a plugin archived since\nthe workflow was written, or one this node could not load."
+              },
+              "unresolved_functions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Function names the tasks call that this generation's registry does\nnot know. Empty for a workflow that would activate here."
               },
               "version": {
                 "type": "integer",
@@ -6667,7 +8880,8 @@
           "name",
           "description",
           "category",
-          "source"
+          "source",
+          "retry_safety"
         ],
         "properties": {
           "aliases": {
@@ -6694,6 +8908,9 @@
           },
           "name": {
             "type": "string"
+          },
+          "retry_safety": {
+            "description": "What a second run of this function does, as\n`{\"kind\": \"...\"}` — `pure`, `read`, `idempotent_write`, `unsafe_write`,\nor `depends_on` with the `input` that decides it (`http_call` on its\n`method`, `data_write` on its `op`).\n\nA different question from whether an *error* was transient: this is\nwhat a retry costs when it is. Orion retries tasks in several places —\nthe trace DLQ, a Kafka redelivery, `http_call`'s transport retry — and\nthis is how an author or a tool knows which of those are safe over a\ngiven function."
           },
           "source": {
             "type": "string",
@@ -7212,6 +9429,93 @@
           }
         }
       },
+      "PaginatedEnvelope_CronOccurrenceSummaryResponse": {
+        "type": "object",
+        "description": "The paginated envelope: `data` plus the three counters, and nothing else.",
+        "required": [
+          "data",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One row of `GET /api/v1/admin/cron/occurrences`.\n\nThe list projection: what happened and when, without the diagnostic detail.\nNarrower than [`CronOccurrenceResponse`] for readability rather than for\ncost — an occurrence carries no payload column, unlike a trace — so a page\nof a hundred reads as a schedule's history instead of as a wall of lease\nbookkeeping.",
+              "required": [
+                "id",
+                "channel_id",
+                "channel_name",
+                "trigger",
+                "scheduled_for",
+                "status",
+                "attempt",
+                "created_at"
+              ],
+              "properties": {
+                "attempt": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "channel_id": {
+                  "type": "string"
+                },
+                "channel_name": {
+                  "type": "string",
+                  "description": "The channel's name when this occurrence was materialised, not its name\nnow — renaming a channel does not rewrite what already ran."
+                },
+                "completed_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "scheduled_for": {
+                  "type": "string",
+                  "description": "The immutable UTC instant this occurrence was due."
+                },
+                "started_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "status": {
+                  "type": "string",
+                  "description": "`pending`, `claimed`, `running`, `completed`, `failed`,\n`skipped_misfire` or `skipped_singleton`. An open string on the wire:\ntolerate a value you do not know."
+                },
+                "trigger": {
+                  "type": "string",
+                  "description": "`cron` or `manual`."
+                }
+              }
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total rows matching the filter, ignoring `limit`/`offset`."
+          }
+        }
+      },
       "PaginatedEnvelope_PackageReceiptResponse": {
         "type": "object",
         "description": "The paginated envelope: `data` plus the three counters, and nothing else.",
@@ -7261,6 +9565,112 @@
                 },
                 "version": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total rows matching the filter, ignoring `limit`/`offset`."
+          }
+        }
+      },
+      "PaginatedEnvelope_PluginResponse": {
+        "type": "object",
+        "description": "The paginated envelope: `data` plus the three counters, and nothing else.",
+        "required": [
+          "data",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One version of a plugin, as every plugin endpoint returns it.\n\n`manifest` is the validated manifest as JSON — what was uploaded, with\nnothing the server inferred added to it. `functions` is the list of\nnames it declares, repeated at the top level so a client need not walk\nthe manifest to learn what the plugin adds to the vocabulary. `health` is\npresent only on the single-entity read, and only when the serving node\nhas an opinion: it says whether *this node* loaded the digest.",
+              "required": [
+                "plugin_id",
+                "version",
+                "status",
+                "digest",
+                "abi",
+                "plugin_version",
+                "manifest",
+                "functions",
+                "tags",
+                "content_hash",
+                "created_at",
+                "updated_at"
+              ],
+              "properties": {
+                "abi": {
+                  "type": "string",
+                  "description": "The WIT package version the component was built against."
+                },
+                "content_hash": {
+                  "type": "string",
+                  "description": "`sha256:…` over the importable content (manifest, digest, tags) — the\nsame projection the upsert import compares."
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string",
+                  "description": "`sha256:…` of the component bytes — the identity a generation, a\ntrace, a package and the catalogue all name the artifact by."
+                },
+                "functions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "health": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PluginHealth",
+                      "description": "This node's load state for the version, on the single-entity read."
+                    }
+                  ]
+                },
+                "manifest": {},
+                "plugin_id": {
+                  "type": "string"
+                },
+                "plugin_version": {
+                  "type": "string",
+                  "description": "The author's own version string from the manifest, informational."
+                },
+                "signature": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The detached Ed25519 signature over `digest` the upload carried, base64,\nwhen there was one. Not part of the content hash: the digest is the\nidentity, and the signature only attests to it."
+                },
+                "status": {
+                  "type": "string"
+                },
+                "tags": {},
+                "updated_at": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer",
+                  "format": "int64"
                 }
               }
             }
@@ -7446,6 +9856,172 @@
             "type": "integer",
             "format": "int64",
             "description": "Total rows matching the filter, ignoring `limit`/`offset`."
+          }
+        }
+      },
+      "PluginDependencies": {
+        "type": "object",
+        "description": "What depends on a plugin: the active workflows calling its functions.",
+        "required": [
+          "plugin_id",
+          "version",
+          "functions",
+          "workflows"
+        ],
+        "properties": {
+          "functions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "workflows": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Active workflows whose tasks call any of `functions` — the ones an\narchive or delete is refused for."
+          }
+        }
+      },
+      "PluginDependency": {
+        "type": "object",
+        "description": "One plugin a workflow depends on, as this generation serves it.",
+        "required": [
+          "id",
+          "version",
+          "digest",
+          "functions"
+        ],
+        "properties": {
+          "digest": {
+            "type": "string",
+            "description": "`sha256:…` of the component the functions resolve to — what a\npackage records and a target is checked for."
+          },
+          "functions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The plugin's functions this workflow names, task order kept."
+          },
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "PluginHealth": {
+        "type": "object",
+        "description": "Whether the node answering loaded a plugin version, and if not, why.",
+        "properties": {
+          "compile_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Compile time in milliseconds when loaded.",
+            "minimum": 0
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The stage and reason when `failed`."
+          },
+          "state": {
+            "type": "string",
+            "description": "`loaded`, `failed`, `disabled` (plugins are off on this node) or\n`inactive` (the version is not the one this node's generation carries)."
+          }
+        }
+      },
+      "PluginResponse": {
+        "type": "object",
+        "description": "One version of a plugin, as every plugin endpoint returns it.\n\n`manifest` is the validated manifest as JSON — what was uploaded, with\nnothing the server inferred added to it. `functions` is the list of\nnames it declares, repeated at the top level so a client need not walk\nthe manifest to learn what the plugin adds to the vocabulary. `health` is\npresent only on the single-entity read, and only when the serving node\nhas an opinion: it says whether *this node* loaded the digest.",
+        "required": [
+          "plugin_id",
+          "version",
+          "status",
+          "digest",
+          "abi",
+          "plugin_version",
+          "manifest",
+          "functions",
+          "tags",
+          "content_hash",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "abi": {
+            "type": "string",
+            "description": "The WIT package version the component was built against."
+          },
+          "content_hash": {
+            "type": "string",
+            "description": "`sha256:…` over the importable content (manifest, digest, tags) — the\nsame projection the upsert import compares."
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string",
+            "description": "`sha256:…` of the component bytes — the identity a generation, a\ntrace, a package and the catalogue all name the artifact by."
+          },
+          "functions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "health": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PluginHealth",
+                "description": "This node's load state for the version, on the single-entity read."
+              }
+            ]
+          },
+          "manifest": {},
+          "plugin_id": {
+            "type": "string"
+          },
+          "plugin_version": {
+            "type": "string",
+            "description": "The author's own version string from the manifest, informational."
+          },
+          "signature": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The detached Ed25519 signature over `digest` the upload carried, base64,\nwhen there was one. Not part of the content hash: the digest is the\nidentity, and the signature only attests to it."
+          },
+          "status": {
+            "type": "string"
+          },
+          "tags": {},
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -8028,6 +10604,40 @@
           }
         }
       },
+      "UpdatePluginRequest": {
+        "type": "object",
+        "description": "`PUT /plugins/{id}`: every field optional, absent means keep.",
+        "properties": {
+          "component": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "digest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "manifest": {},
+          "signature": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "UpdateWorkflowRequest": {
         "type": "object",
         "properties": {
@@ -8151,6 +10761,20 @@
           "has_dynamic_channel_calls": {
             "type": "boolean",
             "description": "True when a `channel_call` resolves its target with `channel_logic`\nat runtime — the static `channels` list is then incomplete by\nconstruction, and closure tooling must treat this workflow as having\nunknowable channel dependencies."
+          },
+          "plugins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginDependency"
+            },
+            "description": "The plugins whose functions the tasks name, resolved against this\nnode's generation: the active version and digest each function\ncurrently comes from. A function this generation does not dispatch\nappears under `unresolved_functions` instead — a plugin archived since\nthe workflow was written, or one this node could not load."
+          },
+          "unresolved_functions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Function names the tasks call that this generation's registry does\nnot know. Empty for a workflow that would activate here."
           },
           "version": {
             "type": "integer",
@@ -8292,6 +10916,10 @@
       "description": "Engine function schemas"
     },
     {
+      "name": "Plugins",
+      "description": "WebAssembly plugins: sandboxed custom task functions"
+    },
+    {
       "name": "Audit",
       "description": "Admin audit-log history"
     },
@@ -8302,6 +10930,10 @@
     {
       "name": "Trace DLQ",
       "description": "Dead-letter queue inspection, replay, and purge"
+    },
+    {
+      "name": "Cron",
+      "description": "Scheduled runs: the durable occurrence ledger, per-schedule status, and manual triggers"
     },
     {
       "name": "Backups",

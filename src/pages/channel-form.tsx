@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Link, useNavigate, useParams } from "react-router"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router"
 import {
   useChannel,
   useCreateChannel,
@@ -12,9 +12,11 @@ import type {
   ChannelProtocol,
   ChannelType,
   CreateChannelRequest,
+  CronTransportConfig,
   UpdateChannelRequest,
   ValidationResponse,
 } from "@/api/types"
+import { cronTransport, stripCronRefusedConfig } from "@/lib/cron"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -27,22 +29,45 @@ import { Callout } from "@/components/ui/callout"
 import { PageHeader } from "@/components/shared/page-header"
 import { ValidationResults } from "@/components/shared/validation-results"
 import { ChannelConfigEditor } from "@/components/shared/channel-config-editor"
+import { CronTransportEditor } from "@/components/shared/cron-transport-editor"
 import { ArrowLeft, Save, ShieldCheck } from "lucide-react"
 
 const CHANNEL_TYPES: ChannelType[] = ["sync", "async"]
-const PROTOCOLS: ChannelProtocol[] = ["rest", "http", "kafka"]
+// `cron` (1.6) is the fourth protocol: started by a clock, not a caller.
+const PROTOCOLS: ChannelProtocol[] = ["rest", "http", "kafka", "cron"]
 
-function ChannelForm({ existing }: { existing?: Channel }) {
+const isProtocol = (v: string | null): v is ChannelProtocol =>
+  v !== null && (PROTOCOLS as string[]).includes(v)
+
+/** A schedule to start from, so the cron form is never an empty JSON box. */
+const CRON_STARTER: CronTransportConfig = { schedule: "0 0 2 * * *", timezone: "UTC" }
+
+function ChannelForm({
+  existing,
+  initialProtocol,
+}: {
+  existing?: Channel
+  /** Preselects the protocol on create — the Schedules page links here with `?protocol=cron`. */
+  initialProtocol?: ChannelProtocol
+}) {
   const isEdit = !!existing
   const navigate = useNavigate()
   const createChannel = useCreateChannel()
   const updateChannel = useUpdateChannel()
   const validateChannel = useValidateChannel()
 
+  const startProtocol = existing?.protocol ?? initialProtocol ?? "rest"
   const [name, setName] = useState(existing?.name ?? "")
   const [description, setDescription] = useState(existing?.description ?? "")
-  const [channelType, setChannelType] = useState<ChannelType>(existing?.channel_type ?? "sync")
-  const [protocol, setProtocol] = useState<ChannelProtocol>(existing?.protocol ?? "rest")
+  // A cron channel must be async: its work is a claimed occurrence, never a
+  // waiting caller.
+  const [channelType, setChannelType] = useState<ChannelType>(
+    existing?.channel_type ?? (startProtocol === "cron" ? "async" : "sync")
+  )
+  const [protocol, setProtocol] = useState<ChannelProtocol>(startProtocol)
+  const [cron, setCron] = useState<CronTransportConfig>(
+    () => cronTransport(existing) ?? CRON_STARTER
+  )
   const [methods, setMethods] = useState((existing?.methods ?? []).join(", "))
   const [routePattern, setRoutePattern] = useState(existing?.route_pattern ?? "")
   const [topic, setTopic] = useState(existing?.topic ?? "")
@@ -59,6 +84,24 @@ function ChannelForm({ existing }: { existing?: Channel }) {
   const [validation, setValidation] = useState<ValidationResponse | null>(null)
 
   const backTo = existing ? `/channels/${existing.channel_id}` : "/channels"
+  const isCron = protocol === "cron"
+
+  /**
+   * Switching to cron on a draft: the caller-shaped fields have no meaning and
+   * are refused at save, so drop them here rather than let the first Save be
+   * a 400. The other direction keeps everything — a route can be typed back.
+   */
+  const changeProtocol = (next: ChannelProtocol) => {
+    setProtocol(next)
+    if (next === "cron") {
+      setChannelType("async")
+      setConfig((c) => stripCronRefusedConfig(c))
+      setMethods("")
+      setRoutePattern("")
+      setTopic("")
+      setConsumerGroup("")
+    }
+  }
 
   /**
    * Assemble the request, or return null after setting `error`. Shared by Save
@@ -77,7 +120,13 @@ function ChannelForm({ existing }: { existing?: Channel }) {
       .filter(Boolean)
 
     let transport: Record<string, unknown> | undefined
-    if (transportConfig.trim()) {
+    if (isCron) {
+      if (!cron.schedule?.trim()) {
+        setError("A cron channel needs a schedule")
+        return null
+      }
+      transport = cron as unknown as Record<string, unknown>
+    } else if (transportConfig.trim()) {
       try {
         const parsed = JSON.parse(transportConfig)
         if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -94,15 +143,17 @@ function ChannelForm({ existing }: { existing?: Channel }) {
     return {
       name,
       description: description || undefined,
-      methods: methodList.length > 0 ? methodList : undefined,
-      route_pattern: routePattern || undefined,
-      topic: topic || undefined,
-      consumer_group: consumerGroup || undefined,
+      // A cron channel registers no route and no subscription; each of these
+      // is refused there rather than ignored.
+      methods: !isCron && methodList.length > 0 ? methodList : undefined,
+      route_pattern: !isCron && routePattern ? routePattern : undefined,
+      topic: !isCron && topic ? topic : undefined,
+      consumer_group: !isCron && consumerGroup ? consumerGroup : undefined,
       transport_config: transport,
       workflow_id: workflowId || undefined,
-      config,
+      config: isCron ? stripCronRefusedConfig(config) : config,
       priority: Number(priority) || 0,
-      channel_type: channelType,
+      channel_type: isCron ? "async" : channelType,
       protocol,
     }
   }
@@ -166,8 +217,12 @@ function ChannelForm({ existing }: { existing?: Channel }) {
       </Button>
 
       <PageHeader
-        title={isEdit ? "Edit Channel" : "Create Channel"}
-        description="Service endpoint and routing configuration"
+        title={isEdit ? "Edit Channel" : isCron ? "Create Cron Channel" : "Create Channel"}
+        description={
+          isCron
+            ? "A workflow run on a schedule — started by a clock, not a caller"
+            : "Service endpoint and routing configuration"
+        }
       />
 
       <Card className="max-w-2xl">
@@ -192,8 +247,8 @@ function ChannelForm({ existing }: { existing?: Channel }) {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label>Type</Label>
-              {isEdit ? (
+              <Label hint={isCron ? "A cron channel is always async" : undefined}>Type</Label>
+              {isEdit || isCron ? (
                 <div className="pt-1"><Badge variant="outline">{channelType}</Badge></div>
               ) : (
                 <Select value={channelType} onChange={(e) => setChannelType(e.target.value as ChannelType)}>
@@ -208,7 +263,11 @@ function ChannelForm({ existing }: { existing?: Channel }) {
               {isEdit ? (
                 <div className="pt-1"><Badge variant="outline" className="uppercase">{protocol}</Badge></div>
               ) : (
-                <Select value={protocol} onChange={(e) => setProtocol(e.target.value as ChannelProtocol)}>
+                <Select
+                  value={protocol}
+                  onChange={(e) => changeProtocol(e.target.value as ChannelProtocol)}
+                  aria-label="Protocol"
+                >
                   {PROTOCOLS.map((p) => (
                     <option key={p} value={p}>{p.toUpperCase()}</option>
                   ))}
@@ -217,31 +276,42 @@ function ChannelForm({ existing }: { existing?: Channel }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Methods</Label>
-              <Input
-                value={methods}
-                onChange={(e) => setMethods(e.target.value)}
-                placeholder="GET, POST"
-                aria-label="HTTP methods"
-              />
-            </div>
+          {isCron ? (
             <div>
               <Label>Priority</Label>
               <Input type="number" value={priority} onChange={(e) => setPriority(e.target.value)} />
             </div>
-          </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Methods</Label>
+                  <Input
+                    value={methods}
+                    onChange={(e) => setMethods(e.target.value)}
+                    placeholder="GET, POST"
+                    aria-label="HTTP methods"
+                  />
+                </div>
+                <div>
+                  <Label>Priority</Label>
+                  <Input type="number" value={priority} onChange={(e) => setPriority(e.target.value)} />
+                </div>
+              </div>
 
-          <div>
-            <Label>Route Pattern</Label>
-            <Input
-              value={routePattern}
-              onChange={(e) => setRoutePattern(e.target.value)}
-              placeholder="/api/v1/orders"
-              aria-label="Route pattern"
-            />
-          </div>
+              <div>
+                <Label>Route Pattern</Label>
+                <Input
+                  value={routePattern}
+                  onChange={(e) => setRoutePattern(e.target.value)}
+                  placeholder="/api/v1/orders"
+                  aria-label="Route pattern"
+                />
+              </div>
+            </>
+          )}
+
+          {isCron && <CronTransportEditor value={cron} onChange={setCron} />}
 
           {protocol === "kafka" && (
             <div className="grid grid-cols-2 gap-4">
@@ -256,7 +326,7 @@ function ChannelForm({ existing }: { existing?: Channel }) {
             </div>
           )}
 
-          {(protocol === "kafka" || transportConfig.trim() !== "") && (
+          {!isCron && (protocol === "kafka" || transportConfig.trim() !== "") && (
             <div>
               <Label>Transport Config</Label>
               <p className="mb-1 text-xs text-muted-foreground">
@@ -287,7 +357,12 @@ function ChannelForm({ existing }: { existing?: Channel }) {
           )}
 
           <div>
-            <Label>Linked Workflow ID</Label>
+            <Label
+              required={isCron}
+              hint={isCron ? "The workflow the schedule runs; the payload arrives where a request body would." : undefined}
+            >
+              Linked Workflow ID
+            </Label>
             <Input
               value={workflowId}
               onChange={(e) => setWorkflowId(e.target.value)}
@@ -295,7 +370,7 @@ function ChannelForm({ existing }: { existing?: Channel }) {
             />
           </div>
 
-          <ChannelConfigEditor value={config} onChange={setConfig} />
+          <ChannelConfigEditor value={config} onChange={setConfig} protocol={protocol} />
 
           {validation && <ValidationResults result={validation} validLabel="Channel is valid." />}
 
@@ -326,6 +401,9 @@ function ChannelForm({ existing }: { existing?: Channel }) {
 
 export function ChannelFormPage() {
   const { id } = useParams<{ id: string }>()
+  const [params] = useSearchParams()
+  const requested = params.get("protocol")
+  const initialProtocol = isProtocol(requested) ? requested : undefined
   const { data: existing, isLoading } = useChannel(id ?? "")
 
   if (id && isLoading) {
@@ -337,5 +415,11 @@ export function ChannelFormPage() {
     )
   }
 
-  return <ChannelForm key={existing?.channel_id ?? "new"} existing={id ? existing : undefined} />
+  return (
+    <ChannelForm
+      key={existing?.channel_id ?? `new-${initialProtocol ?? "rest"}`}
+      existing={id ? existing : undefined}
+      initialProtocol={initialProtocol}
+    />
+  )
 }

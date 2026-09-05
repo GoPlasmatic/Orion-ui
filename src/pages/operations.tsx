@@ -30,11 +30,13 @@ import {
 import { PageHeader } from "@/components/shared/page-header"
 import { Sparkline } from "@/components/ui/sparkline"
 import { formatDate, formatDuration, cn } from "@/lib/utils"
-import { traceStatusBadgeClass, statusChartColor } from "@/lib/status"
+import { traceStatusBadgeClass, statusChartColor, isComponentFault } from "@/lib/status"
+import { componentRoute } from "@/lib/health"
 import {
   Activity,
   RefreshCw,
   AlertTriangle,
+  Blocks,
   ZapOff,
   CircleOff,
   CheckCircle2,
@@ -168,7 +170,14 @@ export function OperationsPage() {
     .sort((a, b) => b.errorPct - a.errorPct || a.channel.localeCompare(b.channel))
   const quarantined = health?.channels?.quarantined ?? []
   const failedConnectors = health?.connectors?.failed_to_load ?? []
-  const degraded = Object.entries(health?.components ?? {}).filter(([, state]) => state !== "ok")
+  // A plugin version this node could not load quarantines every workflow
+  // naming its functions — the same silent failure as a failed connector.
+  const failedPlugins = health?.plugins?.failed_to_load ?? []
+  // `plugins: disabled` is a configured state, not a fault; `isComponentFault`
+  // keeps it (and only it) out of the list.
+  const degraded = Object.entries(health?.components ?? {}).filter(([, state]) =>
+    isComponentFault(state),
+  )
   const failed = failedTraces?.data ?? []
 
   // Severity first, then name, so a poll every 15s does not reshuffle the list
@@ -194,6 +203,15 @@ export function OperationsPage() {
       detail: "Every task using it is failing",
       onClick: () => navigate("/connectors"),
     })),
+    ...failedPlugins.map((issue) => ({
+      key: `plugin-${issue.plugin}-${issue.version}`,
+      severity: 1,
+      tone: "destructive" as const,
+      icon: <Blocks className="h-4 w-4 text-destructive" />,
+      label: `Plugin not loaded: ${issue.plugin} v${issue.version}`,
+      detail: `${issue.stage}: ${issue.reason}`,
+      onClick: () => navigate(`/plugins/${encodeURIComponent(issue.plugin)}`),
+    })),
     ...erroringChannels.map((c) => ({
       key: `err-${c.channel}`,
       severity: 2,
@@ -209,8 +227,15 @@ export function OperationsPage() {
       tone: "warning" as const,
       icon: <AlertTriangle className="h-4 w-4 text-warning" />,
       label: `${component} is ${state}`,
-      detail: "Reported by /health",
-      onClick: () => navigate("/settings"),
+      detail:
+        component === "cron"
+          ? "Declared schedules are not running — every liveness signal is green"
+          : component === "engine_reload"
+            ? "The last reload failed; this node serves the previous generation"
+            : component === "config_propagation"
+              ? "A change committed here has not reached the peers"
+              : "Reported by /health",
+      onClick: () => navigate(componentRoute(component)),
     })),
     ...(breakers?.enabled ? openBreakers : []).map(([key, state]) => ({
       key: `brk-${key}`,
@@ -375,8 +400,8 @@ export function OperationsPage() {
                 <CheckCircle2 className="h-5 w-5 text-success" />
                 <p className="text-sm font-medium">All clear</p>
                 <p className="max-w-xs text-xs text-muted-foreground">
-                  Nothing quarantined, no connector failed to load, no channel erroring, no open
-                  circuit breakers, no failed traces recently.
+                  Nothing quarantined, no connector or plugin failed to load, no channel erroring,
+                  no open circuit breakers, no failed traces recently.
                 </p>
               </div>
             ) : (

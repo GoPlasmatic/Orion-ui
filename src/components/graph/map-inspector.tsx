@@ -104,7 +104,9 @@ export function MapInspector({
             <p className="truncate font-display text-sm font-semibold">{node.name}</p>
           </div>
           <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-            {node.methods.join(" ") || node.channelType} {node.route ?? ""}
+            {node.schedule
+              ? `cron ${node.schedule}`
+              : `${node.methods.join(" ") || node.channelType} ${node.route ?? ""}`}
           </p>
         </div>
         <Button
@@ -271,7 +273,9 @@ export function MapInspector({
               Called by {node.callers.length}
             </p>
             {node.callers.length === 0 ? (
-              <p className="px-1 text-xs text-muted-foreground">Entry point</p>
+              <p className="px-1 text-xs text-muted-foreground">
+                {node.schedule ? "Started by its schedule" : "Entry point"}
+              </p>
             ) : (
               <div className="-mx-1 max-h-40 overflow-y-auto">
                 {node.callers.map((name) => (
@@ -339,9 +343,15 @@ export function MapInspector({
             </Link>
           </Button>
           <Button variant="outline" size="sm" asChild>
-            <Link to={`/traces?channel=${encodeURIComponent(node.name)}`}>
-              <ScrollText className="h-3.5 w-3.5" /> Traces
-            </Link>
+            {node.schedule ? (
+              <Link to={`/schedules?channel_id=${encodeURIComponent(node.channelId)}`}>
+                <ScrollText className="h-3.5 w-3.5" /> Occurrences
+              </Link>
+            ) : (
+              <Link to={`/traces?channel=${encodeURIComponent(node.name)}`}>
+                <ScrollText className="h-3.5 w-3.5" /> Traces
+              </Link>
+            )}
           </Button>
         </div>
       )}

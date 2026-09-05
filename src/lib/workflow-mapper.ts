@@ -28,6 +28,7 @@ function toVisualizerStep(step: Step): DataflowStep {
       description: step.description,
       condition: step.condition,
       terminal: step.terminal,
+      continue_on_error: step.continue_on_error,
       tasks: groupMembers(step).map(toVisualizerStep),
     }
   }
@@ -43,6 +44,8 @@ function toVisualizerStep(step: Step): DataflowStep {
     },
     continue_on_error: task.continue_on_error,
     terminal: task.terminal,
+    // 1.6: the visualizer (dataflow-ui 3.12) draws the halt-on-failure marker.
+    halt_on: task.halt_on,
   } satisfies DataflowTask
 }
 

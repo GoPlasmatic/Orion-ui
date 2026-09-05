@@ -24,6 +24,11 @@ import { TraceDetailPage } from "@/pages/trace-detail"
 import { AuditPage } from "@/pages/audit"
 import { ConsolePage } from "@/pages/console"
 import { PackagesPage } from "@/pages/packages"
+import { PluginsPage } from "@/pages/plugins"
+import { PluginDetailPage } from "@/pages/plugin-detail"
+import { PluginFormPage } from "@/pages/plugin-form"
+import { SchedulesPage } from "@/pages/schedules"
+import { OccurrenceDetailPage } from "@/pages/occurrence-detail"
 import { SettingsPage } from "@/pages/settings"
 
 const queryClient = new QueryClient({
@@ -61,6 +66,10 @@ export default function App() {
               <Route path="workflows/:id" element={<WorkflowDetailPage />} />
               <Route path="workflows/:id/edit" element={<WorkflowFormPage />} />
               <Route path="functions" element={<FunctionsPage />} />
+              <Route path="plugins" element={<PluginsPage />} />
+              <Route path="plugins/new" element={<PluginFormPage />} />
+              <Route path="plugins/:id" element={<PluginDetailPage />} />
+              <Route path="plugins/:id/edit" element={<PluginFormPage />} />
               <Route path="connectors" element={<ConnectorsPage />} />
               <Route path="connectors/new" element={<ConnectorFormPage />} />
               <Route path="connectors/:id" element={<ConnectorDetailPage />} />
@@ -69,6 +78,8 @@ export default function App() {
               <Route path="traces" element={<TracesPage />} />
               <Route path="traces/:id" element={<TraceDetailPage />} />
               <Route path="trace-dlq" element={<TraceDlqPage />} />
+              <Route path="schedules" element={<SchedulesPage />} />
+              <Route path="schedules/occurrences/:id" element={<OccurrenceDetailPage />} />
               <Route path="audit" element={<AuditPage />} />
               <Route path="console" element={<ConsolePage />} />
               <Route path="packages" element={<PackagesPage />} />

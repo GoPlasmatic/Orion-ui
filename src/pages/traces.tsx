@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from "react-router"
 import { useTraces } from "@/hooks/use-traces"
 import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
 import { listTableFeatures } from "@/lib/table"
-import type { Trace, TraceSortBy, SortOrder } from "@/api/types"
+import type { Trace, TraceMode, TraceSortBy, SortOrder } from "@/api/types"
+import { TRACE_MODES } from "@/api/types"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -77,7 +78,7 @@ export function TracesPage() {
   // channel and land here already filtered to it, rather than dropping the
   // operator into an unfiltered list and asking them to retype the name.
   const [channelFilter, setChannelFilter] = useState(() => params.get("channel") ?? "")
-  const [modeFilter, setModeFilter] = useState("")
+  const [modeFilter, setModeFilter] = useState<TraceMode | "">("")
 
   // Keep the URL in step so the filtered view is linkable and survives a reload.
   function updateChannelFilter(value: string) {
@@ -162,17 +163,23 @@ export function TracesPage() {
           onChange={(e) => updateChannelFilter(e.target.value)}
           className="w-48"
         />
+        {/* `kafka` (1.4) and `cron` (1.6) are open-string additions: a consumed
+            record and a scheduled occurrence each write a trace row too. */}
         <Select
           value={modeFilter}
           onChange={(e) => {
-            setModeFilter(e.target.value)
+            setModeFilter(e.target.value as TraceMode | "")
             resetPage()
           }}
           className={FILTER_W}
+          aria-label="Filter by mode"
         >
           <option value="">All modes</option>
-          <option value="sync">Sync</option>
-          <option value="async">Async</option>
+          {TRACE_MODES.map((m) => (
+            <option key={m} value={m}>
+              {m.charAt(0).toUpperCase() + m.slice(1)}
+            </option>
+          ))}
         </Select>
       </FilterBar>
 

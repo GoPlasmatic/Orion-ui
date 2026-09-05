@@ -70,6 +70,8 @@ const { tracesApi } = await import("@/api/traces")
 const { dataApi } = await import("@/api/data")
 const { traceDlqApi } = await import("@/api/trace-dlq")
 const { packagesApi } = await import("@/api/packages")
+const { pluginsApi } = await import("@/api/plugins")
+const { cronApi } = await import("@/api/cron")
 
 /** Resolve a client path ("admin/workflows/x?y=1" or "/health") to spec-path + query. */
 function normalize(rawPath: string): { url: string; query: string | undefined } {
@@ -166,6 +168,7 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
     changeStatusDryRun: () => channelsApi.changeStatusDryRun("ch-1", { status: "active" }),
     listVersions: () => channelsApi.listVersions("ch-1", { limit: 10, offset: 0 }),
     createVersion: () => channelsApi.createVersion("ch-1"),
+    trigger: () => channelsApi.trigger("ch-1"),
     import: () => channelsApi.import([], { dryRun: true, onConflict: "skip" }),
     export: () =>
       channelsApi.export({
@@ -243,6 +246,53 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
     list: () => packagesApi.list({ limit: 10, offset: 0 }),
     get: () => packagesApi.get("payments"),
   },
+  pluginsApi: {
+    list: () =>
+      pluginsApi.list({
+        limit: 10,
+        offset: 0,
+        status: "active",
+        tag: "t",
+        sort_by: "plugin_id",
+        sort_order: "asc",
+      }),
+    get: () => pluginsApi.get("acme.codec"),
+    create: () => pluginsApi.create({ manifest: 'abi = "orion:plugin@1.0.0"', component: "AA==" }),
+    update: () => pluginsApi.update("acme.codec", { tags: ["t"] }),
+    delete: () => pluginsApi.delete("acme.codec"),
+    validate: () => pluginsApi.validate({ manifest: {}, digest: "sha256:0" }),
+    changeStatus: () =>
+      pluginsApi.changeStatus("acme.codec", { status: "active" }, { reload: "defer" }),
+    changeStatusDryRun: () => pluginsApi.changeStatusDryRun("acme.codec", { status: "active" }),
+    listVersions: () => pluginsApi.listVersions("acme.codec", { limit: 10, offset: 0 }),
+    createVersion: () => pluginsApi.createVersion("acme.codec"),
+    dependencies: () => pluginsApi.dependencies("acme.codec"),
+    import: () => pluginsApi.import([], { dryRun: true, onConflict: "new_version" }),
+    export: () =>
+      pluginsApi.export({
+        status: "active",
+        tag: "t",
+        limit: 10,
+        offset: 0,
+        sort_by: "plugin_id",
+        sort_order: "asc",
+        include_artifacts: true,
+      }),
+  },
+  cronApi: {
+    listOccurrences: () =>
+      cronApi.listOccurrences({
+        limit: 10,
+        offset: 0,
+        channel_id: "ch-1",
+        status: "failed",
+        since: "2026-09-01T00:00:00Z",
+        until: "2026-09-05T00:00:00Z",
+      }),
+    getOccurrence: () => cronApi.getOccurrence("occ-1"),
+    retryOccurrence: () => cronApi.retryOccurrence("occ-1"),
+    status: () => cronApi.status(),
+  },
 }
 
 const MODULES: Record<string, object> = {
@@ -256,6 +306,8 @@ const MODULES: Record<string, object> = {
   tracesApi,
   traceDlqApi,
   packagesApi,
+  pluginsApi,
+  cronApi,
 }
 
 describe("API layer ↔ OpenAPI contract", () => {

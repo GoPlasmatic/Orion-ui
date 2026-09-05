@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Link, useParams, useSearchParams } from "react-router"
+import { Link, useLocation, useParams, useSearchParams } from "react-router"
 import { useTrace } from "@/hooks/use-traces"
 import type { ExecutionStep } from "@/api/types"
 import { Button } from "@/components/ui/button"
@@ -110,10 +110,18 @@ function TaskStep({ step, index, isLast }: { step: ExecutionStep; index: number;
 
 export function TraceDetailPage() {
   const { id } = useParams<{ id: string }>()
-  // The console passes the async submission's capability token through the URL
-  // so a follow-the-trace link works without an admin credential.
+  // The console hands the async submission's capability token over in router
+  // state, so a follow-the-trace link works without an admin credential and
+  // the token stays out of the URL. `?token=` is still read for a link minted
+  // before 1.6; the server itself sends the token as the `x-trace-token`
+  // header either way.
+  const location = useLocation()
   const [searchParams] = useSearchParams()
-  const { data: trace, isLoading, error } = useTrace(id ?? "", searchParams.get("token") ?? undefined)
+  const stateToken = (location.state as { traceToken?: string } | null)?.traceToken
+  const { data: trace, isLoading, error } = useTrace(
+    id ?? "",
+    stateToken ?? searchParams.get("token") ?? undefined
+  )
   const [showRaw, setShowRaw] = useState(false)
 
   if (isLoading) {
@@ -163,11 +171,36 @@ export function TraceDetailPage() {
               {trace.status}
             </Badge>
             <Badge variant="outline">{trace.mode}</Badge>
+            {trace.channel && (
+              trace.channel_id ? (
+                <Link to={`/channels/${trace.channel_id}`} className="text-sm font-medium hover:underline">
+                  {trace.channel}
+                </Link>
+              ) : (
+                <span className="text-sm font-medium">{trace.channel}</span>
+              )
+            )}
             <span className="text-sm text-muted-foreground">{formatDuration(trace.duration_ms)}</span>
             <span className="ml-auto font-mono text-xs text-muted-foreground">{trace.id}</span>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {trace.mode === "cron" && trace.channel_id && (
+            <p className="text-xs text-muted-foreground">
+              A scheduled run. The occurrence it belongs to — what was due, which attempt this was,
+              and the lease — is in the{" "}
+              <Link to={`/schedules?channel_id=${encodeURIComponent(trace.channel_id)}`} className="underline underline-offset-2">
+                occurrence ledger
+              </Link>
+              .
+            </p>
+          )}
+          {trace.mode === "kafka" && (
+            <p className="text-xs text-muted-foreground">
+              A consumed Kafka record. It arrived on no route, so there is no channel id, and its
+              payload is already the workflow input.
+            </p>
+          )}
           {trace.error && (
             <pre className="whitespace-pre-wrap rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
               {trace.error}

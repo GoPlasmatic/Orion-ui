@@ -5,8 +5,29 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/**
+ * A timestamp as the server writes it. Orion's admin plane serialises
+ * `chrono::NaiveDateTime` — `2026-09-05T12:13:55`, no zone suffix — and every
+ * such value is a UTC instant. `new Date()` on a zoneless ISO string reads it
+ * as *local* time, which put every timestamp in the console off by the
+ * viewer's UTC offset and made "next fire in 5s" render as "5.5h ago" in
+ * Kolkata. So a zoneless string is pinned to UTC here; one that carries a
+ * zone (`Z`, `+02:00`) is left alone.
+ */
+export function parseServerDate(value: string | number): Date {
+  if (typeof value === "number") return new Date(value)
+  return new Date(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(value) ? `${value}Z` : value)
+}
+
+/** Epoch milliseconds for a server timestamp — for durations and "ago" labels. */
+export function serverTime(value: string | number | null | undefined): number | null {
+  if (value == null || value === "") return null
+  const t = parseServerDate(value).getTime()
+  return Number.isNaN(t) ? null : t
+}
+
 export function formatDate(date: string) {
-  return new Date(date).toLocaleDateString("en-US", {
+  return parseServerDate(date).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",

@@ -14,13 +14,14 @@
  * ---------------------------------------------------------------------------
  * PATCH 1 — missing `OnConflict` / `ReloadMode` component schemas (Orion 1.1.0)
  *
- * Six query parameters `$ref` these two components, but neither is registered
- * in `components.schemas`, so the published spec does not resolve and
- * `openapi-typescript` refuses to generate:
+ * Eight query parameters (six before 1.6, which added the plugin entity) `$ref`
+ * these two components, but neither is registered in `components.schemas`, so
+ * the published spec does not resolve and `openapi-typescript` refuses to
+ * generate:
  *
- *   POST  /admin/{channels,connectors,workflows}/import  ?on_conflict  -> OnConflict
- *   PATCH /admin/{channels,workflows}/{id}/status        ?reload       -> ReloadMode
- *   PATCH /admin/workflows/{id}/rollout                  ?reload       -> ReloadMode
+ *   POST  /admin/{channels,connectors,workflows,plugins}/import  ?on_conflict  -> OnConflict
+ *   PATCH /admin/{channels,workflows,plugins}/{id}/status        ?reload       -> ReloadMode
+ *   PATCH /admin/workflows/{id}/rollout                          ?reload       -> ReloadMode
  *
  * Both enums derive `utoipa::ToSchema` but are never added to the components
  * registry. Values below are transcribed verbatim from the Rust source, which

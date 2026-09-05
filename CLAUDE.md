@@ -11,7 +11,9 @@ npm run lint         # ESLint
 npm run preview      # Preview production build locally
 
 npm test             # Vitest unit tests, incl. the API ↔ OpenAPI contract test
-npm run test:e2e     # Playwright smoke flow (needs a live orion-server on :8080; skips locally if absent)
+npm run test:e2e     # Playwright smoke flow (needs a live orion-server on :8080; skips locally if absent).
+                     # ORION_URL points it at another server; UI_PORT moves the dev server off 5173 —
+                     # `reuseExistingServer` adopts whatever is already listening there.
 npm run patch:api    # Re-apply local fixes to the vendored spec (see contracts/PATCHES.md)
 npm run generate:api # Patch + regenerate src/api/schema.d.ts from contracts/openapi.json
 npm run check:contract # Fail if schema.d.ts is stale relative to the vendored spec
@@ -54,14 +56,31 @@ Orion UI is a React 19 dashboard for the Orion workflow engine. It uses Vite 8, 
 
 ### Core Domain
 
-Targets the Orion **v1.3** API (dataflow-rs 3.8 / datalogic-rs 5.3). Three primitives with
-Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
+Targets the Orion **v1.6** API (dataflow-rs 3.12 / datalogic-rs 5.4). Four primitives with a
+Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 
-- **Channels** — Service endpoints (sync/async, REST/HTTP/Kafka). Config covers `auth`
+- **Channels** — Service endpoints (sync/async, REST/HTTP/Kafka/**cron**). Config covers `auth`
   (`api_key` | `hmac` | `jwt`), rate limits (incl. `key_logic` + `key_headers`), backpressure,
-  dedup, caching, `origin_allow_list`, `request`, `response`, `validation_logic` and `tracing`;
-  `transport_config` is a JSON editor shown for Kafka. Full CRUD (create/edit forms, server-side
-  Validate, bulk import, export). `methods` is `string[] | null`.
+  dedup, caching (incl. `key_logic` since 1.5), `origin_allow_list`, `request`, `response`
+  (incl. `cookies`), `validation_logic`, `tracing` and **`oauth2_login`** (1.6, inbound OAuth2 /
+  OIDC sign-in; `oauth2-login-editor.tsx`). `transport_config` is a JSON editor for Kafka and a
+  structured schedule editor (`cron-transport-editor.tsx`) for cron. Full CRUD (create/edit
+  forms, server-side Validate, bulk import, export). `methods` is `string[] | null`. A **cron
+  channel** (`protocol: "cron"`, 1.6) is started by a clock: its schedule lives in
+  `transport_config`, it is always `async`, registers no route or topic, is refused everything
+  caller-shaped in `config` (`lib/cron.ts::CRON_REFUSED_CONFIG_KEYS`), and is run manually with
+  `POST admin/channels/{id}/trigger` — never from the Data Console.
+- **Schedules** — The cron occurrence ledger (`/schedules`): `GET admin/cron/status` (one row
+  per active cron channel — schedule, next fire, last run, backlog) and
+  `GET admin/cron/occurrences` (every instant a schedule was due, with `retry` for a failed or
+  skipped one). An occurrence detail page carries the trace id, the executing version and the
+  lease. Also embedded on a cron channel's detail page.
+- **Plugins** — Custom task functions as sandboxed WebAssembly components (`/plugins`, 1.6): a
+  versioned entity with the workflow's lifecycle. Upload (manifest as TOML text or JSON +
+  component as base64, encoded in the browser; the sha256 is computed client-side to compare),
+  Validate, activate/archive with pre-flight, versions, `GET admin/plugins/{id}/dependencies`
+  (the active workflows calling its functions), import/export (`?include_artifacts=true`).
+  The single read carries `health` — whether *this node* loaded the digest.
 - **Workflows** — Step pipelines with JSONLogic conditions. A step is a **task** (carries
   `function`) or, since 1.2, a **task group** (carries its own `tasks`) — one condition gating a
   contiguous run, plus `terminal` to end the workflow after a step. Full authoring via
@@ -75,15 +94,84 @@ Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
   distinct from `name`).
 - **Functions** — Read-only reference page (`/functions`) rendering the server's function
   catalogue (`GET admin/functions`). Since 1.2 this is *every* valid function name, not just the
-  schema registry: entries carry `source` (`orion` | `engine`), optional `aliases`, and
-  `input_fields` is **absent** for an engine built-in.
+  schema registry: entries carry `source` (`orion` | `engine` | `plugin`), optional `aliases`,
+  `input_fields` is **absent** for an engine built-in, every entry carries `retry_safety` (1.6)
+  and a `plugin` entry names the plugin version and digest serving it. Accepts `?q=` to land on
+  one function.
 - **Trace DLQ** — Operator view of the async dead-letter queue (`/trace-dlq`): inspect, requeue,
   purge.
 - **Packages** — Read-only promotion receipts (`/packages`). `PUT admin/packages/{name}` is
   deliberately **not** exposed; recording receipts is CI's job.
+- **Health** — `/settings` renders the whole `/health` report (`health-components.tsx`): every
+  component with what its state means, plus the admin-only detail — background tasks, plugin
+  loads and failures, the scheduler's own numbers. The Operations dashboard shows only the faults.
 
 ### v1.x wire contracts worth remembering
 
+- **A cron channel's schedule is `transport_config` (1.6).** `{ schedule, timezone?, payload?,
+  misfire_policy?, max_catch_up?, concurrency? }` — six-field expression (seconds first; five- and
+  seven-field forms are refused rather than guessed at), an IANA zone, a fixed payload delivered
+  where a request body would be. `lib/cron.ts::cronTransport` is the one reader. Unknown keys are
+  refused. `payload` is recorded verbatim as every occurrence's trace input, so secrets and
+  `env://`-style references are refused in it. `metadata.trigger` is what the workflow gets:
+  `type` (`cron` | `manual`), `occurrence_id`, `scheduled_for`, `started_at`, `attempt`.
+- **Occurrences outlive names.** `admin/cron/occurrences?channel_id=` filters by the stable id —
+  an occurrence keeps the channel *name* it was materialised under, so renaming does not rewrite
+  history. Statuses (`pending`, `claimed`, `running`, `completed`, `failed`, `skipped_misfire`,
+  `skipped_singleton`) are an open string. A misfire run is **one** row with the count and range
+  in `error_message`, not one per missed instant. A retry keeps the id and `scheduled_for` and
+  increments `attempt`; only `failed` / `skipped_*` accept it (409 otherwise). Re-running finished
+  work is a *trigger*, which mints a new occurrence. Failed occurrences never enter the trace DLQ.
+  Cron runs **do** count in `orion_messages_total{channel}`, unlike `channel_call` targets.
+- **`/health` components (1.4–1.6):** always `database`, `engine` (constant ok), `connectors`,
+  `channels`, `background_tasks`, `engine_reload` (the last reload failed — serving the previous
+  generation) and `plugins` (`disabled` when the sandbox is off and nothing needs it; a *state*,
+  not a fault — `lib/status.ts::isComponentFault` keeps it off the dashboard); conditionally
+  `kafka`, `cron` (on, or off while an active cron channel is quarantined), `config_propagation`
+  and `cluster_redis`. `degraded` on `engine_reload`/`config_propagation`/`cron` does not fail
+  `/readyz`. Admin-only detail adds `plugins.{loaded,failed_to_load}` (a failed load quarantines
+  every workflow naming the plugin's functions — surfaced as an alert like a failed connector),
+  `cron` (reconcile age, oldest pending, lease renewal failures) and `background_tasks[]`.
+- **Plugins are off by default** (`plugins.enabled = false`): every `admin/plugins` route answers
+  400, and a stored active plugin row quarantines its dependants rather than aborting. A plugin
+  function is pure JSON → JSON with no imports at all (no clock, sockets, connectors, secrets — a
+  `{"secret": …}` node in a plugin task's input is a create-time error). Activating a version is
+  checked against every active workflow calling it: a renamed or newly-required field is a 409
+  naming the workflow. `GET admin/workflows/{id}/dependencies` gained `plugins[]` (id, version,
+  digest, functions) and `unresolved_functions[]` — a workflow with any of the latter would be
+  refused activation on this node. `PluginResponse.manifest` is the validated manifest as JSON;
+  `functions` repeats the names at the top level so a client need not walk it.
+- **`retry_safety` (1.6)** is served for every catalogue entry as `{"kind"}` — `pure`, `read`,
+  `idempotent_write`, `unsafe_write`, or `depends_on` with the `input` that decides
+  (`http_call` → `method`, `data_write` → `op`). A different question from whether an *error*
+  was transient. `retry-safety-badge.tsx` renders it.
+- **`template_at` (1.5)** on a catalogue field: `[""]` means the value is JSONLogic, compiled
+  once and evaluated per message, so an object there may be an operator call rather than a
+  literal of the declared kind. A literal is JSONLogic for itself, so the static spelling still
+  works. `channel_call.channel` is one such field — a computed target is an object, and
+  `lib/topology.ts::channelCallTargets` skips it (the server's `has_dynamic_channel_calls` is the
+  authority; `channel_logic` survives only as an alias).
+- **`halt_on: "failure"` (1.6, dataflow-rs 3.10)** on a task ends the workflow when that task
+  failed (status ≥ 400, which covers a `validation` rule) — the outcome axis to `terminal`'s
+  position axis; they compose by `or`. `lintSteps` refuses any other spelling; the visualizer
+  (dataflow-ui 3.12) draws it; `countHaltOnFailure` badges it.
+- **`?token=` on trace reads is deprecated (1.6).** The header `x-trace-token` is what
+  `tracesApi.get` has always sent; the console now hands the token to the trace page in router
+  *state* rather than the UI's own URL, for the same reason (browser history, `Referer`, pasted
+  links). `/traces/:id?token=` is still read for old links.
+- **Trace `mode` is open:** `sync` | `async` | `kafka` (1.4 — no `channel_id`, no `input_json`)
+  | `cron` (1.6). `TRACE_MODES` drives the filter.
+- **Audit vocabulary** gained `resource_type: plugin` and `cron_occurrence`, and actions
+  `trigger` (channel) and `retry` (cron_occurrence). Status changes are named for the status
+  requested (`status_active`, `status_archived`); there is no `activate` action.
+- **`response.cookies` (1.5)** is its own switch — a shaped channel's workflow may then set
+  cookies declaratively through `data._orion.response.cookies`. A response that sets a cookie is
+  never stored in the response cache. `cache.key_logic` is the general form of
+  `cache_key_fields` and takes precedence.
+- **Integrity failures (1.5):** `errors[].code` may be `integrity_unique` / `integrity_foreign_key`
+  (a run that does not catch one answers 409) or `integrity_not_null` / `integrity_check` (400).
+- **`orion_messages_total{status}` counts a run that finished with task errors as `error` on every
+  transport since 1.4** (the sync route used to count it `ok`).
 - **Envelope:** every admin 2xx body puts its payload under `data`. List endpoints add
   `limit`/`offset` alongside, and `total` where the endpoint computes it. `unwrap()` in
   `client.ts` is the helper; `/health` is not an admin route and is *not* wrapped.
@@ -203,7 +291,7 @@ Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
   `selectClassName` reaches the `<select>` itself.
 - **`src/components/shared/`** — Shared composed components: `StatusBadge`, `LifecycleActions` (incl. the activation pre-flight), `VersionHistory`, `JsonViewer`, `PageHeader`, `ConfirmDialog`, `PaginationFooter`, `ValidationResults`, `ImportDialog`/`ImportSummary`, `ChannelAuthEditor`, `ConnectorTestDialog`, `WorkflowDependencies`, `FilterBar`, `EmptyState`.
 - **`src/components/layout/`** — `AppLayout`, `Sidebar`, `Header`.
-- **`src/lib/utils.ts`** — `cn()` (clsx + tailwind-merge), `formatDate()`, `formatDuration()`, `parseJson()` (safe parse; returns the *raw string* on failure, not null), `downloadJson()` (the shared export blob helper).
+- **`src/lib/utils.ts`** — `cn()` (clsx + tailwind-merge), `formatDate()`, `formatDuration()`, `parseJson()` (safe parse; returns the *raw string* on failure, not null), `downloadJson()` (the shared export blob helper), and `parseServerDate()` / `serverTime()`: **the admin plane serialises `chrono::NaiveDateTime` — `2026-09-05T12:13:55`, no zone — and every such value is UTC.** `new Date()` reads a zoneless string as local time, so go through these for anything time-based; `formatDate` already does.
 - **`src/lib/use-pagination.ts`** — `usePagination()` + `PAGE_SIZE`, paired with `PaginationFooter`. Lives in `lib/` because the fast-refresh lint rule forbids non-component exports from component files.
 - **`src/lib/topology.ts`** — client-side channel/workflow/connector graph inference for the
   *per-entity* neighbourhoods embedded on the detail pages (`RelationshipGraph`). For a single
@@ -234,7 +322,20 @@ Draft -> Active -> Archived lifecycle, plus two read-only operator surfaces:
   not depend on the visualizer package.
 - **`src/lib/workflow-mapper.ts`** — Maps API `Workflow` (has `workflow_id`) to
   `@goplasmatic/dataflow-ui` `Workflow` type (has `id`). Walks the step tree rather than casting:
-  the visualizer requires `function.input`, which the API type leaves optional.
+  the visualizer requires `function.input`, which the API type leaves optional. Passes `halt_on`
+  through so the 3.12 visualizer draws it.
+- **`src/lib/cron.ts`** — Reading a cron channel: `isCronChannel`, `cronTransport` (the one
+  reader of `transport_config` as a schedule), `CRON_REFUSED_CONFIG_KEYS` +
+  `stripCronRefusedConfig` (what a protocol switch must drop), `lintCronExpression` (six fields,
+  while typing — Validate is the authority), `isRetryable`, the policy option lists and status
+  labels.
+- **`src/lib/health.ts`** — `componentRoute`: which page acts on a degraded `/health` component.
+- **`src/api/plugins.ts`, `src/api/cron.ts`** — the 1.6 entity and the ledger;
+  `channelsApi.trigger` is the manual cron run. Hooks in `use-plugins.ts` / `use-cron.ts`; a
+  plugin status change invalidates `["functions"]` and `["workflows"]` because the vocabulary
+  moved. `use-metrics.ts` also exposes `useCronMetrics` (pending gauge, lag p95, occurrences by
+  status, lease failures) and `usePluginMetrics` (per-function invocations, errors, p95), both
+  reading the shared `["metrics"]` poll.
 
 ### Routing
 
@@ -244,14 +345,18 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
 /                   -> OperationsPage
 /system-map         -> SystemMapPage
 /channels           -> ChannelsPage
-/channels/new       -> ChannelFormPage (create)
+/channels/new       -> ChannelFormPage (create; ?protocol=cron preselects a schedule)
 /channels/:id       -> ChannelDetailPage
 /channels/:id/edit  -> ChannelFormPage (edit; draft only)
 /workflows          -> WorkflowsPage
 /workflows/new      -> WorkflowFormPage (create)
 /workflows/:id      -> WorkflowDetailPage
 /workflows/:id/edit -> WorkflowFormPage (edit; draft only)
-/functions          -> FunctionsPage
+/functions          -> FunctionsPage (accepts ?q= to land on one function)
+/plugins            -> PluginsPage
+/plugins/new        -> PluginFormPage (upload)
+/plugins/:id        -> PluginDetailPage
+/plugins/:id/edit   -> PluginFormPage (edit; draft only)
 /connectors         -> ConnectorsPage
 /connectors/new     -> ConnectorFormPage (create)
 /connectors/:id     -> ConnectorDetailPage
@@ -259,6 +364,8 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
 /traces             -> TracesPage
 /traces/:id         -> TraceDetailPage (accepts ?token= for async trace polling)
 /trace-dlq          -> TraceDlqPage
+/schedules          -> SchedulesPage (accepts ?channel_id= to pre-filter the ledger)
+/schedules/occurrences/:id -> OccurrenceDetailPage
 /circuit-breakers   -> CircuitBreakersPage
 /audit              -> AuditPage
 /console            -> ConsolePage

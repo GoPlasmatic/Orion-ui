@@ -24,6 +24,8 @@ const functionRows: FunctionSchema[] = [
     description: "Call an HTTP endpoint through a connector.",
     category: "connector",
     source: "orion",
+    // 1.6: a retry's safety depends on the task's own `method`.
+    retry_safety: { kind: "depends_on", input: "method" },
     input_fields: [
       {
         name: "connector",
@@ -43,6 +45,7 @@ const functionRows: FunctionSchema[] = [
     description: "Verify a JWT against static keys or a JWKS.",
     category: "utility",
     source: "orion",
+    retry_safety: { kind: "read" },
     input_fields: [
       {
         name: "token",
@@ -70,6 +73,7 @@ const functionRows: FunctionSchema[] = [
     description: "Copy and transform values between the run's documents.",
     category: "data",
     source: "engine",
+    retry_safety: { kind: "pure" },
   },
   {
     // The alias row — `validation` carries `validate` rather than appearing twice.
@@ -78,6 +82,7 @@ const functionRows: FunctionSchema[] = [
     category: "data",
     source: "engine",
     aliases: ["validate"],
+    retry_safety: { kind: "pure" },
   },
   {
     // An Orion handler that genuinely takes nothing, which must read
@@ -86,7 +91,50 @@ const functionRows: FunctionSchema[] = [
     description: "Write a line to the run log.",
     category: "utility",
     source: "orion",
+    retry_safety: { kind: "pure" },
     input_fields: [],
+  },
+  {
+    // 1.6: a function an active plugin declares. Its field table comes from
+    // the manifest, and the row names the version and digest serving it.
+    name: "acme.codec.parse",
+    description: "Parse a fixed-width record into JSON.",
+    category: "transform",
+    source: "plugin",
+    retry_safety: { kind: "pure" },
+    plugin: { id: "acme.codec", version: 2, digest: "sha256:abc", abi: "orion:plugin@1.0.0" },
+    input_fields: [
+      {
+        name: "record",
+        description: "The raw record.",
+        kind: "string",
+        required: true,
+        resolvable: false,
+        secret_at: [],
+        // 1.5: the value is JSONLogic, evaluated per message.
+        template_at: [""],
+        alias: null,
+      },
+    ],
+  },
+  {
+    name: "send_email",
+    description: "Send an email through an smtp connector.",
+    category: "connector",
+    source: "orion",
+    retry_safety: { kind: "unsafe_write" },
+    input_fields: [
+      {
+        name: "connector",
+        description: "Name of the smtp connector.",
+        kind: "string",
+        required: true,
+        resolvable: false,
+        secret_at: [],
+        template_at: [],
+        alias: null,
+      },
+    ],
   },
 ]
 
@@ -147,10 +195,10 @@ describe("functions page", () => {
     expect(screen.getAllByText("resolvable")).toHaveLength(1)
   })
 
-  it("counts the two halves of the catalogue", async () => {
+  it("counts the three sources of the catalogue", async () => {
     renderPage()
     await screen.findByText("map")
-    expect(screen.getByText("5 functions")).toBeInTheDocument()
+    expect(screen.getByText("7 functions")).toBeInTheDocument()
   })
 
   it("filters to engine built-ins", async () => {
@@ -160,7 +208,36 @@ describe("functions page", () => {
     expect(select).not.toBeNull()
     select!.value = "engine"
     select!.dispatchEvent(new Event("change", { bubbles: true }))
-    expect(await screen.findByText("2 of 5")).toBeInTheDocument()
+    expect(await screen.findByText("2 of 7")).toBeInTheDocument()
+    expect(screen.queryByText("http_call")).not.toBeInTheDocument()
+  })
+
+  it("says what a retry costs, naming the deciding input (1.6)", async () => {
+    renderPage()
+    await screen.findByText("http_call")
+    // `depends_on` carries the input to look at rather than a boolean that
+    // would be wrong half the time.
+    expect(screen.getByText("method", { selector: "code" })).toBeInTheDocument()
+    expect(screen.getByText("retry: unsafe to retry")).toBeInTheDocument()
+    expect(screen.getAllByText("retry: pure").length).toBeGreaterThan(0)
+  })
+
+  it("links a plugin function to the plugin serving it (1.6)", async () => {
+    renderPage()
+    await screen.findByText("acme.codec.parse")
+    const link = screen.getByText("acme.codec v2")
+    expect(link.closest("a")).toHaveAttribute("href", "/plugins/acme.codec")
+    // A `template_at` field is an expression, not a literal of its kind.
+    expect(screen.getByText("expression")).toBeInTheDocument()
+  })
+
+  it("filters to plugin functions", async () => {
+    const { container } = renderPage()
+    await screen.findByText("http_call")
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="Filter by source"]')
+    select!.value = "plugin"
+    select!.dispatchEvent(new Event("change", { bubbles: true }))
+    expect(await screen.findByText("1 of 7")).toBeInTheDocument()
     expect(screen.queryByText("http_call")).not.toBeInTheDocument()
   })
 })

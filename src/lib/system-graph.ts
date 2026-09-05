@@ -1,4 +1,5 @@
 import { countGroups, countLeafSteps } from "@/lib/workflow-steps"
+import { cronTransport } from "@/lib/cron"
 import {
   channelCallTargets,
   channelConnectorRefs,
@@ -47,6 +48,8 @@ export interface SystemNode {
   protocol: ChannelProtocol
   route: string | null
   methods: string[]
+  /** A cron channel's six-field expression (1.6); it has no route. */
+  schedule: string | null
   tags: string[]
   /** Slug id of the workflow this channel runs. */
   workflowId: string | null
@@ -107,6 +110,7 @@ function placeholder(name: string): SystemNode {
     protocol: "rest",
     route: null,
     methods: [],
+    schedule: null,
     tags: [],
     workflowId: null,
     workflowName: null,
@@ -196,6 +200,9 @@ export function buildSystemGraph(idx: EntityIndex): SystemGraph {
       protocol: channel.protocol,
       route: channel.route_pattern,
       methods: channel.methods ?? [],
+      // A cron channel is an entry point reached by a clock rather than a
+      // route; nothing can call it, so it always sits in the entry lane.
+      schedule: cronTransport(channel)?.schedule ?? null,
       tags: channel.tags ?? [],
       workflowId: channel.workflow_id,
       workflowName: workflow?.name ?? null,

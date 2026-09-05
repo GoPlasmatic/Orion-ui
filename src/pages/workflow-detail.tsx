@@ -28,8 +28,8 @@ import { JsonViewer } from "@/components/shared/json-viewer"
 import { RelationshipGraph } from "@/components/graph/relationship-graph"
 import { WorkflowDependencies } from "@/components/shared/workflow-dependencies"
 import { stepResultBadgeClass } from "@/lib/status"
-import { ArrowLeft, AlertCircle, CircleStop, Layers, Pencil, Percent, Play } from "lucide-react"
-import { countGroups, countLeafSteps, countTerminal } from "@/lib/workflow-steps"
+import { ArrowLeft, AlertCircle, CircleStop, Layers, OctagonX, Pencil, Percent, Play } from "lucide-react"
+import { countGroups, countHaltOnFailure, countLeafSteps, countTerminal } from "@/lib/workflow-steps"
 import type { WorkflowTestResponse } from "@/api/types"
 
 export function WorkflowDetailPage() {
@@ -79,6 +79,7 @@ export function WorkflowDetailPage() {
   const taskCount = countLeafSteps(workflow.tasks)
   const groupCount = countGroups(workflow.tasks)
   const terminalCount = countTerminal(workflow.tasks)
+  const haltCount = countHaltOnFailure(workflow.tasks)
 
   const handleTest = () => {
     setTestError(null)
@@ -135,6 +136,12 @@ export function WorkflowDetailPage() {
               <Badge variant="outline" className="text-xs" title="Steps that end the workflow once they have run">
                 <CircleStop className="mr-1 h-3 w-3" />
                 {terminalCount} terminal
+              </Badge>
+            )}
+            {haltCount > 0 && (
+              <Badge variant="outline" className="text-xs" title="Tasks that end the workflow when they fail (halt_on: failure)">
+                <OctagonX className="mr-1 h-3 w-3" />
+                {haltCount} halt on failure
               </Badge>
             )}
             {workflow.status === "active" && (

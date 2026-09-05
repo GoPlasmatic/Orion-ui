@@ -72,6 +72,54 @@ export function breakerStateBadgeClass(state: string): string {
 export const enabledBadgeClass = GOOD
 export const disabledBadgeClass = NEUTRAL
 
+// Cron occurrence status (1.6). A skip is the scheduler doing what the
+// channel's policy told it to — visible, not a failure — so it reads as a
+// warning rather than red. The wire value is open: an unknown one is neutral.
+export const occurrenceStatusClass: Record<string, string> = {
+  pending: NEUTRAL,
+  claimed: INFO,
+  running: INFO,
+  completed: GOOD,
+  failed: BAD,
+  skipped_misfire: WARN,
+  skipped_singleton: WARN,
+}
+
+export function occurrenceStatusBadgeClass(status: string | null | undefined): string {
+  return (status && occurrenceStatusClass[status]) || NEUTRAL
+}
+
+// A plugin version's load state on the answering node (1.6): loaded / failed /
+// disabled (the sandbox is off here) / inactive (not this generation's version).
+export const pluginHealthClass: Record<string, string> = {
+  loaded: GOOD,
+  failed: BAD,
+  disabled: NEUTRAL,
+  inactive: NEUTRAL,
+}
+
+export function pluginHealthBadgeClass(state: string | null | undefined): string {
+  return (state && pluginHealthClass[state]) || NEUTRAL
+}
+
+// A `/health` component state. `disabled` is a state, not a fault — a node
+// without the plugin sandbox serves everything else — so it is neutral.
+export const componentStateClass: Record<string, string> = {
+  ok: GOOD,
+  degraded: WARN,
+  error: BAD,
+  disabled: NEUTRAL,
+}
+
+export function componentStateBadgeClass(state: string | null | undefined): string {
+  return (state && componentStateClass[state]) || WARN
+}
+
+/** Whether a component state is something a person should act on. */
+export function isComponentFault(state: string | null | undefined): boolean {
+  return state !== undefined && state !== null && state !== "ok" && state !== "disabled"
+}
+
 // Concrete chart colors (hex) for status segments in SVG charts (recharts), where
 // CSS-variable fills don't resolve. These mirror the --chart-* / --destructive
 // theme tokens, which are identical in light and dark.
@@ -81,9 +129,12 @@ const STATUS_CHART_COLORS: Record<string, string> = {
   ok: "#4CBD97",
   complete: "#4CBD97",
   running: "#119FCD",
+  claimed: "#119FCD",
   pending: "#7FAFC0",
   failed: "#EF476F",
   error: "#EF476F",
+  skipped_misfire: "#FFD167",
+  skipped_singleton: "#FFD167",
 }
 
 export function statusChartColor(status: string): string {

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router"
 import { useChannels } from "@/hooks/use-channels"
 import { useWorkflows } from "@/hooks/use-workflows"
 import { useConnectors } from "@/hooks/use-connectors"
+import { usePlugins } from "@/hooks/use-plugins"
 import { useTheme } from "@/lib/use-theme"
 import { Dialog } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
@@ -13,7 +14,9 @@ import {
   Radio,
   GitBranch,
   Plug,
+  Blocks,
   Activity,
+  CalendarClock,
   Inbox,
   Package,
   ZapOff,
@@ -64,6 +67,7 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
   const { data: channels } = useChannels({ limit: 200 })
   const { data: workflows } = useWorkflows({ limit: 200 })
   const { data: connectors } = useConnectors({ limit: 200 })
+  const { data: plugins } = usePlugins({ limit: 200 })
 
   const go = (to: string) => {
     navigate(to)
@@ -78,8 +82,10 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
       { id: "nav-workflows", label: "Workflows", group: "Go to", icon: GitBranch, run: () => go("/workflows") },
       { id: "nav-connectors", label: "Connectors", group: "Go to", icon: Plug, run: () => go("/connectors") },
       { id: "nav-functions", label: "Functions", group: "Go to", icon: FunctionSquare, run: () => go("/functions") },
+      { id: "nav-plugins", label: "Plugins", group: "Go to", icon: Blocks, keywords: "wasm webassembly custom functions", run: () => go("/plugins") },
       { id: "nav-packages", label: "Packages", group: "Go to", icon: Package, keywords: "promotion receipts release", run: () => go("/packages") },
       { id: "nav-traces", label: "Traces", group: "Go to", icon: Activity, run: () => go("/traces") },
+      { id: "nav-schedules", label: "Schedules", group: "Go to", icon: CalendarClock, keywords: "cron occurrences scheduled jobs", run: () => go("/schedules") },
       { id: "nav-trace-dlq", label: "Trace DLQ", group: "Go to", icon: Inbox, keywords: "dead letter queue retry failed async", run: () => go("/trace-dlq") },
       { id: "nav-breakers", label: "Circuit Breakers", group: "Go to", icon: ZapOff, run: () => go("/circuit-breakers") },
       { id: "nav-audit", label: "Audit Log", group: "Go to", icon: FileText, run: () => go("/audit") },
@@ -91,6 +97,8 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
       { id: "act-new-channel", label: "Create channel", group: "Actions", icon: Plus, run: () => go("/channels/new") },
       { id: "act-new-workflow", label: "Create workflow", group: "Actions", icon: Plus, run: () => go("/workflows/new") },
       { id: "act-new-connector", label: "Create connector", group: "Actions", icon: Plus, run: () => go("/connectors/new") },
+      { id: "act-new-cron", label: "Create cron channel", group: "Actions", icon: CalendarClock, keywords: "schedule", run: () => go("/channels/new?protocol=cron") },
+      { id: "act-new-plugin", label: "Upload plugin", group: "Actions", icon: Upload, keywords: "wasm", run: () => go("/plugins/new") },
       { id: "act-import-workflow", label: "Import workflow", group: "Actions", icon: Upload, run: () => go("/workflows") },
       {
         id: "act-theme",
@@ -132,10 +140,19 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
         icon: Plug,
         run: () => go(`/connectors/${c.id}`),
       })),
+      ...(plugins?.data ?? []).map((p) => ({
+        id: `pl-${p.plugin_id}`,
+        label: p.plugin_id,
+        hint: "plugin",
+        group: "Plugins",
+        icon: Blocks,
+        keywords: p.functions.join(" "),
+        run: () => go(`/plugins/${encodeURIComponent(p.plugin_id)}`),
+      })),
     ]
 
     return [...nav, ...actions, ...entities]
-  }, [channels, workflows, connectors, resolvedTheme]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [channels, workflows, connectors, plugins, resolvedTheme]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

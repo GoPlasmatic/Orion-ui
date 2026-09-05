@@ -123,11 +123,18 @@ function ProfilePanel({ profile }: { profile: ProfileResult }) {
 /**
  * Polling an async trace needs the capability token handed out with the 202 —
  * an admin credential is the only alternative, and the console may not have one.
+ *
+ * The token travels in router state, not the URL: a URL is not a private
+ * place — it reaches browser history, the `Referer` of whatever the page loads
+ * next, and every chat window a link is pasted into. That is the reason the
+ * server deprecated its own `?token=` query parameter in 1.6; the console's
+ * link used to carry the token the same way.
  */
-function traceLink(traceId: string, token?: string): string {
-  return token
-    ? `/traces/${traceId}?token=${encodeURIComponent(token)}`
-    : `/traces/${traceId}`
+function traceLink(traceId: string, token?: string) {
+  return {
+    to: `/traces/${traceId}`,
+    state: token ? { traceToken: token } : undefined,
+  }
 }
 
 /**
@@ -181,7 +188,12 @@ export function ConsolePage() {
   const [history, setHistory] = useState<HistoryEntry[]>([])
 
   const { data: channels } = useChannels({ limit: 200 })
-  const channelList = channels?.data ?? []
+  // A cron channel (1.6) registers no route and is not reachable at
+  // `data/{name}` — running it here would execute the workflow outside its
+  // ledger and outside its singleton lock, which is why the server refuses
+  // it. Its manual path is "Trigger now" on the channel.
+  const cronChannels = (channels?.data ?? []).filter((c) => c.protocol === "cron")
+  const channelList = (channels?.data ?? []).filter((c) => c.protocol !== "cron")
 
   const selected = channelList.find((c) => c.name === channel)
   const restMode = isRestChannel(selected)
@@ -319,6 +331,17 @@ export function ConsolePage() {
               </Select>
             </div>
 
+            {cronChannels.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {cronChannels.length} cron channel{cronChannels.length === 1 ? " is" : "s are"} not
+                listed: a schedule is not reachable by name. Run one from its channel page or{" "}
+                <Link to="/schedules" className="underline underline-offset-2">
+                  Schedules
+                </Link>
+                .
+              </p>
+            )}
+
             {restMode && (
               <div className="flex gap-2">
                 <div className="w-32">
@@ -416,7 +439,7 @@ export function ConsolePage() {
                 Response
                 {traceId && (
                   <Button variant="outline" size="sm" asChild>
-                    <Link to={traceLink(traceId, traceToken)}>
+                    <Link to={traceLink(traceId, traceToken).to} state={traceLink(traceId, traceToken).state}>
                       <ExternalLink className="h-3.5 w-3.5" /> Open as trace
                     </Link>
                   </Button>
@@ -474,7 +497,8 @@ export function ConsolePage() {
                     </button>
                     {h.traceId && (
                       <Link
-                        to={`/traces/${h.traceId}`}
+                        to={traceLink(h.traceId, h.traceToken).to}
+                        state={traceLink(h.traceId, h.traceToken).state}
                         className="shrink-0 text-muted-foreground hover:text-foreground"
                         aria-label="Open trace"
                       >

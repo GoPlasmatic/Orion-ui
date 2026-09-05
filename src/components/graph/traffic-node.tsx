@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react"
-import { AlertTriangle, CornerDownRight, HelpCircle, Radio, Waypoints } from "lucide-react"
+import { AlertTriangle, CalendarClock, CornerDownRight, HelpCircle, Radio, Waypoints } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { SystemNode } from "@/lib/system-graph"
 import type { ChannelTraffic } from "@/hooks/use-metrics"
@@ -194,7 +194,10 @@ export function TrafficNode({ data, selected }: NodeProps) {
                   {node.callers.length}
                 </span>
               )}
-              <span className="truncate">{node.workflowName ?? node.route ?? "—"}</span>
+              {node.schedule && <CalendarClock className="h-2.5 w-2.5 shrink-0" />}
+              <span className="truncate">
+                {node.workflowName ?? node.route ?? node.schedule ?? "—"}
+              </span>
             </>
           )}
         </div>
@@ -222,7 +225,8 @@ export function TrafficNode({ data, selected }: NodeProps) {
               <>
                 <Radio className="h-2.5 w-2.5 shrink-0" />
                 <span className="truncate">
-                  {node.steps} steps · {node.callers.length > 0 ? "no calls yet" : "idle"}
+                  {node.steps} steps ·{" "}
+                  {node.schedule ? "scheduled" : node.callers.length > 0 ? "no calls yet" : "idle"}
                 </span>
               </>
             )}

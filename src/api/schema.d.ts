@@ -132,6 +132,22 @@ export interface paths {
         patch: operations["change_channel_status"];
         trace?: never;
     };
+    "/api/v1/admin/channels/{id}/trigger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["trigger_channel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/channels/{id}/versions": {
         parameters: {
             query?: never;
@@ -276,6 +292,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/cron/occurrences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_occurrences"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/cron/occurrences/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_occurrence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/cron/occurrences/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retry_occurrence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/cron/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["cron_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/engine/reload": {
         parameters: {
             query?: never;
@@ -350,6 +430,134 @@ export interface paths {
         get: operations["get_package"];
         put: operations["put_package"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_plugins"];
+        put?: never;
+        post: operations["create_plugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/plugins/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["export_plugins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/plugins/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["import_plugins"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/plugins/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["validate_plugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/plugins/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_plugin"];
+        put: operations["update_plugin"];
+        post?: never;
+        delete: operations["delete_plugin"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/plugins/{id}/dependencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["plugin_dependencies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/plugins/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["change_plugin_status"];
+        trace?: never;
+    };
+    "/api/v1/admin/plugins/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_plugin_versions"];
+        put?: never;
+        post: operations["create_new_plugin_version"];
         delete?: never;
         options?: never;
         head?: never;
@@ -443,7 +651,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Fetch one trace. Access follows a two-lane rule (R12): present either a valid admin credential, or — for async submissions — the `trace_token` returned with the 202, via the `x-trace-token` header or `?token=` query parameter. Traces without a token (sync traces, DLQ retries, rows from before 1.0.0) are admin-plane only when admin auth is enabled. */
+        /**
+         * @description Fetch one trace. Access follows a two-lane rule (R12): present either a valid admin credential, or — for async submissions — the `trace_token` returned with the 202, in the `x-trace-token` header. Traces without a token (sync traces, DLQ retries, rows from before 1.0.0) are admin-plane only when admin auth is enabled.
+         *
+         *     The `?token=` query parameter is a **deprecated** alternative for clients that cannot set headers. Prefer the header: a URL is not a private place, and the token leaks into browser history, proxy and CDN logs, `Referer` headers and anywhere a link is pasted. Reads authorised that way answer with a `Deprecation` header.
+         *
+         *     Every response carries `Cache-Control: no-store` — the body is the submission's result and the capability is not an `Authorization` header, so nothing else stops a shared cache storing it.
+         */
         get: operations["get_trace"];
         put?: never;
         post?: never;
@@ -735,9 +949,9 @@ export interface paths {
         };
         /**
          * Readiness probe
-         * @description Readiness probe. Reports `ready` only when the database responds, startup has completed, — in cluster mode — the shared Redis answers `PING`, and — with Kafka enabled — the ingest consumer is not degraded. The `components.engine` field is a constant `"ok"` kept for response-shape stability: the engine snapshot is lock-free and cannot be unavailable once the process serves. Both conditional checks matter because those degradations are otherwise silent: without Redis, deduplication fails open, the shared response cache misses, and cluster rate limiting stops enforcing; with the consumer down, no message is ingested — all while the data plane keeps returning 200s.
+         * @description Readiness probe. Reports `ready` only when the database responds, startup has completed, every background task the node cannot work without is still running, — in cluster mode — the shared Redis answers `PING`, and — with Kafka enabled — the ingest consumer is not degraded. The `components.engine` field is a constant `"ok"` kept for response-shape stability: the engine snapshot is lock-free and cannot be unavailable once the process serves. Both conditional checks matter because those degradations are otherwise silent: without Redis, deduplication fails open, the shared response cache misses, and cluster rate limiting stops enforcing; with the consumer down, no message is ingested — all while the data plane keeps returning 200s.
          *
-         *     The `components.cluster_redis` field is present only in cluster mode, and `components.kafka` only when `kafka.enabled` is true. Unauthenticated, so probes work without provisioning an admin key.
+         *     The `components.background_tasks` is `error` when a required task — the trace dispatcher, the persistence workers, the audit writer, the DLQ retry consumer, the cluster epoch watcher — has stopped for good; each of those fails silently otherwise, dropping traces or audit rows while the data plane keeps answering 200s. The `components.cluster_redis` field is present only in cluster mode, and `components.kafka` only when `kafka.enabled` is true. Unauthenticated, so probes work without provisioning an admin key.
          */
         get: operations["readiness_probe"];
         put?: never;
@@ -798,7 +1012,7 @@ export interface components {
             size_bytes: number;
         };
         /** @enum {string} */
-        ChannelProtocol: "rest" | "http" | "kafka";
+        ChannelProtocol: "rest" | "http" | "kafka" | "cron";
         /**
          * @description API-friendly representation of a Channel with parsed JSON fields.
          *
@@ -993,8 +1207,10 @@ export interface components {
          *     deserialization is case-insensitive so "HTTP" or "Kafka" also parse.
          *
          *     `"storage"` was accepted through the whole 0.x line with no handler behind
-         *     it and was removed in 1.0 (proposal F15); `load_from_repo` reports stored
-         *     rows as a load issue naming the removal.
+         *     it and was removed in 1.0 (proposal F15). It came back in #265 with
+         *     `storage_presign` and `storage_head` behind it — presign and metadata only,
+         *     no data path — so the variant is live again and the removal note applies
+         *     only to rows stored by a 0.x server.
          * @enum {string}
          */
         ConnectorType: "http" | "kafka" | "db" | "cache" | "es" | "smtp" | "storage";
@@ -1038,6 +1254,34 @@ export interface components {
              */
             tags?: string[];
         };
+        /**
+         * @description What `POST /plugins` and the import accept.
+         *
+         *     `manifest` is either the TOML text (a string) or the manifest as a JSON
+         *     object — the CLI sends the file it read, an export round-trips the
+         *     object. `component` is the component bytes as base64; it may be omitted
+         *     when `digest` names an artifact this instance already holds, which is
+         *     what an export without `?include_artifacts=true` produces.
+         */
+        CreatePluginRequest: {
+            /** @description The component, base64-encoded. */
+            component?: string | null;
+            /** @description `sha256:…` of a component already stored, when `component` is absent. */
+            digest?: string | null;
+            manifest: unknown;
+            /**
+             * @description Must equal the manifest's `name` when given; the manifest is the
+             *     source of truth for the id.
+             */
+            plugin_id?: string | null;
+            /**
+             * @description A detached Ed25519 signature over the digest string, base64. Required
+             *     when the node's `[plugins.trust]` names public keys; ignored, but
+             *     stored, when it does not.
+             */
+            signature?: string | null;
+            tags?: string[];
+        };
         CreateWorkflowRequest: {
             condition?: unknown;
             continue_on_error?: boolean;
@@ -1054,6 +1298,148 @@ export interface components {
             tags?: string[];
             tasks: unknown;
             workflow_id?: string | null;
+        };
+        /**
+         * @description One occurrence in full: `GET /api/v1/admin/cron/occurrences/{id}`.
+         *
+         *     Adds what the summary leaves out — the failure reason, the trace to read the
+         *     run in, and the lease bookkeeping that answers "which node has it, and until
+         *     when?".
+         */
+        CronOccurrenceResponse: {
+            /** Format: int64 */
+            attempt: number;
+            channel_id: string;
+            channel_name: string;
+            /**
+             * Format: int64
+             * @description The channel version that materialised this occurrence…
+             */
+            channel_version: number;
+            /**
+             * @description The instance holding this occurrence, and until when. Both `null` unless
+             *     an attempt is in flight.
+             */
+            claimed_by?: string | null;
+            /** Format: date-time */
+            claimed_until?: string | null;
+            /** Format: date-time */
+            completed_at?: string | null;
+            created_at: string;
+            error_message?: string | null;
+            /**
+             * Format: int64
+             * @description …and the one that claimed it. They differ when the channel gained a
+             *     version between the two, which is expected: a pending occurrence follows
+             *     the active generation at claim time, exactly as a queued async trace
+             *     does. `null` until claimed.
+             */
+            executing_version?: number | null;
+            /**
+             * Format: int64
+             * @description The acquisition generation this attempt holds its key under. Diagnostic:
+             *     Orion's connectors do not accept a fencing token, so it bounds Orion's
+             *     own writes rather than a downstream side effect.
+             */
+            fencing_token?: number | null;
+            id: string;
+            scheduled_for: string;
+            singleton_key?: string | null;
+            /** Format: date-time */
+            started_at?: string | null;
+            status: string;
+            /**
+             * @description The trace this attempt wrote, readable at
+             *     `GET /api/v1/admin/traces/{id}`. `null` before admission, and when trace
+             *     storage dropped the row — the occurrence is kept either way, because it
+             *     is scheduling correctness state rather than optional observability.
+             */
+            trace_id?: string | null;
+            trigger: string;
+            updated_at: string;
+            workflow_id?: string | null;
+        };
+        /**
+         * @description One row of `GET /api/v1/admin/cron/occurrences`.
+         *
+         *     The list projection: what happened and when, without the diagnostic detail.
+         *     Narrower than [`CronOccurrenceResponse`] for readability rather than for
+         *     cost — an occurrence carries no payload column, unlike a trace — so a page
+         *     of a hundred reads as a schedule's history instead of as a wall of lease
+         *     bookkeeping.
+         */
+        CronOccurrenceSummaryResponse: {
+            /** Format: int64 */
+            attempt: number;
+            channel_id: string;
+            /**
+             * @description The channel's name when this occurrence was materialised, not its name
+             *     now — renaming a channel does not rewrite what already ran.
+             */
+            channel_name: string;
+            /** Format: date-time */
+            completed_at?: string | null;
+            created_at: string;
+            id: string;
+            /** @description The immutable UTC instant this occurrence was due. */
+            scheduled_for: string;
+            /** Format: date-time */
+            started_at?: string | null;
+            /**
+             * @description `pending`, `claimed`, `running`, `completed`, `failed`,
+             *     `skipped_misfire` or `skipped_singleton`. An open string on the wire:
+             *     tolerate a value you do not know.
+             */
+            status: string;
+            /** @description `cron` or `manual`. */
+            trigger: string;
+        };
+        /**
+         * @description One channel's schedule as the runtime sees it right now:
+         *     `GET /api/v1/admin/cron/status`.
+         *
+         *     Deliberately a separate response rather than fields on the channel. The
+         *     channel row is an immutable authored definition; where its cursor has got to
+         *     is runtime state that changes every minute, and writing it into the active
+         *     row would make an immutable record mutable.
+         */
+        CronScheduleStatusResponse: {
+            channel_id: string;
+            channel_name: string;
+            /** Format: date-time */
+            last_completed_at?: string | null;
+            /** Format: date-time */
+            last_scheduled_for?: string | null;
+            /**
+             * @description The most recent occurrence's status and instant, so one read answers
+             *     "is this schedule healthy?".
+             */
+            last_status?: string | null;
+            /**
+             * Format: date-time
+             * @description The next UTC instant this schedule will materialise. `null` when the
+             *     reconciler has not yet seen the channel — it appears within one poll
+             *     interval of activation.
+             */
+            next_fire_at?: string | null;
+            /**
+             * Format: date-time
+             * @description Set when the channel has left the active set. Its history is kept; it
+             *     simply stops producing occurrences.
+             */
+            paused_at?: string | null;
+            /**
+             * Format: int64
+             * @description Occurrences waiting for a worker. A number that only grows is the signal
+             *     that this schedule is producing work faster than the instance runs it.
+             */
+            pending: number;
+            /**
+             * @description The authored expression and zone, echoed so a status read answers
+             *     "what is scheduled?" without a second request.
+             */
+            schedule: string;
+            timezone: string;
         };
         /**
          * @description The `{"data": …}` envelope every admin 2xx carries (R17).
@@ -1236,6 +1622,76 @@ export interface components {
          *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
          *     of the 48 2xx responses had no `content` block at all.
          */
+        DataEnvelope_CronOccurrenceResponse: {
+            /**
+             * @description One occurrence in full: `GET /api/v1/admin/cron/occurrences/{id}`.
+             *
+             *     Adds what the summary leaves out — the failure reason, the trace to read the
+             *     run in, and the lease bookkeeping that answers "which node has it, and until
+             *     when?".
+             */
+            data: {
+                /** Format: int64 */
+                attempt: number;
+                channel_id: string;
+                channel_name: string;
+                /**
+                 * Format: int64
+                 * @description The channel version that materialised this occurrence…
+                 */
+                channel_version: number;
+                /**
+                 * @description The instance holding this occurrence, and until when. Both `null` unless
+                 *     an attempt is in flight.
+                 */
+                claimed_by?: string | null;
+                /** Format: date-time */
+                claimed_until?: string | null;
+                /** Format: date-time */
+                completed_at?: string | null;
+                created_at: string;
+                error_message?: string | null;
+                /**
+                 * Format: int64
+                 * @description …and the one that claimed it. They differ when the channel gained a
+                 *     version between the two, which is expected: a pending occurrence follows
+                 *     the active generation at claim time, exactly as a queued async trace
+                 *     does. `null` until claimed.
+                 */
+                executing_version?: number | null;
+                /**
+                 * Format: int64
+                 * @description The acquisition generation this attempt holds its key under. Diagnostic:
+                 *     Orion's connectors do not accept a fencing token, so it bounds Orion's
+                 *     own writes rather than a downstream side effect.
+                 */
+                fencing_token?: number | null;
+                id: string;
+                scheduled_for: string;
+                singleton_key?: string | null;
+                /** Format: date-time */
+                started_at?: string | null;
+                status: string;
+                /**
+                 * @description The trace this attempt wrote, readable at
+                 *     `GET /api/v1/admin/traces/{id}`. `null` before admission, and when trace
+                 *     storage dropped the row — the occurrence is kept either way, because it
+                 *     is scheduling correctness state rather than optional observability.
+                 */
+                trace_id?: string | null;
+                trigger: string;
+                updated_at: string;
+                workflow_id?: string | null;
+            };
+        };
+        /**
+         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
+         *
+         *     Generic so each resource gets a described response without a hand-written
+         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
+         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
+         *     of the 48 2xx responses had no `content` block at all.
+         */
         DataEnvelope_DlqPurgeResult: {
             /** @description `POST /api/v1/admin/trace-dlq/purge`. */
             data: {
@@ -1379,6 +1835,80 @@ export interface components {
                 state: string;
                 updated_at: string;
                 version: string;
+            };
+        };
+        /**
+         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
+         *
+         *     Generic so each resource gets a described response without a hand-written
+         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
+         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
+         *     of the 48 2xx responses had no `content` block at all.
+         */
+        DataEnvelope_PluginDependencies: {
+            /** @description What depends on a plugin: the active workflows calling its functions. */
+            data: {
+                functions: string[];
+                plugin_id: string;
+                /** Format: int64 */
+                version: number;
+                /**
+                 * @description Active workflows whose tasks call any of `functions` — the ones an
+                 *     archive or delete is refused for.
+                 */
+                workflows: string[];
+            };
+        };
+        /**
+         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
+         *
+         *     Generic so each resource gets a described response without a hand-written
+         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
+         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
+         *     of the 48 2xx responses had no `content` block at all.
+         */
+        DataEnvelope_PluginResponse: {
+            /**
+             * @description One version of a plugin, as every plugin endpoint returns it.
+             *
+             *     `manifest` is the validated manifest as JSON — what was uploaded, with
+             *     nothing the server inferred added to it. `functions` is the list of
+             *     names it declares, repeated at the top level so a client need not walk
+             *     the manifest to learn what the plugin adds to the vocabulary. `health` is
+             *     present only on the single-entity read, and only when the serving node
+             *     has an opinion: it says whether *this node* loaded the digest.
+             */
+            data: {
+                /** @description The WIT package version the component was built against. */
+                abi: string;
+                /**
+                 * @description `sha256:…` over the importable content (manifest, digest, tags) — the
+                 *     same projection the upsert import compares.
+                 */
+                content_hash: string;
+                created_at: string;
+                /**
+                 * @description `sha256:…` of the component bytes — the identity a generation, a
+                 *     trace, a package and the catalogue all name the artifact by.
+                 */
+                digest: string;
+                functions: string[];
+                health?: null | components["schemas"]["PluginHealth"];
+                manifest: unknown;
+                plugin_id: string;
+                /** @description The author's own version string from the manifest, informational. */
+                plugin_version: string;
+                /**
+                 * @description The detached Ed25519 signature over `digest` the upload carried, base64,
+                 *     when there was one. Not part of the content hash: the digest is the
+                 *     identity, and the signature only attests to it.
+                 */
+                signature?: string | null;
+                status: string;
+                tags: unknown;
+                updated_at: string;
+                /** Format: int64 */
+                version: number;
             };
         };
         /**
@@ -1540,6 +2070,54 @@ export interface components {
          *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
          *     of the 48 2xx responses had no `content` block at all.
          */
+        DataEnvelope_Vec_CronScheduleStatusResponse: {
+            data: {
+                channel_id: string;
+                channel_name: string;
+                /** Format: date-time */
+                last_completed_at?: string | null;
+                /** Format: date-time */
+                last_scheduled_for?: string | null;
+                /**
+                 * @description The most recent occurrence's status and instant, so one read answers
+                 *     "is this schedule healthy?".
+                 */
+                last_status?: string | null;
+                /**
+                 * Format: date-time
+                 * @description The next UTC instant this schedule will materialise. `null` when the
+                 *     reconciler has not yet seen the channel — it appears within one poll
+                 *     interval of activation.
+                 */
+                next_fire_at?: string | null;
+                /**
+                 * Format: date-time
+                 * @description Set when the channel has left the active set. Its history is kept; it
+                 *     simply stops producing occurrences.
+                 */
+                paused_at?: string | null;
+                /**
+                 * Format: int64
+                 * @description Occurrences waiting for a worker. A number that only grows is the signal
+                 *     that this schedule is producing work faster than the instance runs it.
+                 */
+                pending: number;
+                /**
+                 * @description The authored expression and zone, echoed so a status read answers
+                 *     "what is scheduled?" without a second request.
+                 */
+                schedule: string;
+                timezone: string;
+            }[];
+        };
+        /**
+         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
+         *
+         *     Generic so each resource gets a described response without a hand-written
+         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
+         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
+         *     of the 48 2xx responses had no `content` block at all.
+         */
         DataEnvelope_Vec_FunctionSchemaItem: {
             data: {
                 /**
@@ -1557,10 +2135,65 @@ export interface components {
                 input_fields?: unknown[] | null;
                 name: string;
                 /**
+                 * @description What a second run of this function does, as
+                 *     `{"kind": "..."}` — `pure`, `read`, `idempotent_write`, `unsafe_write`,
+                 *     or `depends_on` with the `input` that decides it (`http_call` on its
+                 *     `method`, `data_write` on its `op`).
+                 *
+                 *     A different question from whether an *error* was transient: this is
+                 *     what a retry costs when it is. Orion retries tasks in several places —
+                 *     the trace DLQ, a Kafka redelivery, `http_call`'s transport retry — and
+                 *     this is how an author or a tool knows which of those are safe over a
+                 *     given function.
+                 */
+                retry_safety: unknown;
+                /**
                  * @description `orion` for a handler Orion implements and input-schema validates,
                  *     `engine` for a dataflow-rs built-in the engine executes itself.
                  */
                 source: string;
+            }[];
+        };
+        /**
+         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
+         *
+         *     Generic so each resource gets a described response without a hand-written
+         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
+         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
+         *     of the 48 2xx responses had no `content` block at all.
+         */
+        DataEnvelope_Vec_PluginResponse: {
+            data: {
+                /** @description The WIT package version the component was built against. */
+                abi: string;
+                /**
+                 * @description `sha256:…` over the importable content (manifest, digest, tags) — the
+                 *     same projection the upsert import compares.
+                 */
+                content_hash: string;
+                created_at: string;
+                /**
+                 * @description `sha256:…` of the component bytes — the identity a generation, a
+                 *     trace, a package and the catalogue all name the artifact by.
+                 */
+                digest: string;
+                functions: string[];
+                health?: null | components["schemas"]["PluginHealth"];
+                manifest: unknown;
+                plugin_id: string;
+                /** @description The author's own version string from the manifest, informational. */
+                plugin_version: string;
+                /**
+                 * @description The detached Ed25519 signature over `digest` the upload carried, base64,
+                 *     when there was one. Not part of the content hash: the digest is the
+                 *     identity, and the signature only attests to it.
+                 */
+                signature?: string | null;
+                status: string;
+                tags: unknown;
+                updated_at: string;
+                /** Format: int64 */
+                version: number;
             }[];
         };
         /**
@@ -1629,6 +2262,19 @@ export interface components {
                  *     unknowable channel dependencies.
                  */
                 has_dynamic_channel_calls: boolean;
+                /**
+                 * @description The plugins whose functions the tasks name, resolved against this
+                 *     node's generation: the active version and digest each function
+                 *     currently comes from. A function this generation does not dispatch
+                 *     appears under `unresolved_functions` instead — a plugin archived since
+                 *     the workflow was written, or one this node could not load.
+                 */
+                plugins?: components["schemas"]["PluginDependency"][];
+                /**
+                 * @description Function names the tasks call that this generation's registry does
+                 *     not know. Empty for a workflow that would activate here.
+                 */
+                unresolved_functions?: string[];
                 /**
                  * Format: int64
                  * @description The version whose tasks were walked (the latest).
@@ -1799,6 +2445,19 @@ export interface components {
              */
             input_fields?: unknown[] | null;
             name: string;
+            /**
+             * @description What a second run of this function does, as
+             *     `{"kind": "..."}` — `pure`, `read`, `idempotent_write`, `unsafe_write`,
+             *     or `depends_on` with the `input` that decides it (`http_call` on its
+             *     `method`, `data_write` on its `op`).
+             *
+             *     A different question from whether an *error* was transient: this is
+             *     what a retry costs when it is. Orion retries tasks in several places —
+             *     the trace DLQ, a Kafka redelivery, `http_call`'s transport retry — and
+             *     this is how an author or a tool knows which of those are safe over a
+             *     given function.
+             */
+            retry_safety: unknown;
             /**
              * @description `orion` for a handler Orion implements and input-schema validates,
              *     `engine` for a dataflow-rs built-in the engine executes itself.
@@ -2043,6 +2702,44 @@ export interface components {
             total: number;
         };
         /** @description The paginated envelope: `data` plus the three counters, and nothing else. */
+        PaginatedEnvelope_CronOccurrenceSummaryResponse: {
+            data: {
+                /** Format: int64 */
+                attempt: number;
+                channel_id: string;
+                /**
+                 * @description The channel's name when this occurrence was materialised, not its name
+                 *     now — renaming a channel does not rewrite what already ran.
+                 */
+                channel_name: string;
+                /** Format: date-time */
+                completed_at?: string | null;
+                created_at: string;
+                id: string;
+                /** @description The immutable UTC instant this occurrence was due. */
+                scheduled_for: string;
+                /** Format: date-time */
+                started_at?: string | null;
+                /**
+                 * @description `pending`, `claimed`, `running`, `completed`, `failed`,
+                 *     `skipped_misfire` or `skipped_singleton`. An open string on the wire:
+                 *     tolerate a value you do not know.
+                 */
+                status: string;
+                /** @description `cron` or `manual`. */
+                trigger: string;
+            }[];
+            /** Format: int64 */
+            limit: number;
+            /** Format: int64 */
+            offset: number;
+            /**
+             * Format: int64
+             * @description Total rows matching the filter, ignoring `limit`/`offset`.
+             */
+            total: number;
+        };
+        /** @description The paginated envelope: `data` plus the three counters, and nothing else. */
         PaginatedEnvelope_PackageReceiptResponse: {
             data: {
                 /**
@@ -2061,6 +2758,50 @@ export interface components {
                 state: string;
                 updated_at: string;
                 version: string;
+            }[];
+            /** Format: int64 */
+            limit: number;
+            /** Format: int64 */
+            offset: number;
+            /**
+             * Format: int64
+             * @description Total rows matching the filter, ignoring `limit`/`offset`.
+             */
+            total: number;
+        };
+        /** @description The paginated envelope: `data` plus the three counters, and nothing else. */
+        PaginatedEnvelope_PluginResponse: {
+            data: {
+                /** @description The WIT package version the component was built against. */
+                abi: string;
+                /**
+                 * @description `sha256:…` over the importable content (manifest, digest, tags) — the
+                 *     same projection the upsert import compares.
+                 */
+                content_hash: string;
+                created_at: string;
+                /**
+                 * @description `sha256:…` of the component bytes — the identity a generation, a
+                 *     trace, a package and the catalogue all name the artifact by.
+                 */
+                digest: string;
+                functions: string[];
+                health?: null | components["schemas"]["PluginHealth"];
+                manifest: unknown;
+                plugin_id: string;
+                /** @description The author's own version string from the manifest, informational. */
+                plugin_version: string;
+                /**
+                 * @description The detached Ed25519 signature over `digest` the upload carried, base64,
+                 *     when there was one. Not part of the content hash: the digest is the
+                 *     identity, and the signature only attests to it.
+                 */
+                signature?: string | null;
+                status: string;
+                tags: unknown;
+                updated_at: string;
+                /** Format: int64 */
+                version: number;
             }[];
             /** Format: int64 */
             limit: number;
@@ -2139,6 +2880,88 @@ export interface components {
              * @description Total rows matching the filter, ignoring `limit`/`offset`.
              */
             total: number;
+        };
+        /** @description What depends on a plugin: the active workflows calling its functions. */
+        PluginDependencies: {
+            functions: string[];
+            plugin_id: string;
+            /** Format: int64 */
+            version: number;
+            /**
+             * @description Active workflows whose tasks call any of `functions` — the ones an
+             *     archive or delete is refused for.
+             */
+            workflows: string[];
+        };
+        /** @description One plugin a workflow depends on, as this generation serves it. */
+        PluginDependency: {
+            /**
+             * @description `sha256:…` of the component the functions resolve to — what a
+             *     package records and a target is checked for.
+             */
+            digest: string;
+            /** @description The plugin's functions this workflow names, task order kept. */
+            functions: string[];
+            id: string;
+            /** Format: int64 */
+            version: number;
+        };
+        /** @description Whether the node answering loaded a plugin version, and if not, why. */
+        PluginHealth: {
+            /**
+             * Format: int64
+             * @description Compile time in milliseconds when loaded.
+             */
+            compile_ms?: number | null;
+            /** @description The stage and reason when `failed`. */
+            reason?: string | null;
+            /**
+             * @description `loaded`, `failed`, `disabled` (plugins are off on this node) or
+             *     `inactive` (the version is not the one this node's generation carries).
+             */
+            state?: string;
+        };
+        /**
+         * @description One version of a plugin, as every plugin endpoint returns it.
+         *
+         *     `manifest` is the validated manifest as JSON — what was uploaded, with
+         *     nothing the server inferred added to it. `functions` is the list of
+         *     names it declares, repeated at the top level so a client need not walk
+         *     the manifest to learn what the plugin adds to the vocabulary. `health` is
+         *     present only on the single-entity read, and only when the serving node
+         *     has an opinion: it says whether *this node* loaded the digest.
+         */
+        PluginResponse: {
+            /** @description The WIT package version the component was built against. */
+            abi: string;
+            /**
+             * @description `sha256:…` over the importable content (manifest, digest, tags) — the
+             *     same projection the upsert import compares.
+             */
+            content_hash: string;
+            created_at: string;
+            /**
+             * @description `sha256:…` of the component bytes — the identity a generation, a
+             *     trace, a package and the catalogue all name the artifact by.
+             */
+            digest: string;
+            functions: string[];
+            health?: null | components["schemas"]["PluginHealth"];
+            manifest: unknown;
+            plugin_id: string;
+            /** @description The author's own version string from the manifest, informational. */
+            plugin_version: string;
+            /**
+             * @description The detached Ed25519 signature over `digest` the upload carried, base64,
+             *     when there was one. Not part of the content hash: the digest is the
+             *     identity, and the signature only attests to it.
+             */
+            signature?: string | null;
+            status: string;
+            tags: unknown;
+            updated_at: string;
+            /** Format: int64 */
+            version: number;
         };
         ProbeEnvelope: {
             data: components["schemas"]["ProbeResult"];
@@ -2398,6 +3221,14 @@ export interface components {
             name?: string | null;
             tags?: string[] | null;
         };
+        /** @description `PUT /plugins/{id}`: every field optional, absent means keep. */
+        UpdatePluginRequest: {
+            component?: string | null;
+            digest?: string | null;
+            manifest?: unknown;
+            signature?: string | null;
+            tags?: string[] | null;
+        };
         UpdateWorkflowRequest: {
             condition?: unknown;
             continue_on_error?: boolean | null;
@@ -2442,6 +3273,19 @@ export interface components {
              *     unknowable channel dependencies.
              */
             has_dynamic_channel_calls: boolean;
+            /**
+             * @description The plugins whose functions the tasks name, resolved against this
+             *     node's generation: the active version and digest each function
+             *     currently comes from. A function this generation does not dispatch
+             *     appears under `unresolved_functions` instead — a plugin archived since
+             *     the workflow was written, or one this node could not load.
+             */
+            plugins?: components["schemas"]["PluginDependency"][];
+            /**
+             * @description Function names the tasks call that this generation's registry does
+             *     not know. Empty for a workflow that would activate here.
+             */
+            unresolved_functions?: string[];
             /**
              * Format: int64
              * @description The version whose tasks were walked (the latest).
@@ -3234,6 +4078,74 @@ export interface operations {
             };
         };
     };
+    trigger_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Channel id of an active cron channel */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description An occurrence was created; a worker picks it up on its next poll. It runs through the same claim, singleton and execution path a scheduled occurrence does */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CronOccurrenceResponse"];
+                };
+            };
+            /** @description Not an active cron channel */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An occurrence already exists for this instant — retry in a second */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_channel_versions: {
         parameters: {
             query?: {
@@ -3964,6 +4876,214 @@ export interface operations {
             };
         };
     };
+    list_occurrences: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Stable channel id, not the name — an occurrence outlives the name it was
+                 *     materialised under.
+                 */
+                channel_id?: string;
+                /** @description One status, spelled as the column stores it. */
+                status?: string;
+                /** @description Inclusive lower bound on `scheduled_for`. */
+                since?: string;
+                /** @description Inclusive upper bound on `scheduled_for`. */
+                until?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated occurrences, newest first. Summaries only — fetch one by id for the failure reason, the trace id and the lease detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedEnvelope_CronOccurrenceSummaryResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_occurrence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Occurrence id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One occurrence in full */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CronOccurrenceResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such occurrence */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    retry_occurrence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Occurrence id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Occurrence reset to `pending`; the next worker poll picks it up */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CronOccurrenceResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such occurrence */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The occurrence is not in a retryable state — `completed` work is re-run by triggering the channel, not by retrying a finished occurrence */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cron_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One row per active cron channel: its schedule, where its cursor has got to, its most recent occurrence and its backlog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_Vec_CronScheduleStatusResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     engine_reload: {
         parameters: {
             query?: never;
@@ -4252,6 +5372,736 @@ export interface operations {
             };
         };
     };
+    list_plugins: {
+        parameters: {
+            query?: {
+                status?: string;
+                tag?: string;
+                limit?: number;
+                offset?: number;
+                /** @description Column to sort by: plugin_id (default), status, created_at, updated_at. */
+                sort_by?: string;
+                /** @description Sort direction: asc (default) or desc. */
+                sort_order?: string;
+                /** @description Export only: carry each component as base64 under `component`. */
+                include_artifacts?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated list of plugins */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedEnvelope_PluginResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_plugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePluginRequest"];
+            };
+        };
+        responses: {
+            /** @description Plugin created as draft. The manifest was validated, the component hashed, compiled in the sandbox and every declared function probed before the row was written, so the draft is already known to load. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_PluginResponse"];
+                };
+            };
+            /** @description Invalid manifest, component, or digest; or plugins are disabled on this node */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Plugin id already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    export_plugins: {
+        parameters: {
+            query?: {
+                status?: string;
+                tag?: string;
+                limit?: number;
+                offset?: number;
+                /** @description Column to sort by: plugin_id (default), status, created_at, updated_at. */
+                sort_by?: string;
+                /** @description Sort direction: asc (default) or desc. */
+                sort_order?: string;
+                /** @description Export only: carry each component as base64 under `component`. */
+                include_artifacts?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Exported plugins, importable as they are. With `?include_artifacts=true` each item also carries its component as base64 under `component`; without it the item names only the digest, which an import accepts when the target already holds the artifact. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_Vec_PluginResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    import_plugins: {
+        parameters: {
+            query?: {
+                /**
+                 * @description When true, validate each item and report what would happen without
+                 *     writing. Probes for conflicts against stored rows and for duplicates
+                 *     within the batch (R15), and under `on_conflict=new_version` reports
+                 *     the per-item action the real import would take (K2).
+                 */
+                dry_run?: boolean;
+                /**
+                 * @description What an already-stored conflict key means: `fail` (default — the item
+                 *     is refused), `skip`, or `new_version` (upsert: update the draft in
+                 *     place, or cut a new draft version over an active entity; identical
+                 *     content is a no-op). K2.
+                 */
+                on_conflict?: components["schemas"]["OnConflict"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePluginRequest"][];
+            };
+        };
+        responses: {
+            /** @description Import results with counts (or would-be results when ?dry_run=true). Each item is handled independently. An item may carry its component inline (base64) or name a digest this instance already holds — what an export produces with and without `?include_artifacts=true`. `?on_conflict=new_version` upserts: an existing draft is replaced, an active plugin whose content differs gets a new draft version, identical content is reported `unchanged`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ImportResult"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    validate_plugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePluginRequest"];
+            };
+        };
+        responses: {
+            /** @description Validation result: `valid: true` means `POST /plugins` would accept this payload on this node — the manifest parses, the component compiles and every declared function answers a probe. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_plugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plugin ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The latest version, with this node's load state under `health` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_PluginResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Plugin not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_plugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plugin ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePluginRequest"];
+            };
+        };
+        responses: {
+            /** @description Draft plugin updated; an absent field keeps its stored value */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_PluginResponse"];
+                };
+            };
+            /** @description Invalid input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Plugin not found, or it has no draft version to update */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_plugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plugin ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Plugin deleted (all versions), and any component nothing names any more */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Plugin not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An active workflow still calls one of its functions */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    plugin_dependencies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plugin ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The functions the latest version declares and the active workflows calling them */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_PluginDependencies"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Plugin not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    change_plugin_status: {
+        parameters: {
+            query?: {
+                /**
+                 * @description When true, run the transition's gates and report findings without
+                 *     writing. The response body is the `/validate` envelope, not the
+                 *     entity.
+                 */
+                dry_run?: boolean;
+                /**
+                 * @description `now` (default) reloads the engine as part of this request; `defer`
+                 *     commits the row and leaves the reload to a later
+                 *     `POST /engine/reload` (K4).
+                 */
+                reload?: components["schemas"]["ReloadMode"];
+            };
+            header?: never;
+            path: {
+                /** @description Plugin ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatusChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description Status updated. Activating supersedes the previously active version in the same transaction, so a function name resolves to one digest per generation; it is refused while an active workflow calls one of the version's functions with an input its schema does not accept. Archiving is refused while an active workflow calls one of the plugin's functions. `?dry_run=true` reports every gate without writing; `?reload=defer` commits without rebuilding the engine. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_PluginResponse"];
+                };
+            };
+            /** @description Invalid status transition, or plugins are disabled on this node */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Plugin not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An active workflow still calls one of its functions, or calls one with an input the version being activated does not accept */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_plugin_versions: {
+        parameters: {
+            query?: {
+                /** @description Page size, clamped to [1, 1000] (default 50). */
+                limit?: number;
+                /** @description Pagination offset (default 0). */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Plugin ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated version history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedEnvelope_PluginResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Plugin not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_new_plugin_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plugin ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description New draft version copied from the latest */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_PluginResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Draft already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_trace_dlq: {
         parameters: {
             query?: {
@@ -4478,7 +6328,10 @@ export interface operations {
                 status?: string;
                 /** @description Filter by channel. */
                 channel?: string;
-                /** @description Filter by mode: sync, async. */
+                /**
+                 * @description Filter by mode: `sync`, `async` or `kafka` — the transport the
+                 *     message arrived on.
+                 */
                 mode?: string;
                 /** @description Page size, clamped to [1, 1000] (default 50). */
                 limit?: number;
@@ -4551,8 +6404,15 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description The capability token returned with the async 202. Alternative to the
-                 *     `x-trace-token` header for clients that cannot set headers.
+                 * @description **Deprecated.** The capability token returned with the async 202. Use
+                 *     the `x-trace-token` header instead: a URL is not a private place. It
+                 *     reaches browser history, reverse-proxy and CDN access logs, analytics,
+                 *     `Referer` headers on anything the page loads next, and every chat
+                 *     window a support ticket is pasted into — none of which the header
+                 *     touches. Still accepted for clients that cannot set headers; responses
+                 *     that authorise this way carry a `Deprecation` header, and
+                 *     `orion_trace_token_query_reads_total` counts them so an operator can
+                 *     see whether anything still depends on it.
                  */
                 token?: string;
             };

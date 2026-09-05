@@ -27,7 +27,7 @@ import { Label } from "@/components/ui/label"
 import { Callout } from "@/components/ui/callout"
 import { PageHeader } from "@/components/shared/page-header"
 import { ValidationResults } from "@/components/shared/validation-results"
-import { ArrowLeft, Braces, Layers, Network, Plus, Save, ShieldCheck, Trash2 } from "lucide-react"
+import { ArrowLeft, Braces, Layers, Network, OctagonX, Plus, Save, ShieldCheck, Trash2 } from "lucide-react"
 
 /** One task, as inserted by "Add task". */
 const SAMPLE_TASK = `{
@@ -36,6 +36,22 @@ const SAMPLE_TASK = `{
   "function": {
     "name": "map",
     "input": { "mappings": [] }
+  }
+}`
+
+/**
+ * A task that ends the workflow when it fails — `halt_on: "failure"`, Orion
+ * 1.6 / dataflow-rs 3.10. The outcome axis to `terminal`'s position axis: a
+ * `validation` rule that did not pass is a status of 400 or above, so the
+ * workflow stops there and the task keeps its own status on the audit trail.
+ */
+const SAMPLE_HALT_TASK = `{
+  "id": "check",
+  "name": "Refuse a bad request",
+  "halt_on": "failure",
+  "function": {
+    "name": "validation",
+    "input": { "rules": [] }
   }
 }`
 
@@ -453,8 +469,9 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
               a task; one carrying its own <code className="font-mono">tasks</code> is a{" "}
               <strong>group</strong> — a single condition gating that whole run, evaluated once on
               entry. Any step may set <code className="font-mono">terminal: true</code> to end the
-              workflow after it. Use Validate to check function names and inputs against the
-              server registry.
+              workflow after it, and a task may set{" "}
+              <code className="font-mono">halt_on: "failure"</code> to end it only when that task
+              failed. Use Validate to check function names and inputs against the server registry.
             </p>
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <Button type="button" variant="outline" size="sm" onClick={() => appendStep(SAMPLE_TASK)}>
@@ -462,6 +479,9 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
               </Button>
               <Button type="button" variant="outline" size="sm" onClick={() => appendStep(SAMPLE_GROUP)}>
                 <Layers className="h-3.5 w-3.5" /> Add guard clause
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => appendStep(SAMPLE_HALT_TASK)}>
+                <OctagonX className="h-3.5 w-3.5" /> Add halt-on-failure
               </Button>
               {stepSummary && (
                 <span className="text-xs text-muted-foreground">{stepSummary}</span>

@@ -1,12 +1,16 @@
 import { useEngineStatus, useEngineReload } from "@/hooks/use-engine"
 import { useReloadConnectors } from "@/hooks/use-connectors"
 import { useBackups, useCreateBackup } from "@/hooks/use-backup"
+import { useHealth } from "@/hooks/use-health"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PageHeader } from "@/components/shared/page-header"
+import { HealthComponents } from "@/components/shared/health-components"
+import { traceStatusBadgeClass } from "@/lib/status"
 import { formatDate } from "@/lib/utils"
-import { RefreshCw, Archive, Database, Plug } from "lucide-react"
+import { RefreshCw, Archive, Database, HeartPulse, Plug } from "lucide-react"
 
 function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
@@ -29,10 +33,39 @@ export function SettingsPage() {
   const reloadConnectors = useReloadConnectors()
   const { data: backups, isLoading: backupsLoading, error: backupsError } = useBackups()
   const createBackup = useCreateBackup()
+  const { data: health } = useHealth()
 
   return (
     <div className="space-y-6">
       <PageHeader title="Settings" description="System operations and management" />
+
+      {/* The full /health report. The dashboard shows only the faults; this is
+          where a coarse `degraded` becomes a sentence and the admin-only
+          detail — background tasks, plugin loads, the scheduler — is readable. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <HeartPulse className="h-4 w-4" /> Health
+            {health && (
+              <Badge
+                variant="outline"
+                className={traceStatusBadgeClass(health.status === "ok" ? "completed" : "failed")}
+              >
+                {health.status}
+              </Badge>
+            )}
+          </CardTitle>
+          <CardDescription>
+            Per-subsystem state from <code className="font-mono">/health</code>
+            {health?.git_hash ? ` · build ${health.git_hash}` : ""}. A monitor should read the{" "}
+            <code className="font-mono">status</code> field, not only the HTTP code: a failed
+            connector load, a quarantined channel or a stalled scheduler report degraded at 200.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <HealthComponents health={health} />
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
         {/* Engine */}

@@ -150,3 +150,120 @@ test("the packages page renders its empty state", async ({ page }) => {
   await page.goto("/packages")
   await expect(page.getByText("No package receipts")).toBeVisible()
 })
+
+// ---- Orion 1.6: cron channels and the occurrence ledger ----------------------
+
+const cronName = `smoke-cron-${runId}`
+let cronChannelId = ""
+
+test("create and activate a cron channel bound to the workflow", async ({ page }) => {
+  // `?protocol=cron` preselects the schedule editor, as the Schedules page links it.
+  await page.goto("/channels/new?protocol=cron")
+  await expect(page.getByRole("heading", { name: "Create Cron Channel" })).toBeVisible()
+  await page.getByLabel("Channel name").fill(cronName)
+  // Daily at 03:00 UTC: the schedule itself never fires during the run, so
+  // the ledger holds exactly what the suite triggers. Occurrence identity is
+  // `(channel, scheduled_for)` at second precision, and a busy schedule made
+  // "Trigger now" collide with its own tick as a 409.
+  await page.getByLabel("Cron expression").fill("0 0 3 * * *")
+  await page.getByLabel("Linked workflow ID").fill(workflowId)
+
+  // Server-side validation runs the create-time checks against the real
+  // schedule. It answers `valid: true` here — with an advisory about the
+  // linked workflow, so the verdict renders as findings rather than the bare
+  // "valid" label. What matters is that nothing was refused.
+  await page.getByRole("button", { name: "Validate" }).click()
+  await expect(page.getByText(/refuses|references workflow|valid/i).first()).toBeVisible()
+  await expect(page.getByText(/must|unknown field|invalid/i)).toHaveCount(0)
+
+  await page.getByRole("button", { name: "Save" }).click()
+  // A UUID, specifically: `/channels/new?protocol=cron` is where the form
+  // lives, and a looser pattern matched it before the save landed.
+  await page.waitForURL(/\/channels\/[0-9a-f-]{36}$/)
+  cronChannelId = page.url().split("/").pop()!
+
+  // The schedule card renders the transport_config, not a route.
+  await expect(page.getByText("Schedule", { exact: true })).toBeVisible()
+  await expect(page.getByText("0 0 3 * * *").first()).toBeVisible()
+
+  await page.getByRole("button", { name: "Activate" }).click()
+  await expect(page.getByRole("button", { name: "Archive" })).toBeVisible()
+})
+
+test("a cron channel is not offered in the Data Console", async ({ page }) => {
+  await page.goto("/console")
+  await expect(page.getByLabel("Channel")).toBeVisible()
+  await expect(page.getByLabel("Channel").locator(`option[value="${cronName}"]`)).toHaveCount(0)
+  await expect(page.getByText(/not listed: a schedule is not reachable by name/)).toBeVisible()
+})
+
+test("the schedule appears on the Schedules page and can be triggered", async ({ page }) => {
+  await page.goto("/schedules")
+  // Materialised within one poll interval of activation.
+  await expect(page.getByRole("link", { name: cronName })).toBeVisible({ timeout: 15_000 })
+
+  const row = page.getByRole("row", { name: new RegExp(cronName) })
+  await row.getByRole("button", { name: "Trigger now" }).click()
+  await expect(page.getByText("Occurrence created")).toBeVisible({ timeout: 15_000 })
+
+  // The ledger, filtered to this channel, shows a manual occurrence.
+  await page.goto(`/schedules?channel_id=${cronChannelId}`)
+  await expect(page.getByText("manual").first()).toBeVisible({ timeout: 15_000 })
+})
+
+test("an occurrence opens in full and links its trace", async ({ page }) => {
+  await page.goto(`/channels/${cronChannelId}`)
+  await page.getByRole("tab", { name: "Occurrences" }).click()
+  const first = page.getByRole("row").nth(1)
+  await expect(first).toBeVisible({ timeout: 15_000 })
+  await first.click()
+  await page.waitForURL(/\/schedules\/occurrences\/[^/]+$/)
+  await expect(page.getByText("Scheduled for")).toBeVisible()
+  // A run that completed has a trace to read it in.
+  await expect(page.getByRole("link", { name: /open trace/i })).toBeVisible({ timeout: 30_000 })
+})
+
+test("a triggered run leaves a trace with mode cron", async ({ page }) => {
+  await page.goto("/traces")
+  await page.getByLabel("Filter by mode").selectOption("cron")
+  await expect(page.getByText(cronName).first()).toBeVisible({ timeout: 15_000 })
+})
+
+test("archiving the cron channel stops it", async ({ page }) => {
+  await page.goto(`/channels/${cronChannelId}`)
+  await page.getByRole("button", { name: "Archive" }).click()
+  await page.getByRole("button", { name: "Confirm" }).click()
+  await expect(page.getByRole("button", { name: "Archive" })).toHaveCount(0)
+})
+
+// ---- Orion 1.6: plugins --------------------------------------------------------
+
+test("the plugins page renders and the upload form validates server-side", async ({ page }) => {
+  await page.goto("/plugins")
+  // A fresh CI container has none; a developer's server may hold some. Either
+  // way the page must land on one of its two shapes, never on a blank.
+  await expect(
+    page.getByText("No plugins yet").or(page.getByRole("columnheader", { name: "Plugin" }))
+  ).toBeVisible()
+
+  await page.goto("/plugins/new")
+  // The seeded manifest names no component: the client asks for one before
+  // the round trip, the way it does for a workflow name.
+  await page.getByRole("button", { name: "Validate" }).click()
+  await expect(page.getByText(/Choose the component file/)).toBeVisible()
+
+  // With a digest nothing holds, the *server* answers — either the sandbox
+  // is off (400, plugins.enabled = false) or the artifact is unknown. Both
+  // are rendered rather than swallowed.
+  await page.getByLabel("Component digest").fill("sha256:" + "0".repeat(64))
+  await page.getByRole("button", { name: "Validate" }).click()
+  await expect(
+    page.getByText(/plugin|disabled|digest|artifact|manifest/i).first()
+  ).toBeVisible({ timeout: 15_000 })
+})
+
+test("the health report on Settings names the 1.6 components", async ({ page }) => {
+  await page.goto("/settings")
+  await expect(page.getByText("engine_reload")).toBeVisible()
+  await expect(page.getByText("plugins", { exact: true })).toBeVisible()
+})

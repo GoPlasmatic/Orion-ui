@@ -24,10 +24,10 @@ fixed everything. When that happens, delete both this file and the script.
 
 ## Patch 1 — missing `OnConflict` / `ReloadMode` components
 
-**Server version affected:** 1.1.0 — still present in 1.3.1
+**Server version affected:** 1.1.0 — still present in 1.6.0
 **Status:** open upstream — not yet reported
 
-Six query parameters `$ref` these two schema components, but neither is
+Eight query parameters (six before 1.6) `$ref` these two schema components, but neither is
 registered in `components.schemas`, so the published spec does not resolve.
 `openapi-typescript` fails hard:
 
@@ -46,6 +46,8 @@ Affected operations:
 | `PATCH /admin/channels/{id}/status` | `reload` | `ReloadMode` |
 | `PATCH /admin/workflows/{id}/status` | `reload` | `ReloadMode` |
 | `PATCH /admin/workflows/{id}/rollout` | `reload` | `ReloadMode` |
+| `POST /admin/plugins/import` (1.6) | `on_conflict` | `OnConflict` |
+| `PATCH /admin/plugins/{id}/status` (1.6) | `reload` | `ReloadMode` |
 
 **Root cause.** Both enums derive `utoipa::ToSchema` but are never added to the
 components registry, so `utoipa` emits the `$ref` without emitting the

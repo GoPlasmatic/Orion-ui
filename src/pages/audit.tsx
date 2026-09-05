@@ -97,12 +97,28 @@ export function AuditPage() {
           aria-label="Filter by action"
           className={FILTER_W}
         >
+          {/* The server's own vocabulary (docs/operate/audit-logs.md). A status
+              change is named for the status requested — there is no
+              `status_draft`, because a transition *to* draft is refused
+              before anything is written. */}
           <option value="">All actions</option>
           <option value="create">Create</option>
           <option value="update">Update</option>
           <option value="delete">Delete</option>
-          <option value="activate">Activate</option>
-          <option value="status_change">Status Change</option>
+          <option value="create_version">Create version</option>
+          <option value="status_active">Activate</option>
+          <option value="status_archived">Archive</option>
+          <option value="update_rollout">Update rollout</option>
+          <option value="import">Import</option>
+          <option value="test">Test</option>
+          <option value="trigger">Trigger (cron)</option>
+          <option value="retry">Retry (occurrence)</option>
+          <option value="reload">Reload</option>
+          <option value="reset">Reset breaker</option>
+          <option value="requeue">Requeue (DLQ)</option>
+          <option value="purge">Purge (DLQ)</option>
+          <option value="package_staged">Package staged</option>
+          <option value="package_applied">Package applied</option>
         </Select>
         <Select
           value={resourceTypeFilter}
@@ -114,7 +130,12 @@ export function AuditPage() {
           <option value="channel">Channel</option>
           <option value="workflow">Workflow</option>
           <option value="connector">Connector</option>
+          <option value="plugin">Plugin</option>
+          <option value="cron_occurrence">Cron occurrence</option>
           <option value="engine">Engine</option>
+          <option value="circuit_breaker">Circuit breaker</option>
+          <option value="trace_dlq">Trace DLQ</option>
+          <option value="package">Package</option>
           <option value="backup">Backup</option>
         </Select>
         <Input

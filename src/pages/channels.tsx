@@ -20,7 +20,8 @@ import { StatusBadge } from "@/components/shared/status-badge"
 import { EmptyState } from "@/components/shared/empty-state"
 import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
 import { formatDate, downloadJson } from "@/lib/utils"
-import { Download, Plus, Radio, Upload } from "lucide-react"
+import { cronTransport } from "@/lib/cron"
+import { CalendarClock, Download, Plus, Radio, Upload } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, Channel>()
 
@@ -41,11 +42,26 @@ const columns = columnHelper.columns([
   }),
   columnHelper.accessor("route_pattern", {
     header: "Route",
-    cell: (info) => (
-      <span className="font-mono text-xs text-muted-foreground">
-        {info.getValue() ?? "--"}
-      </span>
-    ),
+    // A cron channel has no route: the thing that starts it is its schedule.
+    cell: (info) => {
+      const schedule = cronTransport(info.row.original)
+      if (schedule) {
+        return (
+          <span
+            className="inline-flex items-center gap-1 font-mono text-xs text-muted-foreground"
+            title={`Schedule · ${schedule.timezone ?? "UTC"}`}
+          >
+            <CalendarClock className="h-3 w-3" />
+            {schedule.schedule}
+          </span>
+        )
+      }
+      return (
+        <span className="font-mono text-xs text-muted-foreground">
+          {info.getValue() ?? "--"}
+        </span>
+      )
+    },
   }),
   columnHelper.accessor("status", {
     header: "Status",
@@ -156,6 +172,7 @@ export function ChannelsPage() {
           <option value="http">HTTP</option>
           <option value="rest">REST</option>
           <option value="kafka">Kafka</option>
+          <option value="cron">Cron</option>
         </Select>
       </FilterBar>
 

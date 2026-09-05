@@ -113,6 +113,27 @@ export function useChannelStatusDryRun() {
   })
 }
 
+/**
+ * Run an active cron channel now. The occurrence ledger is what changes, so
+ * that is what gets invalidated — the channel row itself is untouched.
+ */
+export function useTriggerChannel() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => channelsApi.trigger(id),
+    onSuccess: (occurrence) => {
+      queryClient.invalidateQueries({ queryKey: ["cron"] })
+      toast.success("Occurrence created", {
+        description:
+          occurrence.status === "skipped_singleton"
+            ? "Skipped: another occurrence holds the singleton key"
+            : `Attempt ${occurrence.attempt} · ${occurrence.status}`,
+      })
+    },
+    onError: (e) => toast.error("Failed to trigger channel", { description: errorDescription(e) }),
+  })
+}
+
 export function useImportChannels() {
   const queryClient = useQueryClient()
   return useMutation({
