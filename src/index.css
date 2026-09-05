@@ -252,4 +252,40 @@
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  box-shadow: var(--elev-2);
+}
+/* MiniMap paints `fill` as an SVG attribute, which cannot read a custom
+   property; a stylesheet rule outranks the attribute and can. */
+.react-flow__minimap-mask {
+  fill: color-mix(in oklab, var(--background) 55%, transparent);
+}
+.react-flow__minimap-node.map-mini-channel {
+  fill: var(--muted-foreground);
+  opacity: 0.55;
+}
+.react-flow__minimap-node.map-mini-frame {
+  fill: var(--muted);
+  opacity: 0.6;
+}
+
+/* A focused channel on the map: React Flow's node wrapper takes focus (Enter or
+   Space selects, Escape clears), so the ring goes on the wrapper, not the card. */
+.react-flow__node:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+  border-radius: var(--radius-lg);
+}
+
+/* Less motion when the OS asks for it: skeleton pulses, the header's live dot,
+   the map's animated edges and every transition stop. Script-started motion —
+   the map's viewport travel — reads the same query through lib/motion.ts. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

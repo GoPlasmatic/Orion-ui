@@ -7,6 +7,7 @@ import {
   labelValues,
   histogramQuantile,
   histogramMean,
+  type MetricLine,
   type MetricsSnapshot,
 } from "@/api/metrics"
 
@@ -60,6 +61,20 @@ const FAILURE_STATUSES = new Set(["error", "timeout"])
 const MAX_SAMPLES = 60
 const history: MetricsSnapshot[] = []
 
+/**
+ * The windows a sliding view may ask for, bounded by the buffer: 60 samples
+ * at a 10 s poll. The dashboard, the map and the inspector share this list so
+ * "5 min" means the same thing everywhere.
+ */
+export const TRAFFIC_WINDOWS = [
+  { value: 60, label: "1 min" },
+  { value: 300, label: "5 min" },
+  { value: 600, label: "10 min" },
+] as const
+export const DEFAULT_TRAFFIC_WINDOW = 300
+export const trafficWindowLabel = (sec: number): string =>
+  TRAFFIC_WINDOWS.find((w) => w.value === sec)?.label ?? `${sec}s`
+
 function pushSample(s: MetricsSnapshot) {
   const last = history[history.length - 1]
   if (last && last.t === s.t) return
@@ -109,6 +124,46 @@ function pairSeries(fn: (a: MetricsSnapshot, b: MetricsSnapshot, dtSec: number) 
     const dt = (history[i].t - history[i - 1].t) / 1000
     if (dt <= 0) continue
     out.push(fn(history[i - 1], history[i], dt))
+  }
+  return out
+}
+
+/**
+ * `cur − base`, line by line: a snapshot of what happened *between* the two
+ * scrapes. Counters and histogram buckets are monotonic, so the difference is
+ * itself a valid counter set and a valid cumulative histogram — which is what
+ * lets `histogramQuantile` answer "p95 in the last five minutes" rather than
+ * "p95 since the server started". A restart shows up as a negative delta and
+ * clamps to zero. Gauges are not meaningful here; nothing reads them off it.
+ */
+function deltaSnapshot(base: MetricsSnapshot, cur: MetricsSnapshot): MetricsSnapshot {
+  const key = (l: MetricLine) =>
+    `${l.name}|${Object.keys(l.labels)
+      .sort()
+      .map((k) => `${k}=${l.labels[k]}`)
+      .join(",")}`
+  const before = new Map<string, number>()
+  for (const l of base.lines) before.set(key(l), l.value)
+  return {
+    t: cur.t,
+    lines: cur.lines.map((l) => ({ ...l, value: Math.max(0, l.value - (before.get(key(l)) ?? 0)) })),
+  }
+}
+
+/**
+ * Consecutive sample pairs inside the window that ends at `cur`. The buffer's
+ * tail is the *previous* poll (the current one is pushed after render), so
+ * `cur` is appended explicitly.
+ */
+function pairsWithin(cur: MetricsSnapshot, windowSec: number): [MetricsSnapshot, MetricsSnapshot][] {
+  const floor = cur.t - windowSec * 1000
+  const samples = [...history.filter((s) => s.t < cur.t), cur]
+  const out: [MetricsSnapshot, MetricsSnapshot][] = []
+  for (let i = 1; i < samples.length; i++) {
+    const a = samples[i - 1]
+    const b = samples[i]
+    if (a.t < floor || b.t - a.t <= 0) continue
+    out.push([a, b])
   }
   return out
 }
@@ -192,10 +247,21 @@ export interface ChannelTraffic {
   rejectedPct: number | null
   /** The most common non-ok status in the window, for labelling. */
   dominantIssue: string | null
-  /** Cumulative p95 since server start: the histogram is not windowable here. */
+  /** Every status seen in the window with its count — the outcome mix. */
+  byStatus: Record<string, number>
+  /**
+   * p95 over the window, from the bucket deltas between the window's two ends.
+   * Cumulative since server start until a second sample exists.
+   */
   p95Ms: number | null
   /** Cumulative requests since server start. */
   total: number
+}
+
+/** A per-poll trend inside the window, oldest first; one point per sample pair. */
+export interface TrafficSeries {
+  rate: number[]
+  errorPct: number[]
 }
 
 export interface TrafficWindow {
@@ -212,6 +278,18 @@ export interface TrafficWindow {
   totalRatePerMin: number | null
   /** Channels that saw any traffic inside the window. */
   activeCount: number
+  /** Requests inside the window, every channel. */
+  windowed: number
+  /** failed / (ok + failed) across the window. Null when nothing was processed. */
+  errorPct: number | null
+  /** p95 across every channel over the window; cumulative until a second sample. */
+  p95Ms: number | null
+  /** Mean latency over the window; cumulative until a second sample. */
+  meanMs: number | null
+  /** Trends across every channel, one point per poll inside the window. */
+  series: TrafficSeries & { meanMs: number[] }
+  /** The same trends for one channel. */
+  seriesFor: (channel: string) => TrafficSeries
 }
 
 function statusesByChannel(snap: MetricsSnapshot): Map<string, Map<string, number>> {
@@ -253,6 +331,12 @@ export function useChannelTraffic(windowSec: number, paused = false): TrafficWin
       byChannel: new Map(),
       totalRatePerMin: null,
       activeCount: 0,
+      windowed: 0,
+      errorPct: null,
+      p95Ms: null,
+      meanMs: null,
+      series: { rate: [], errorPct: [], meanMs: [] },
+      seriesFor: () => ({ rate: [], errorPct: [] }),
     }
     if (!cur || cur.lines.length === 0) return empty
 
@@ -283,6 +367,8 @@ export function useChannelTraffic(windowSec: number, paused = false): TrafficWin
     const hasRate = spanSec > 0
     const curByCh = statusesByChannel(cur)
     const baseByCh = base ? statusesByChannel(base) : new Map<string, Map<string, number>>()
+    // Latency inside the window comes from the histogram's bucket deltas.
+    const quantileSource = base ? deltaSnapshot(base, cur) : cur
 
     const channels: ChannelTraffic[] = []
     for (const [channel, statuses] of curByCh) {
@@ -308,9 +394,14 @@ export function useChannelTraffic(windowSec: number, paused = false): TrafficWin
 
       const windowed = ok + failed + rejected + duplicate
       const processed = ok + failed
-      const p95s = histogramQuantile(cur, DURATION, P95, { channel })
+      const p95s = histogramQuantile(quantileSource, DURATION, P95, { channel })
       const dominantIssue =
         [...issues.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
+      const byStatus: Record<string, number> = {}
+      for (const [status, value] of statuses) {
+        const delta = Math.max(0, value - (before?.get(status) ?? 0))
+        if (delta > 0) byStatus[status] = delta
+      }
 
       channels.push({
         channel,
@@ -323,6 +414,7 @@ export function useChannelTraffic(windowSec: number, paused = false): TrafficWin
         errorPct: processed > 0 ? (failed / processed) * 100 : null,
         rejectedPct: windowed > 0 ? (rejected / windowed) * 100 : null,
         dominantIssue,
+        byStatus,
         p95Ms: p95s == null ? null : p95s * 1000,
         total,
       })
@@ -333,6 +425,38 @@ export function useChannelTraffic(windowSec: number, paused = false): TrafficWin
     const totalRate = hasRate
       ? channels.reduce((sum, c) => sum + (c.ratePerMin ?? 0), 0)
       : null
+
+    let okAll = 0
+    let failedAll = 0
+    let windowedAll = 0
+    for (const c of channels) {
+      okAll += c.ok
+      failedAll += c.failed
+      windowedAll += c.windowed
+    }
+    const p95All = histogramQuantile(quantileSource, DURATION, P95)
+    const meanAll = histogramMean(base, cur, DURATION)
+
+    // Trends: one point per consecutive pair of samples inside the window.
+    const pairs = pairsWithin(cur, windowSec)
+    const series = { rate: [] as number[], errorPct: [] as number[], meanMs: [] as number[] }
+    for (const [a, b] of pairs) {
+      const dt = (b.t - a.t) / 1000
+      const d = deltaSplit(messagesSplit(a), messagesSplit(b))
+      series.rate.push(d.total < 0 ? 0 : (d.total / dt) * 60)
+      series.errorPct.push(d.success + d.failed > 0 ? (errorPct(d) ?? 0) : 0)
+      series.meanMs.push((histogramMean(a, b, DURATION) ?? 0) * 1000)
+    }
+    const seriesFor = (channel: string): TrafficSeries => {
+      const out: TrafficSeries = { rate: [], errorPct: [] }
+      for (const [a, b] of pairs) {
+        const dt = (b.t - a.t) / 1000
+        const d = deltaSplit(messagesSplit(a, channel), messagesSplit(b, channel))
+        out.rate.push(d.total < 0 ? 0 : (d.total / dt) * 60)
+        out.errorPct.push(d.success + d.failed > 0 ? (errorPct(d) ?? 0) : 0)
+      }
+      return out
+    }
 
     return {
       isLoading: query.isLoading,
@@ -345,6 +469,12 @@ export function useChannelTraffic(windowSec: number, paused = false): TrafficWin
       byChannel,
       totalRatePerMin: totalRate,
       activeCount: channels.filter((c) => c.windowed > 0).length,
+      windowed: windowedAll,
+      errorPct: okAll + failedAll > 0 ? (failedAll / (okAll + failedAll)) * 100 : null,
+      p95Ms: p95All == null ? null : p95All * 1000,
+      meanMs: meanAll == null ? null : meanAll * 1000,
+      series,
+      seriesFor,
     }
   }, [cur, windowSec, query.isLoading, query.isError])
 }
@@ -389,7 +519,9 @@ export function useMetrics() {
   const errorRatePct = (() => {
     if (hasRate && prev && cur) {
       const d = deltaSplit(messagesSplit(prev), messagesSplit(cur))
-      if (d.success + d.failed <= 0) return 0
+      // Nothing processed in the window is "no data", not "0% failed": the
+      // dashboard rendered `0.0 %` for an idle engine, which reads as healthy.
+      if (d.success + d.failed <= 0) return null
       return errorPct(d)
     }
     if (!snap) return null

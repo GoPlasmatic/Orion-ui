@@ -13,7 +13,7 @@ const COMPONENT_ROUTES: Record<string, string> = {
 
 /** Where to go to act on a degraded component; the health report otherwise. */
 export function componentRoute(component: string): string {
-  return COMPONENT_ROUTES[component] ?? "/settings"
+  return COMPONENT_ROUTES[component] ?? "/engine"
 }
 
 /** Whether a component has a page of its own to inspect. */

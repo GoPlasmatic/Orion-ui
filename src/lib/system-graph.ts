@@ -50,6 +50,8 @@ export interface SystemNode {
   methods: string[]
   /** A cron channel's six-field expression (1.6); it has no route. */
   schedule: string | null
+  /** A Kafka channel's topic; it has no route either. */
+  topic: string | null
   tags: string[]
   /** Slug id of the workflow this channel runs. */
   workflowId: string | null
@@ -111,6 +113,7 @@ function placeholder(name: string): SystemNode {
     route: null,
     methods: [],
     schedule: null,
+    topic: null,
     tags: [],
     workflowId: null,
     workflowName: null,
@@ -203,6 +206,7 @@ export function buildSystemGraph(idx: EntityIndex): SystemGraph {
       // A cron channel is an entry point reached by a clock rather than a
       // route; nothing can call it, so it always sits in the entry lane.
       schedule: cronTransport(channel)?.schedule ?? null,
+      topic: channel.topic ?? null,
       tags: channel.tags ?? [],
       workflowId: channel.workflow_id,
       workflowName: workflow?.name ?? null,

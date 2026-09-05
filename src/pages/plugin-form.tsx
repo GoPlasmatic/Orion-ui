@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router"
 import {
   usePlugin,
@@ -14,6 +14,7 @@ import type {
   UpdatePluginRequest,
   ValidationResponse,
 } from "@/api/types"
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,8 +23,12 @@ import { Textarea } from "@/components/ui/textarea"
 import { Callout } from "@/components/ui/callout"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PageHeader } from "@/components/shared/page-header"
+import { Breadcrumbs } from "@/components/shared/breadcrumbs"
+import { FormError } from "@/components/shared/form-error"
+import { TagsInput } from "@/components/shared/tags-input"
+import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog"
 import { ValidationResults } from "@/components/shared/validation-results"
-import { ArrowLeft, Save, ShieldCheck, Trash2 } from "lucide-react"
+import { Save, ShieldCheck, Trash2 } from "lucide-react"
 
 const SAMPLE_MANIFEST = `abi = "orion:plugin@1.0.0"
 name = "acme.codec"
@@ -41,6 +46,82 @@ kind = "string"
 required = true
 resolvable = true
 `
+
+/** What the manifest text says about itself, before Validate: which syntax, which plugin, which functions. */
+interface ManifestSummary {
+  kind: "empty" | "json" | "toml"
+  name?: string
+  version?: string
+  functions: string[]
+  /** Something the server will refuse, said now rather than after a round trip. */
+  problem?: string
+}
+
+/**
+ * A light read of the manifest as typed. JSON is parsed; TOML is scanned for
+ * its tables rather than parsed — the server owns the grammar, this only
+ * answers "did the text I pasted come through as I meant it". A blank name
+ * in a `[[functions]]` table or no table at all is the mistake worth catching
+ * before the upload.
+ */
+function summariseManifest(text: string): ManifestSummary {
+  const trimmed = text.trim()
+  if (!trimmed) return { kind: "empty", functions: [] }
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as PluginManifest
+      const fns = Array.isArray(parsed.functions) ? parsed.functions : []
+      const names = fns.map((f) => (f && typeof f === "object" && typeof f.name === "string" ? f.name : "")).filter(Boolean)
+      return {
+        kind: "json",
+        name: typeof parsed.name === "string" ? parsed.name : undefined,
+        version: typeof parsed.version === "string" ? parsed.version : undefined,
+        functions: names,
+        problem:
+          typeof parsed !== "object" || Array.isArray(parsed)
+            ? "A JSON manifest must be an object"
+            : names.length === 0
+              ? "No `functions` entry names a function"
+              : undefined,
+      }
+    } catch (e) {
+      return { kind: "json", functions: [], problem: `Looks like JSON but does not parse: ${e instanceof Error ? e.message : String(e)}` }
+    }
+  }
+  // TOML: top-level keys before the first table, then a name per [[functions]] table.
+  let table = ""
+  let name: string | undefined
+  let version: string | undefined
+  const functions: string[] = []
+  let tables = 0
+  for (const raw of trimmed.split("\n")) {
+    const line = raw.trim()
+    if (!line || line.startsWith("#")) continue
+    const header = /^\[\[?\s*([A-Za-z0-9_.-]+)\s*\]\]?$/.exec(line)
+    if (header) {
+      table = header[1]
+      if (line.startsWith("[[") && table === "functions") tables++
+      continue
+    }
+    const kv = /^([A-Za-z0-9_-]+)\s*=\s*"([^"]*)"/.exec(line)
+    if (!kv) continue
+    if (table === "" && kv[1] === "name") name = kv[2]
+    else if (table === "" && kv[1] === "version") version = kv[2]
+    else if (table === "functions" && kv[1] === "name") functions.push(kv[2])
+  }
+  return {
+    kind: "toml",
+    name,
+    version,
+    functions,
+    problem:
+      tables === 0
+        ? "No [[functions]] table — the server refuses a manifest that declares no function"
+        : functions.length < tables
+          ? "A [[functions]] table has no name"
+          : undefined,
+  }
+}
 
 /** Base64 without the call-stack limit `String.fromCharCode(...bytes)` hits on a real component. */
 function toBase64(bytes: Uint8Array): string {
@@ -92,10 +173,15 @@ function PluginForm({ existing }: { existing?: Plugin }) {
   const [component, setComponent] = useState<ComponentFile | null>(null)
   const [digest, setDigest] = useState("")
   const [signature, setSignature] = useState(existing?.signature ?? "")
-  const [tags, setTags] = useState((existing?.tags ?? []).join(", "))
-  const [error, setError] = useState<string | null>(null)
+  const [tags, setTags] = useState<string[]>(existing?.tags ?? [])
+  const [error, setError] = useState<unknown>(null)
   const [validation, setValidation] = useState<ValidationResponse | null>(null)
   const [reading, setReading] = useState(false)
+
+  const snapshot = JSON.stringify({ manifestText, component: component?.digest, digest, signature, tags })
+  const summary = useMemo(() => summariseManifest(manifestText), [manifestText])
+  const [initialSnapshot] = useState(snapshot)
+  const { blocker, markSaved } = useUnsavedChanges(snapshot !== initialSnapshot)
 
   const backTo = existing ? `/plugins/${encodeURIComponent(existing.plugin_id)}` : "/plugins"
   const editLocked = existing ? existing.status !== "draft" : false
@@ -147,8 +233,7 @@ function PluginForm({ existing }: { existing?: Plugin }) {
   const buildPayload = (): CreatePluginRequest | null => {
     const manifest = parseManifest()
     if (manifest === null) return null
-    const tagList = tags.split(",").map((t) => t.trim()).filter(Boolean)
-    const payload: CreatePluginRequest = { manifest, tags: tagList }
+    const payload: CreatePluginRequest = { manifest, tags }
     if (component) payload.component = component.base64
     else if (digest.trim()) payload.digest = digest.trim()
     else if (!isEdit) {
@@ -169,7 +254,7 @@ function PluginForm({ existing }: { existing?: Plugin }) {
     if (isEdit && !payload.component && !payload.digest) payload.digest = existing!.digest
     validatePlugin.mutate(payload, {
       onSuccess: setValidation,
-      onError: (e) => setError(e instanceof Error ? e.message : "Validation failed"),
+      onError: setError,
     })
   }
 
@@ -189,14 +274,20 @@ function PluginForm({ existing }: { existing?: Plugin }) {
       updatePlugin.mutate(
         { id: existing.plugin_id, req },
         {
-          onSuccess: () => navigate(backTo),
-          onError: (e) => setError(e instanceof Error ? e.message : "Update failed"),
+          onSuccess: () => {
+            markSaved()
+            navigate(backTo)
+          },
+          onError: setError,
         }
       )
     } else {
       createPlugin.mutate(payload, {
-        onSuccess: (p) => navigate(`/plugins/${encodeURIComponent(p.plugin_id)}`),
-        onError: (e) => setError(e instanceof Error ? e.message : "Upload failed"),
+        onSuccess: (p) => {
+          markSaved()
+          navigate(`/plugins/${encodeURIComponent(p.plugin_id)}`)
+        },
+        onError: setError,
       })
     }
   }
@@ -205,11 +296,13 @@ function PluginForm({ existing }: { existing?: Plugin }) {
 
   return (
     <div className="space-y-6">
-      <Button variant="ghost" asChild>
-        <Link to={backTo}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back
-        </Link>
-      </Button>
+      <Breadcrumbs
+        items={[
+          { label: "Plugins", to: "/plugins" },
+          ...(existing ? [{ label: existing.plugin_id, to: backTo }] : []),
+          { label: isEdit ? "Edit" : "Upload" },
+        ]}
+      />
 
       <PageHeader
         title={isEdit ? "Edit Plugin" : "Upload Plugin"}
@@ -251,6 +344,16 @@ function PluginForm({ existing }: { existing?: Plugin }) {
               className="font-mono text-sm"
               aria-label="Plugin manifest"
             />
+            {summary.kind !== "empty" && (
+              <p className={`mt-1 text-xs ${summary.problem ? "text-warning" : "text-muted-foreground"}`}>
+                {summary.kind === "json" ? "JSON" : "TOML"} manifest
+                {summary.name ? ` · ${summary.name}${summary.version ? ` v${summary.version}` : ""}` : " · no name yet"}
+                {summary.functions.length > 0
+                  ? ` · ${summary.functions.length} function${summary.functions.length === 1 ? "" : "s"}: ${summary.functions.join(", ")}`
+                  : ""}
+                {summary.problem ? ` — ${summary.problem}` : ""}
+              </p>
+            )}
             <p className="mt-1 text-xs text-muted-foreground">
               Every function must be named <code className="font-mono">{"<name>.<label>"}</code>;
               a field is evaluated (<code className="font-mono">template_at</code>), folded (
@@ -326,17 +429,12 @@ function PluginForm({ existing }: { existing?: Plugin }) {
 
           <div>
             <Label>Tags</Label>
-            <Input
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder="codecs, billing"
-              aria-label="Tags"
-            />
+            <TagsInput value={tags} onChange={setTags} placeholder="codecs, billing" aria-label="Tags" />
           </div>
 
           {validation && <ValidationResults result={validation} validLabel="Plugin is valid on this node." />}
 
-          {error && <Callout variant="destructive">{error}</Callout>}
+          <FormError error={error} />
 
           <div className="flex justify-end gap-2">
             <Button variant="outline" asChild>
@@ -353,6 +451,8 @@ function PluginForm({ existing }: { existing?: Plugin }) {
           </div>
         </CardContent>
       </Card>
+
+      <UnsavedChangesDialog blocker={blocker} />
     </div>
   )
 }

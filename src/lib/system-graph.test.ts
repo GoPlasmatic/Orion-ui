@@ -210,6 +210,7 @@ function traffic(channelName: string, ratePerMin: number): ChannelTraffic {
     errorPct: 0,
     rejectedPct: 0,
     dominantIssue: null,
+    byStatus: {},
     p95Ms: 5,
     total: ratePerMin,
   }

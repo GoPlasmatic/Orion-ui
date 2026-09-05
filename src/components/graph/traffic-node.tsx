@@ -1,8 +1,19 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react"
-import { AlertTriangle, CalendarClock, CornerDownRight, HelpCircle, Radio, Waypoints } from "lucide-react"
-import { cn } from "@/lib/utils"
+import {
+  AlertTriangle,
+  CalendarClock,
+  CornerDownRight,
+  HelpCircle,
+  Radio,
+  ShieldAlert,
+  Unplug,
+  Waypoints,
+  ZapOff,
+} from "lucide-react"
+import { cn, formatRelative } from "@/lib/utils"
 import type { SystemNode } from "@/lib/system-graph"
 import type { ChannelTraffic } from "@/hooks/use-metrics"
+import { worstTone, type NodeFault } from "@/lib/faults"
 import {
   compactNumber,
   formatMs,
@@ -23,10 +34,22 @@ export const NODE_H = 76
 export const COMPACT_W = 204
 export const COMPACT_H = 42
 
+/**
+ * What a node draws at the current zoom. The footprint never changes — the
+ * layout is zoom-independent — only the content: below `LOD_ZOOM` the card is
+ * a dot and a name big enough to read at overview scale.
+ */
+export type LevelOfDetail = "dot" | "full"
+
 export interface TrafficNodeData extends Record<string, unknown> {
   node: SystemNode
   traffic?: ChannelTraffic
   level: HealthLevel
+  /** What the colour means under the current metric ("failing", "100–500 ms", "draft"). */
+  healthLabel?: string
+  lod: LevelOfDetail
+  /** A cron channel's next fire (an admin-plane instant), for the card's last line. */
+  nextFire?: string | null
   /** Diameter in px for the traffic dot. */
   dot: number
   compact: boolean
@@ -34,6 +57,31 @@ export interface TrafficNodeData extends Record<string, unknown> {
   focused: boolean
   /** Measured-or-derived load; `metered: false` means the exporter cannot see it. */
   load?: EffectiveLoad
+  /** Quarantine, failed connectors, open breakers — what its counters cannot show. */
+  faults: NodeFault[]
+}
+
+const FAULT_ICON = { quarantined: ShieldAlert, connector: Unplug, breaker: ZapOff } as const
+
+/** One glyph per fault, in the fault's own tone, with the reason on hover. */
+function FaultGlyphs({ faults, size = "h-3 w-3" }: { faults: NodeFault[]; size?: string }) {
+  if (faults.length === 0) return null
+  return (
+    <span className="flex shrink-0 items-center gap-0.5">
+      {faults.map((fault, i) => {
+        const Icon = FAULT_ICON[fault.kind]
+        return (
+          <Icon
+            key={`${fault.kind}-${i}`}
+            className={cn(size, fault.tone === "destructive" ? "text-destructive" : "text-warning")}
+            aria-label={fault.detail}
+          >
+            <title>{fault.detail}</title>
+          </Icon>
+        )
+      })}
+    </span>
+  )
 }
 
 /**
@@ -106,8 +154,19 @@ function TrafficDot({
 }
 
 export function TrafficNode({ data, selected }: NodeProps) {
-  const { node, traffic, level, dot, compact, dimmed, focused, load } = data as TrafficNodeData
+  const { node, traffic, level, healthLabel, dot, compact, dimmed, focused, load, faults, lod, nextFire } =
+    data as TrafficNodeData
+  // The name, and what its colour says — a dot at overview zoom otherwise
+  // encodes health by colour alone.
+  const title = healthLabel ? `${node.name} · ${healthLabel}` : node.name
   const hub = node.callers.length >= HUB_THRESHOLD
+  const faultTone = worstTone(faults ?? [])
+  const faultBorder =
+    faultTone === "destructive"
+      ? "border-destructive/70"
+      : faultTone === "warning"
+        ? "border-warning/70"
+        : null
   // Reached only by channel_call: no ingress series exists, so the load shown is
   // an upper bound inherited from whoever calls it.
   const derived = !!load && !load.metered && load.effective != null
@@ -128,14 +187,55 @@ export function TrafficNode({ data, selected }: NodeProps) {
     </>
   )
 
+  // Overview zoom: the same box, drawn as a dot and a name that survive the
+  // scale. Names at this size are what let a person find a channel on a
+  // sixty-node canvas without zooming in first.
+  if (lod === "dot") {
+    return (
+      <div
+        style={{ width: compact ? COMPACT_W : NODE_W, height: compact ? COMPACT_H : NODE_H }}
+        data-lod="dot"
+        title={title}
+        className={cn(
+          "flex items-center gap-3 rounded-xl border bg-card px-3 shadow-xs transition-opacity",
+          compact && "border-border/70 bg-card/80",
+          node.unresolved && "border-dashed",
+          faultBorder,
+          isSelected && "border-primary ring-2 ring-ring/60",
+          dimmed && "opacity-30",
+        )}
+      >
+        {handles}
+        <span
+          className={cn(
+            "shrink-0 rounded-full",
+            compact ? "h-4 w-4" : "h-9 w-9 ring-4",
+            derived ? "border-4 border-primary bg-transparent ring-primary/30" : cn(healthDot[level], healthRing[level]),
+            hub && !compact && "ring-8",
+          )}
+        />
+        <p
+          className={cn(
+            "min-w-0 flex-1 truncate font-semibold leading-none",
+            compact ? "text-xl text-foreground/80" : "text-[26px]",
+          )}
+        >
+          {node.name}
+        </p>
+        <FaultGlyphs faults={faults ?? []} size={compact ? "h-4 w-4" : "h-6 w-6"} />
+      </div>
+    )
+  }
+
   if (compact) {
     return (
       <div
         style={{ width: COMPACT_W, height: COMPACT_H }}
-        title={node.name}
+        title={title}
         className={cn(
           "flex items-center gap-2 rounded-lg border border-border/70 bg-card/80 px-2.5 shadow-xs transition-opacity",
           node.unresolved && "border-dashed",
+          faultBorder,
           isSelected && "border-primary ring-2 ring-ring/60",
           dimmed && "opacity-30",
         )}
@@ -148,6 +248,7 @@ export function TrafficNode({ data, selected }: NodeProps) {
           )}
         />
         <p className="truncate text-xs font-medium text-foreground/80">{node.name}</p>
+        <FaultGlyphs faults={faults ?? []} />
         {node.unresolved && <HelpCircle className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />}
       </div>
     )
@@ -156,10 +257,11 @@ export function TrafficNode({ data, selected }: NodeProps) {
   return (
     <div
       style={{ width: NODE_W, height: NODE_H }}
-      title={node.name}
+      title={title}
       className={cn(
         "flex items-center gap-1.5 rounded-xl border bg-card px-2 py-1.5 shadow-xs transition-opacity",
         node.unresolved && "border-dashed",
+        faultBorder,
         isSelected && "border-primary shadow-md ring-2 ring-ring/60",
         dimmed && "opacity-30",
       )}
@@ -168,10 +270,11 @@ export function TrafficNode({ data, selected }: NodeProps) {
       <TrafficDot size={dot} level={level} hub={hub} derived={derived} />
 
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-1.5">
+        <div className="flex items-center gap-1.5">
           <p className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-tight">
             {node.name}
           </p>
+          <FaultGlyphs faults={faults ?? []} size="h-3.5 w-3.5" />
           {traffic?.ratePerMin != null && traffic.ratePerMin > 0 ? (
             <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
               {compactNumber(traffic.ratePerMin)}/m
@@ -205,7 +308,7 @@ export function TrafficNode({ data, selected }: NodeProps) {
         {traffic && traffic.windowed > 0 ? (
           <div className="mt-0.5 flex items-center gap-2 font-mono text-[10px] tabular-nums">
             <span className={healthText[level]}>
-              {level === "rejected"
+              {level === "notice"
                 ? `${formatPct(traffic.rejectedPct)} rej`
                 : `${formatPct(traffic.errorPct)} err`}
             </span>
@@ -226,7 +329,13 @@ export function TrafficNode({ data, selected }: NodeProps) {
                 <Radio className="h-2.5 w-2.5 shrink-0" />
                 <span className="truncate">
                   {node.steps} steps ·{" "}
-                  {node.schedule ? "scheduled" : node.callers.length > 0 ? "no calls yet" : "idle"}
+                  {node.schedule
+                    ? nextFire
+                      ? `next fire ${formatRelative(nextFire) ?? "pending"}`
+                      : "scheduled"
+                    : node.callers.length > 0
+                      ? "no calls yet"
+                      : "idle"}
                 </span>
               </>
             )}

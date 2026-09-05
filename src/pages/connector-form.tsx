@@ -12,6 +12,7 @@ import type {
   CreateConnectorRequest,
   ValidationResponse,
 } from "@/api/types"
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,11 +20,13 @@ import { Select } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Label } from "@/components/ui/label"
-import { Callout } from "@/components/ui/callout"
 import { PageHeader } from "@/components/shared/page-header"
+import { Breadcrumbs } from "@/components/shared/breadcrumbs"
+import { FormError } from "@/components/shared/form-error"
+import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog"
 import { ConnectorConfigEditor } from "@/components/shared/connector-config-editor"
 import { ValidationResults } from "@/components/shared/validation-results"
-import { ArrowLeft, Save, ShieldCheck } from "lucide-react"
+import { Save, ShieldCheck } from "lucide-react"
 
 // The server returns `config` already parsed, in the shape POST/PUT accept, so
 // a read round-trips straight back. `config_json` is the same document as a
@@ -46,8 +49,12 @@ function ConnectorForm({ existing }: { existing?: Connector }) {
   const [type, setType] = useState<ConnectorType>(existing?.connector_type ?? "http")
   const [enabled, setEnabled] = useState(existing?.enabled ?? true)
   const [config, setConfig] = useState<Record<string, unknown>>(() => initialConfig(existing))
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<unknown>(null)
   const [validation, setValidation] = useState<ValidationResponse | null>(null)
+
+  const snapshot = JSON.stringify({ name, type, enabled, config })
+  const [initialSnapshot] = useState(snapshot)
+  const { blocker, markSaved } = useUnsavedChanges(snapshot !== initialSnapshot)
 
   const backTo = existing ? `/connectors/${existing.id}` : "/connectors"
 
@@ -72,7 +79,7 @@ function ConnectorForm({ existing }: { existing?: Connector }) {
     if (!payload) return
     validateConnector.mutate(payload, {
       onSuccess: setValidation,
-      onError: (e) => setError(e instanceof Error ? e.message : "Validation failed"),
+      onError: setError,
     })
   }
 
@@ -86,14 +93,20 @@ function ConnectorForm({ existing }: { existing?: Connector }) {
       updateConnector.mutate(
         { id: existing.id, req: { ...payload, enabled } },
         {
-          onSuccess: () => navigate(`/connectors/${existing.id}`),
-          onError: (e) => setError(e instanceof Error ? e.message : "Update failed"),
+          onSuccess: () => {
+            markSaved()
+            navigate(`/connectors/${existing.id}`)
+          },
+          onError: setError,
         }
       )
     } else {
       createConnector.mutate(payload, {
-        onSuccess: (c) => navigate(`/connectors/${c.id}`),
-        onError: (e) => setError(e instanceof Error ? e.message : "Create failed"),
+        onSuccess: (c) => {
+          markSaved()
+          navigate(`/connectors/${c.id}`)
+        },
+        onError: setError,
       })
     }
   }
@@ -102,11 +115,13 @@ function ConnectorForm({ existing }: { existing?: Connector }) {
 
   return (
     <div className="space-y-6">
-      <Button variant="ghost" asChild>
-        <Link to={backTo}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back
-        </Link>
-      </Button>
+      <Breadcrumbs
+        items={[
+          { label: "Connectors", to: "/connectors" },
+          ...(existing ? [{ label: existing.name, to: backTo }] : []),
+          { label: isEdit ? "Edit" : "New connector" },
+        ]}
+      />
 
       <PageHeader
         title={isEdit ? "Edit Connector" : "Create Connector"}
@@ -143,11 +158,7 @@ function ConnectorForm({ existing }: { existing?: Connector }) {
 
           {validation && <ValidationResults result={validation} validLabel="Connector is valid." />}
 
-          {error && (
-            <Callout variant="destructive">
-              {error}
-            </Callout>
-          )}
+          <FormError error={error} />
 
           <div className="flex justify-end gap-2">
             <Button variant="outline" asChild>
@@ -168,6 +179,8 @@ function ConnectorForm({ existing }: { existing?: Connector }) {
           </div>
         </CardContent>
       </Card>
+
+      <UnsavedChangesDialog blocker={blocker} />
     </div>
   )
 }

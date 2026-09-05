@@ -9,25 +9,43 @@ import {
   useTriggerChannel,
 } from "@/hooks/use-channels"
 import { useCronOccurrences, useRetryOccurrence } from "@/hooks/use-cron"
+import { useHealth } from "@/hooks/use-health"
 import { OccurrencesTable } from "@/components/shared/occurrences-table"
+import { ErrorState } from "@/components/shared/error-state"
+import { Breadcrumbs } from "@/components/shared/breadcrumbs"
+import { ChannelRecentTraces, ChannelTrafficCard } from "@/components/shared/channel-traffic"
 import { cronTransport, MISFIRE_POLICIES } from "@/lib/cron"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Callout } from "@/components/ui/callout"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { LifecycleActions } from "@/components/shared/lifecycle-actions"
 import { VersionHistory } from "@/components/shared/version-history"
+import { VersionCompare } from "@/components/shared/version-compare"
+import { RetrySafetyWarning } from "@/components/shared/retry-safety-warning"
 import { JsonViewer } from "@/components/shared/json-viewer"
-import { RelationshipGraph } from "@/components/graph/relationship-graph"
+import { NeighbourhoodMap } from "@/components/graph/neighbourhood-map"
 import { formatDate } from "@/lib/utils"
-import { ArrowLeft, AlertCircle, CalendarClock, Pencil, Play } from "lucide-react"
+import { CalendarClock, Network, Pencil, Play, Send } from "lucide-react"
+
+/** One label / value line in a configuration card. */
+function Row({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex justify-between gap-4">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className={mono ? "truncate text-right font-mono text-xs" : "text-right"}>{children}</span>
+    </div>
+  )
+}
 
 export function ChannelDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { data: channel, isLoading, error } = useChannel(id ?? "")
+  const { data: channel, isLoading, error, refetch } = useChannel(id ?? "")
+  const { data: health } = useHealth()
   const statusDryRun = useChannelStatusDryRun()
   const { data: versions, isLoading: versionsLoading } = useChannelVersions(id ?? "")
   const changeStatus = useChangeChannelStatus()
@@ -55,38 +73,60 @@ export function ChannelDetailPage() {
 
   if (error || !channel) {
     return (
-      <div className="space-y-6">
-        <Button variant="ghost" asChild>
-          <Link to="/channels"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Channels</Link>
-        </Button>
-        <div className="flex items-center gap-2 text-destructive">
-          <AlertCircle className="h-5 w-5" />
-          <p>Failed to load channel.</p>
-        </div>
-      </div>
+      <ErrorState
+        title="Failed to load channel"
+        error={error}
+        onRetry={() => refetch()}
+        backTo={{ to: "/channels", label: "Back to Channels" }}
+      />
     )
   }
 
   const isPending = changeStatus.isPending || createVersion.isPending || deleteChannel.isPending
+  // The engine refused this channel at load. Until now the only place that
+  // said so was the dashboard; the channel's own page looked perfectly normal.
+  const quarantine = health?.channels?.quarantined?.find((q) => q.channel === channel.name)
+
+  const auth = channel.config.auth
+  const request = channel.config.request
+  const rateLimit = channel.config.rate_limit
 
   return (
     <div className="space-y-6">
-      <Button variant="ghost" asChild>
-        <Link to="/channels"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Channels</Link>
-      </Button>
+      <Breadcrumbs items={[{ label: "Channels", to: "/channels" }, { label: channel.name }]} />
 
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold">{channel.name}</h1>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <h1 className="min-w-0 break-words text-2xl font-bold">{channel.name}</h1>
           <StatusBadge status={channel.status} />
           <Badge variant="outline">v{channel.version}</Badge>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {channel.status === "draft" && (
             <Button variant="outline" size="sm" asChild>
               <Link to={`/channels/${channel.channel_id}/edit`}>
                 <Pencil className="h-3.5 w-3.5" />
                 Edit
+              </Link>
+            </Button>
+          )}
+          <Button variant="outline" size="sm" asChild>
+            <Link
+              to={`/system-map?select=${encodeURIComponent(channel.name)}`}
+              title="This channel on the System Map: its callers, callees and live traffic"
+            >
+              <Network className="h-3.5 w-3.5" />
+              Map
+            </Link>
+          </Button>
+          {!schedule && (
+            <Button variant="outline" size="sm" asChild>
+              <Link
+                to={`/console?channel=${encodeURIComponent(channel.name)}`}
+                title="Open the Data Console with this channel selected"
+              >
+                <Send className="h-3.5 w-3.5" />
+                Send test request
               </Link>
             </Button>
           )}
@@ -118,6 +158,19 @@ export function ChannelDetailPage() {
         </div>
       </div>
 
+      {quarantine && (
+        <Callout variant="destructive">
+          <p className="font-medium">
+            Quarantined — the engine refused this channel at load, so its route is not being
+            served.
+          </p>
+          <p className="mt-1 text-xs">
+            {quarantine.reason || "No reason was reported."} Fix the definition, then Validate; the
+            next reload clears the quarantine.
+          </p>
+        </Callout>
+      )}
+
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -129,6 +182,12 @@ export function ChannelDetailPage() {
 
         <TabsContent value="overview">
           <div className="space-y-4">
+          {/* What it is doing right now, and its last few runs — the operator's
+              first two questions, which used to live on other pages. */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ChannelTrafficCard channelName={channel.name} />
+            <ChannelRecentTraces channelName={channel.name} />
+          </div>
           {schedule && (
             <Card>
               <CardHeader className="pb-3">
@@ -258,6 +317,9 @@ export function ChannelDetailPage() {
                   </Link>
                 </Button>
               </div>
+              {/* What a retry would run twice — the catalogue's retry_safety
+                  over this channel's workflow, once for every Retry button below. */}
+              <RetrySafetyWarning workflowId={channel.workflow_id} action="Retrying an occurrence" />
               <OccurrencesTable
                 rows={occurrences?.data ?? []}
                 isLoading={occurrencesLoading}
@@ -276,24 +338,110 @@ export function ChannelDetailPage() {
 
         <TabsContent value="config">
           <div className="space-y-4">
-            {channel.config.rate_limit && (
+            {/* The security-relevant section came last — it fell through to the
+                raw JSON. Secrets are masked by the server; counts are shown. */}
+            {auth && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Authentication</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1 text-sm">
+                    <Row label="Mode">
+                      <Badge variant="outline" className="uppercase">{auth.mode ?? "—"}</Badge>
+                    </Row>
+                    {auth.mode === "api_key" && (
+                      <>
+                        <Row label="Header" mono>{auth.header ?? "Authorization"}</Row>
+                        {auth.scheme && <Row label="Scheme" mono>{auth.scheme}</Row>}
+                        <Row label="Keys">{auth.keys?.length ?? 0} configured · values masked</Row>
+                      </>
+                    )}
+                    {auth.mode === "hmac" && (
+                      <>
+                        {auth.preset && <Row label="Preset">{auth.preset}</Row>}
+                        <Row label="Signature header" mono>{auth.header ?? "—"}</Row>
+                        <Row label="Algorithm">{auth.algorithm ?? "sha256"} · {auth.encoding ?? "hex"}</Row>
+                        {auth.timestamp && (
+                          <Row label="Timestamp">
+                            {auth.timestamp}
+                            {auth.tolerance_secs != null ? ` · ±${auth.tolerance_secs}s` : ""}
+                          </Row>
+                        )}
+                        <Row label="Secrets">
+                          {(auth.secrets?.length ?? 0) + (auth.secret ? 1 : 0)} configured · masked
+                        </Row>
+                      </>
+                    )}
+                    {auth.mode === "jwt" && (
+                      <>
+                        <Row label="Algorithms" mono>{auth.algorithms?.join(", ") ?? "—"}</Row>
+                        {auth.issuer && <Row label="Issuer" mono>{[auth.issuer].flat().join(", ")}</Row>}
+                        {auth.audience && <Row label="Audience" mono>{[auth.audience].flat().join(", ")}</Row>}
+                        <Row label="Keys" mono>
+                          {auth.jwks_url ? `JWKS ${auth.jwks_url}` : `${auth.jwt_keys?.length ?? 0} inline key(s) · masked`}
+                        </Row>
+                        <Row label="Token source" mono>
+                          {auth.source?.cookie
+                            ? `cookie ${auth.source.cookie}`
+                            : `${auth.source?.header ?? "Authorization"} ${auth.source?.scheme ?? "Bearer"}`}
+                        </Row>
+                        <Row label="Required">{auth.required === false ? "No — anonymous requests pass" : "Yes"}</Row>
+                        {auth.claims_to_metadata && (
+                          <Row label="Claims to metadata" mono>{auth.claims_to_metadata.join(", ")}</Row>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  {auth.authorization_logic !== undefined && (
+                    <div className="mt-3">
+                      <JsonViewer data={auth.authorization_logic} label="Authorization logic" maxHeight="12rem" />
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {rateLimit && (
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm">Rate Limiting</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-1 text-sm">
-                    {channel.config.rate_limit.requests_per_second !== undefined && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Requests/sec</span>
-                        <span>{channel.config.rate_limit.requests_per_second}</span>
-                      </div>
+                    {rateLimit.requests_per_second !== undefined && (
+                      <Row label="Requests/sec">{rateLimit.requests_per_second}</Row>
                     )}
-                    {channel.config.rate_limit.burst !== undefined && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Burst</span>
-                        <span>{channel.config.rate_limit.burst}</span>
-                      </div>
+                    {rateLimit.burst !== undefined && <Row label="Burst">{rateLimit.burst}</Row>}
+                    <Row label="Bucket key">
+                      {rateLimit.key_logic !== undefined ? "key logic" : "caller identity"}
+                    </Row>
+                    {rateLimit.key_headers && rateLimit.key_headers.length > 0 && (
+                      <Row label="Key headers" mono>{rateLimit.key_headers.join(", ")}</Row>
+                    )}
+                    {rateLimit.on_backend_error && (
+                      <Row label="On backend error">{rateLimit.on_backend_error}</Row>
+                    )}
+                  </div>
+                  {rateLimit.key_logic !== undefined && (
+                    <div className="mt-3">
+                      <JsonViewer data={rateLimit.key_logic} label="Key logic" maxHeight="12rem" />
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {request && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Request</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1 text-sm">
+                    <Row label="Body mode">{request.body_mode ?? "auto"}</Row>
+                    {request.cookies_to_metadata && (
+                      <Row label="Cookies to metadata" mono>{request.cookies_to_metadata.join(", ")}</Row>
                     )}
                   </div>
                 </CardContent>
@@ -382,6 +530,11 @@ export function ChannelDetailPage() {
                           {channel.config.response.allowed_headers.join(", ")}
                         </span>
                       </div>
+                    )}
+                    {channel.config.response.error_bodies && (
+                      <Row label="Error bodies" mono>
+                        {Object.keys(channel.config.response.error_bodies).join(", ")}
+                      </Row>
                     )}
                   </div>
                 </CardContent>
@@ -504,17 +657,38 @@ export function ChannelDetailPage() {
               </Card>
             )}
 
+            {channel.config.validation_logic !== undefined && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Validation logic</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    Evaluated over {"{data, metadata}"} at the channel boundary; a falsy result
+                    answers 400 before any workflow runs.
+                  </p>
+                  <JsonViewer data={channel.config.validation_logic} maxHeight="12rem" />
+                </CardContent>
+              </Card>
+            )}
+
             {/* Raw JSON fallback */}
             <JsonViewer data={channel.config} label="Raw Configuration" />
           </div>
         </TabsContent>
 
         <TabsContent value="relationships">
-          <RelationshipGraph kind="channel" id={channel.channel_id} />
+          <NeighbourhoodMap kind="channel" id={channel.channel_id} />
         </TabsContent>
 
         <TabsContent value="versions">
-          <VersionHistory versions={versions} isLoading={versionsLoading} />
+          <div className="space-y-6">
+            <VersionHistory versions={versions} isLoading={versionsLoading} />
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold">Compare versions</h3>
+              <VersionCompare versions={versions} isLoading={versionsLoading} />
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

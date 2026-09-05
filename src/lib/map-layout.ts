@@ -70,6 +70,20 @@ export interface Cluster {
   y: number
   width: number
   height: number
+  /** Drawn as one summary node; its members are not laid out. */
+  collapsed: boolean
+}
+
+export interface LayoutOptions {
+  /**
+   * Whether a cluster is drawn collapsed — one summary box the size of a node
+   * instead of a grid of its members. Decided per cluster because the caller
+   * knows things the layout does not: how big the map is, what is selected.
+   */
+  isCollapsed?: (clusterId: string, members: string[]) => boolean
+  /** Footprint of a collapsed cluster; defaults to a full node. */
+  collapsedWidth?: number
+  collapsedHeight?: number
 }
 
 export interface LayoutResult {
@@ -105,7 +119,13 @@ interface Item {
   width: number
   height: number
   y: number
-  cluster?: { members: LayoutInput[]; callees: string[]; cols: number; rowHeights: number[] }
+  cluster?: {
+    members: LayoutInput[]
+    callees: string[]
+    cols: number
+    rowHeights: number[]
+    collapsed: boolean
+  }
 }
 
 function mean(values: number[]): number | null {
@@ -131,7 +151,22 @@ function nodeItem(n: LayoutInput): Item {
   return { id: n.id, width: n.width, height: n.height, y: 0 }
 }
 
-function clusterItem(id: string, members: LayoutInput[], callees: string[]): Item {
+function clusterItem(
+  id: string,
+  members: LayoutInput[],
+  callees: string[],
+  collapsed: boolean,
+  collapsedSize: { width: number; height: number },
+): Item {
+  if (collapsed) {
+    return {
+      id,
+      width: collapsedSize.width,
+      height: collapsedSize.height,
+      y: 0,
+      cluster: { members, callees, cols: 1, rowHeights: [], collapsed: true },
+    }
+  }
   const cols = Math.min(CLUSTER_MAX_COLS, Math.ceil(members.length / CLUSTER_ROWS))
   const rows = Math.ceil(members.length / cols)
   const cellW = Math.max(...members.map((m) => m.width))
@@ -147,7 +182,7 @@ function clusterItem(id: string, members: LayoutInput[], callees: string[]): Ite
       (rows - 1) * CLUSTER_GAP_Y +
       CLUSTER_PAD * 2,
     y: 0,
-    cluster: { members, callees, cols, rowHeights },
+    cluster: { members, callees, cols, rowHeights, collapsed: false },
   }
 }
 
@@ -171,9 +206,17 @@ function sortByBarycenter(
   return stack(keyed.map((k) => k.item))
 }
 
-export function layoutSystemGraph(nodes: LayoutInput[], edges: LayoutEdge[]): LayoutResult {
+export function layoutSystemGraph(
+  nodes: LayoutInput[],
+  edges: LayoutEdge[],
+  options: LayoutOptions = {},
+): LayoutResult {
   const positions = new Map<string, Placement>()
   if (nodes.length === 0) return { positions, lanes: [], clusters: [], width: 0, height: 0 }
+  const collapsedSize = {
+    width: options.collapsedWidth ?? 260,
+    height: options.collapsedHeight ?? 76,
+  }
 
   const present = new Set(nodes.map((n) => n.id))
   const calleesOf = new Map<string, string[]>()
@@ -218,7 +261,8 @@ export function layoutSystemGraph(nodes: LayoutInput[], edges: LayoutEdge[]): La
       if (group.length >= CLUSTER_MIN) {
         const id = `cluster:${callees.join("+") || "none"}`
         for (const n of group) itemOf.set(n.id, id)
-        items.push(clusterItem(id, group, callees))
+        const collapsed = options.isCollapsed?.(id, group.map((n) => n.id)) ?? false
+        items.push(clusterItem(id, group, callees, collapsed, collapsedSize))
       } else {
         for (const n of group) {
           itemOf.set(n.id, n.id)
@@ -298,15 +342,21 @@ export function layoutSystemGraph(nodes: LayoutInput[], edges: LayoutEdge[]): La
         count += 1
         continue
       }
-      const { members, callees, cols, rowHeights } = item.cluster
-      const cellW = Math.max(...members.map((m) => m.width))
-      let rowY = item.y + CLUSTER_HEADER + CLUSTER_PAD
-      members.forEach((m, index) => {
-        const row = Math.floor(index / cols)
-        const col = index % cols
-        if (index > 0 && col === 0) rowY += rowHeights[row - 1] + CLUSTER_GAP_Y
-        positions.set(m.id, { x: itemX + CLUSTER_PAD + col * (cellW + CLUSTER_GAP_X), y: rowY })
-      })
+      const { members, callees, cols, rowHeights, collapsed } = item.cluster
+      if (collapsed) {
+        // Members sit under the summary box; the canvas does not draw them,
+        // but a position keeps every id resolvable (a reveal, an edge end).
+        for (const m of members) positions.set(m.id, { x: itemX, y: item.y })
+      } else {
+        const cellW = Math.max(...members.map((m) => m.width))
+        let rowY = item.y + CLUSTER_HEADER + CLUSTER_PAD
+        members.forEach((m, index) => {
+          const row = Math.floor(index / cols)
+          const col = index % cols
+          if (index > 0 && col === 0) rowY += rowHeights[row - 1] + CLUSTER_GAP_Y
+          positions.set(m.id, { x: itemX + CLUSTER_PAD + col * (cellW + CLUSTER_GAP_X), y: rowY })
+        })
+      }
       clusters.push({
         id: item.id,
         members: members.map((m) => m.id),
@@ -315,6 +365,7 @@ export function layoutSystemGraph(nodes: LayoutInput[], edges: LayoutEdge[]): La
         y: item.y,
         width: item.width,
         height: item.height,
+        collapsed,
       })
       count += members.length
     }

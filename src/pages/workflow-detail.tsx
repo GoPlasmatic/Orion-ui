@@ -1,5 +1,11 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useParams, Link, useNavigate } from "react-router"
+import { useChannels } from "@/hooks/use-channels"
+import { useTraces } from "@/hooks/use-traces"
+import { tracesApi } from "@/api/traces"
+import { firstTaskPayload } from "@/lib/trace-payload"
+import { toastError } from "@/lib/toast-error"
+import { toast } from "sonner"
 import {
   useWorkflow,
   useWorkflowVersions,
@@ -17,7 +23,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Slider } from "@/components/ui/slider"
-import { Textarea } from "@/components/ui/textarea"
+import { JsonEditor } from "@/components/shared/json-editor"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Callout } from "@/components/ui/callout"
 import { StatusBadge } from "@/components/shared/status-badge"
@@ -25,17 +31,47 @@ import { LifecycleActions } from "@/components/shared/lifecycle-actions"
 import { VersionHistory } from "@/components/shared/version-history"
 import { VersionCompare } from "@/components/shared/version-compare"
 import { JsonViewer } from "@/components/shared/json-viewer"
-import { RelationshipGraph } from "@/components/graph/relationship-graph"
+import { NeighbourhoodMap } from "@/components/graph/neighbourhood-map"
 import { WorkflowDependencies } from "@/components/shared/workflow-dependencies"
+import { ErrorState } from "@/components/shared/error-state"
+import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { stepResultBadgeClass } from "@/lib/status"
-import { ArrowLeft, AlertCircle, CircleStop, Layers, OctagonX, Pencil, Percent, Play } from "lucide-react"
+import { ChevronDown, ChevronUp, CircleStop, History, Layers, OctagonX, Pencil, Percent, Play, Radio } from "lucide-react"
 import { countGroups, countHaltOnFailure, countLeafSteps, countTerminal } from "@/lib/workflow-steps"
 import type { WorkflowTestResponse } from "@/api/types"
+
+/** The last dry-run payload, per workflow, in this browser only. */
+const dryRunKey = (id: string) => `orion-dryrun-${id}`
+/** Whether the diagram is folded away — a laptop screen preference, per browser. */
+const DIAGRAM_KEY = "orion-workflow-diagram"
+const EMPTY_PAYLOAD = "{\n  \n}"
+
+function loadDryRun(id: string): string | null {
+  try {
+    return localStorage.getItem(dryRunKey(id))
+  } catch {
+    return null
+  }
+}
+function saveDryRun(id: string, text: string) {
+  try {
+    localStorage.setItem(dryRunKey(id), text)
+  } catch {
+    // Private mode: the payload lives in the editor for the session.
+  }
+}
+function loadDiagramHidden(): boolean {
+  try {
+    return localStorage.getItem(DIAGRAM_KEY) === "hidden"
+  } catch {
+    return false
+  }
+}
 
 export function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { data: workflow, isLoading, error } = useWorkflow(id ?? "")
+  const { data: workflow, isLoading, error, refetch } = useWorkflow(id ?? "")
   const statusDryRun = useWorkflowStatusDryRun()
   const { data: versions, isLoading: versionsLoading } = useWorkflowVersions(id ?? "")
   const changeStatus = useChangeWorkflowStatus()
@@ -43,11 +79,31 @@ export function WorkflowDetailPage() {
   const deleteWorkflow = useDeleteWorkflow()
   const setRollout = useSetWorkflowRollout()
   const testWorkflow = useTestWorkflow()
+  // Which channels run it. An active workflow bound to nothing is dead weight,
+  // and the page never said so.
+  const { data: channelList } = useChannels({ limit: 1000 })
+  const runsOn = useMemo(
+    () => (channelList?.data ?? []).filter((c) => c.workflow_id === id),
+    [channelList?.data, id],
+  )
+  // The newest trace through a channel that runs this workflow — the input a
+  // dry run most plausibly wants. The list row is payload-free; the button
+  // fetches the trace itself when asked.
+  const sampleChannel = runsOn.find((c) => c.status === "active") ?? runsOn[0]
+  const { data: lastTraces } = useTraces(
+    { channel: sampleChannel?.name, limit: 1, sort_by: "created_at", sort_order: "desc" },
+    { enabled: !!sampleChannel },
+  )
+  const lastTraceId = lastTraces?.data[0]?.id
 
-  const [testPayload, setTestPayload] = useState('{\n  \n}')
+  // Seeded from what this browser last ran here, so a payload survives a
+  // reload and a page change; saved again on every run.
+  const [testPayload, setTestPayload] = useState(() => loadDryRun(id ?? "") ?? EMPTY_PAYLOAD)
   const [testResult, setTestResult] = useState<WorkflowTestResponse | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
+  const [loadingTrace, setLoadingTrace] = useState(false)
   const [rolloutDraft, setRolloutDraft] = useState<number | null>(null)
+  const [diagramHidden, setDiagramHidden] = useState(loadDiagramHidden)
 
   if (isLoading) {
     return (
@@ -60,15 +116,12 @@ export function WorkflowDetailPage() {
 
   if (error || !workflow) {
     return (
-      <div className="space-y-6">
-        <Button variant="ghost" asChild>
-          <Link to="/workflows"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Workflows</Link>
-        </Button>
-        <div className="flex items-center gap-2 text-destructive">
-          <AlertCircle className="h-5 w-5" />
-          <p>Failed to load workflow.</p>
-        </div>
-      </div>
+      <ErrorState
+        title="Failed to load workflow"
+        error={error}
+        onRetry={() => refetch()}
+        backTo={{ to: "/workflows", label: "Back to Workflows" }}
+      />
     )
   }
 
@@ -81,6 +134,16 @@ export function WorkflowDetailPage() {
   const terminalCount = countTerminal(workflow.tasks)
   const haltCount = countHaltOnFailure(workflow.tasks)
 
+  const toggleDiagram = () => {
+    const next = !diagramHidden
+    setDiagramHidden(next)
+    try {
+      localStorage.setItem(DIAGRAM_KEY, next ? "hidden" : "shown")
+    } catch {
+      // Not remembered; the toggle still works for the session.
+    }
+  }
+
   const handleTest = () => {
     setTestError(null)
     setTestResult(null)
@@ -92,6 +155,7 @@ export function WorkflowDetailPage() {
       setTestError("Invalid JSON payload")
       return
     }
+    saveDryRun(workflow.workflow_id, testPayload)
 
     testWorkflow.mutate(
       { id: workflow.workflow_id, req: { data } },
@@ -102,16 +166,36 @@ export function WorkflowDetailPage() {
     )
   }
 
+  /** Fill the editor with the last trace's input, as its first task saw it. */
+  const fillFromLastTrace = async () => {
+    if (!lastTraceId) return
+    setLoadingTrace(true)
+    try {
+      const trace = await tracesApi.get(lastTraceId)
+      const payload = firstTaskPayload(trace)
+      if (!payload) {
+        toast.error("That trace kept no request payload", {
+          description: "The run recorded no task step with a message, so there is nothing to reuse.",
+        })
+        return
+      }
+      setTestPayload(JSON.stringify(payload, null, 2))
+      setTestError(null)
+    } catch (e) {
+      toastError("Could not read the trace", e)
+    } finally {
+      setLoadingTrace(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <Button variant="ghost" asChild>
-        <Link to="/workflows"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Workflows</Link>
-      </Button>
+      <Breadcrumbs items={[{ label: "Workflows", to: "/workflows" }, { label: workflow.name }]} />
 
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold">{workflow.name}</h1>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="min-w-0 break-words text-2xl font-bold">{workflow.name}</h1>
             <StatusBadge status={workflow.status} />
             <Badge variant="outline">v{workflow.version}</Badge>
           </div>
@@ -151,6 +235,26 @@ export function WorkflowDetailPage() {
               </Badge>
             )}
           </div>
+          {channelList && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-sm">
+              <Radio className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-muted-foreground">Runs on</span>
+              {runsOn.length === 0 ? (
+                <span className={workflow.status === "active" ? "text-warning" : "text-muted-foreground"}>
+                  no channel{workflow.status === "active" ? " — nothing reaches this workflow" : " yet"}
+                </span>
+              ) : (
+                runsOn.map((c) => (
+                  <Link key={c.channel_id} to={`/channels/${c.channel_id}`}>
+                    <Badge variant="outline" className="transition-colors hover:bg-accent">
+                      {c.name}
+                      {c.status !== "active" && <span className="text-muted-foreground"> · {c.status}</span>}
+                    </Badge>
+                  </Link>
+                ))
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {workflow.status === "draft" && (
@@ -221,10 +325,22 @@ export function WorkflowDetailPage() {
         </Card>
       )}
 
-      {/* Diagram is the primary content of the page. */}
-      <div className="h-[calc(100dvh-19rem)] min-h-[520px] overflow-hidden rounded-lg border">
-        <WorkflowVisualizer workflows={[toVisualizerWorkflow(workflow)]} />
+      {/* Diagram is the primary content of the page — but on a laptop it is
+          the whole first screen, so it folds away and the choice is remembered. */}
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">
+          {diagramHidden ? "Diagram hidden" : `Pipeline · ${taskCount} ${taskCount === 1 ? "task" : "tasks"}`}
+        </span>
+        <Button variant="ghost" size="sm" onClick={toggleDiagram} aria-expanded={!diagramHidden}>
+          {diagramHidden ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+          {diagramHidden ? "Show diagram" : "Hide diagram"}
+        </Button>
       </div>
+      {!diagramHidden && (
+        <div className="h-[calc(100dvh-19rem)] min-h-[520px] overflow-hidden rounded-lg border">
+          <WorkflowVisualizer workflows={[toVisualizerWorkflow(workflow)]} />
+        </div>
+      )}
 
       <Tabs defaultValue="relationships">
         <TabsList>
@@ -236,7 +352,7 @@ export function WorkflowDetailPage() {
         </TabsList>
 
         <TabsContent value="relationships">
-          <RelationshipGraph kind="workflow" id={workflow.workflow_id} />
+          <NeighbourhoodMap kind="workflow" id={workflow.workflow_id} />
         </TabsContent>
 
         <TabsContent value="dependencies">
@@ -250,21 +366,43 @@ export function WorkflowDetailPage() {
                 <CardTitle>Test Payload</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Textarea
+                <JsonEditor
                   value={testPayload}
-                  onChange={(e) => setTestPayload(e.target.value)}
-                  rows={12}
-                  className="font-mono text-sm"
-                  placeholder='{ "key": "value" }'
+                  onChange={setTestPayload}
+                  height="18rem"
+                  aria-label="Test payload"
+                  onRun={handleTest}
                 />
-                <Button
-                  onClick={handleTest}
-                  disabled={testWorkflow.isPending}
-                  className="w-full"
-                >
-                  <Play className="h-4 w-4" />
-                  {testWorkflow.isPending ? "Running..." : "Run Test"}
-                </Button>
+                <p className="text-xs text-muted-foreground">
+                  <kbd className="rounded border bg-muted px-1 font-mono">⌘</kbd>{" "}
+                  <kbd className="rounded border bg-muted px-1 font-mono">↵</kbd> runs · the payload
+                  is remembered for this workflow in this browser.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    onClick={handleTest}
+                    disabled={testWorkflow.isPending}
+                    className="flex-1"
+                  >
+                    <Play className="h-4 w-4" />
+                    {testWorkflow.isPending ? "Running..." : "Run Test"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => void fillFromLastTrace()}
+                    disabled={!lastTraceId || loadingTrace}
+                    title={
+                      !sampleChannel
+                        ? "No channel runs this workflow yet, so there is no trace to borrow from"
+                        : !lastTraceId
+                          ? `No trace has run through ${sampleChannel.name} yet`
+                          : `The newest trace through ${sampleChannel.name}, as its first task saw it`
+                    }
+                  >
+                    <History className="h-4 w-4" />
+                    {loadingTrace ? "Loading…" : "Use last trace's input"}
+                  </Button>
+                </div>
 
                 {testError && (
                   <Callout variant="destructive">

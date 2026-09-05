@@ -9,17 +9,21 @@ import type { SystemGraph, SystemNode } from "@/lib/system-graph"
  */
 
 /**
- * `rejected` is deliberately not a kind of failure.
+ * A level is a colour slot, ordered from quiet to loud; what it *means* depends
+ * on the colour metric, and `legendFor` is what names it.
  *
- * Orion 1.2 reports `unauthorized` on `orion_messages_total{status}`, and it is
- * refused at the edge — no workflow runs, nothing goes wrong. A channel serving
- * nothing but 401s is either working exactly as designed (an authenticated route
- * being probed) or badly misconfigured, and the map cannot tell which. Painting
- * it red claims a failure that did not happen; folding it into "healthy" hides a
- * channel that is serving no real traffic. It gets its own colour and says what
- * it is.
+ * `notice` is the informational blue, and it exists because rejected traffic
+ * is deliberately not a kind of failure. Orion 1.2 reports `unauthorized` on
+ * `orion_messages_total{status}`, and it is refused at the edge — no workflow
+ * runs, nothing goes wrong. A channel serving nothing but 401s is either
+ * working exactly as designed (an authenticated route being probed) or badly
+ * misconfigured, and the map cannot tell which. Painting it red claims a
+ * failure that did not happen; folding it into "healthy" hides a channel that
+ * is serving no real traffic. So it gets its own colour, and the legend says
+ * "rejected". The same slot is "100–500 ms" in latency mode and "draft" in
+ * lifecycle mode — a middle band that is neither good news nor bad.
  */
-export type HealthLevel = "idle" | "healthy" | "warning" | "critical" | "rejected"
+export type HealthLevel = "idle" | "healthy" | "notice" | "warning" | "critical"
 
 /** Failure share above which a channel reads as broken rather than flaky. */
 const CRITICAL_ERROR_PCT = 5
@@ -27,11 +31,23 @@ const WARNING_ERROR_PCT = 1
 /** Rejection share above which "guarded" is the honest summary of the channel. */
 const REJECTED_PCT = 50
 
+/**
+ * The error-share bands, on their own, so the dashboard's KPI strip and the
+ * map agree on what "failing" means. Null is "nothing processed", which is
+ * idle rather than healthy.
+ */
+export function errorLevel(errorPct: number | null | undefined): HealthLevel {
+  if (errorPct == null) return "idle"
+  if (errorPct >= CRITICAL_ERROR_PCT) return "critical"
+  if (errorPct >= WARNING_ERROR_PCT) return "warning"
+  return "healthy"
+}
+
 export function healthOf(traffic: ChannelTraffic | undefined): HealthLevel {
   if (!traffic || traffic.windowed === 0) return "idle"
-  if (traffic.errorPct != null && traffic.errorPct >= CRITICAL_ERROR_PCT) return "critical"
-  if (traffic.errorPct != null && traffic.errorPct >= WARNING_ERROR_PCT) return "warning"
-  if (traffic.rejectedPct != null && traffic.rejectedPct >= REJECTED_PCT) return "rejected"
+  const byErrors = errorLevel(traffic.errorPct)
+  if (byErrors === "critical" || byErrors === "warning") return byErrors
+  if (traffic.rejectedPct != null && traffic.rejectedPct >= REJECTED_PCT) return "notice"
   return "healthy"
 }
 
@@ -44,7 +60,7 @@ export function latencyLevel(p95Ms: number | null | undefined): HealthLevel {
   if (p95Ms == null) return "idle"
   if (p95Ms >= LATENCY_SLOW) return "critical"
   if (p95Ms >= LATENCY_OK) return "warning"
-  if (p95Ms >= LATENCY_GOOD) return "rejected" // the middle band; recoloured below
+  if (p95Ms >= LATENCY_GOOD) return "notice"
   return "healthy"
 }
 
@@ -57,7 +73,7 @@ export const healthDot: Record<HealthLevel, string> = {
   healthy: "bg-success",
   warning: "bg-warning",
   critical: "bg-destructive",
-  rejected: "bg-info",
+  notice: "bg-info",
 }
 
 export const healthRing: Record<HealthLevel, string> = {
@@ -65,7 +81,7 @@ export const healthRing: Record<HealthLevel, string> = {
   healthy: "ring-success/30",
   warning: "ring-warning/40",
   critical: "ring-destructive/50",
-  rejected: "ring-info/40",
+  notice: "ring-info/40",
 }
 
 export const healthText: Record<HealthLevel, string> = {
@@ -73,15 +89,16 @@ export const healthText: Record<HealthLevel, string> = {
   healthy: "text-success",
   warning: "text-warning",
   critical: "text-destructive",
-  rejected: "text-info",
+  notice: "text-info",
 }
 
+/** Health-mode names for the slots; `legendFor` is the metric-aware reading. */
 export const healthLabel: Record<HealthLevel, string> = {
   idle: "no traffic",
   healthy: "healthy",
+  notice: "rejected",
   warning: "errors",
   critical: "failing",
-  rejected: "rejected",
 }
 
 /** Stacked-bar segment colours, in the order they are drawn. */
@@ -177,6 +194,45 @@ export const COLOR_METRICS: { value: ColorMetric; label: string }[] = [
   { value: "lifecycle", label: "Lifecycle" },
 ]
 
+export interface LegendEntry {
+  level: HealthLevel
+  label: string
+}
+
+/**
+ * What each colour means under the current colour metric, in the order the
+ * legend draws them. The legend used to be hard-wired to the health labels, so
+ * "Colour: Latency" painted a slow channel amber and captioned it "errors",
+ * and "Colour: Lifecycle" painted a draft blue and captioned it "rejected".
+ */
+export function legendFor(metric: ColorMetric): LegendEntry[] {
+  switch (metric) {
+    case "latency":
+      return [
+        { level: "healthy", label: `p95 < ${LATENCY_GOOD} ms` },
+        { level: "notice", label: `${LATENCY_GOOD}–${LATENCY_OK} ms` },
+        { level: "warning", label: `${LATENCY_OK} ms – ${LATENCY_SLOW / 1000} s` },
+        { level: "critical", label: `≥ ${LATENCY_SLOW / 1000} s` },
+        { level: "idle", label: "no traffic" },
+      ]
+    case "lifecycle":
+      return [
+        { level: "healthy", label: "active" },
+        { level: "notice", label: "draft" },
+        { level: "idle", label: "archived" },
+        { level: "critical", label: "named by a call, not registered" },
+      ]
+    default:
+      return [
+        { level: "healthy", label: "healthy" },
+        { level: "warning", label: `errors ≥ ${WARNING_ERROR_PCT}%` },
+        { level: "critical", label: `failing ≥ ${CRITICAL_ERROR_PCT}%` },
+        { level: "notice", label: `rejected ≥ ${REJECTED_PCT}%` },
+        { level: "idle", label: "no traffic" },
+      ]
+  }
+}
+
 const MIN_DOT = 10
 const MAX_DOT = 40
 
@@ -217,14 +273,10 @@ export function levelFor(
   node: SystemNode,
   traffic: ChannelTraffic | undefined,
 ): HealthLevel {
-  if (metric === "latency") {
-    const level = latencyLevel(traffic?.p95Ms)
-    // latencyLevel borrows "rejected" for its middle band; name it honestly.
-    return level === "rejected" ? "warning" : level
-  }
+  if (metric === "latency") return latencyLevel(traffic?.p95Ms)
   if (metric === "lifecycle") {
     if (node.unresolved) return "critical"
-    return node.status === "active" ? "healthy" : node.status === "draft" ? "rejected" : "idle"
+    return node.status === "active" ? "healthy" : node.status === "draft" ? "notice" : "idle"
   }
   return healthOf(traffic)
 }

@@ -1,14 +1,14 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { toastError } from "@/lib/toast-error"
 import { traceDlqApi } from "@/api/trace-dlq"
 import type { ListTraceDlqParams, PurgeTraceDlqRequest } from "@/api/types"
-
-const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
 
 export function useTraceDlq(params: ListTraceDlqParams = {}, options?: { refetchInterval?: number }) {
   return useQuery({
     queryKey: ["trace-dlq", params],
     queryFn: () => traceDlqApi.list(params),
+    placeholderData: keepPreviousData,
     refetchInterval: options?.refetchInterval,
   })
 }
@@ -29,7 +29,7 @@ export function useRequeueTraceDlq() {
       queryClient.invalidateQueries({ queryKey: ["trace-dlq"] })
       toast.success("Entry requeued for immediate retry")
     },
-    onError: (e) => toast.error("Failed to requeue entry", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to requeue entry", e),
   })
 }
 
@@ -41,6 +41,35 @@ export function usePurgeTraceDlq() {
       queryClient.invalidateQueries({ queryKey: ["trace-dlq"] })
       toast.success(`Purged ${result.purged} exhausted ${result.purged === 1 ? "entry" : "entries"}`)
     },
-    onError: (e) => toast.error("Failed to purge queue", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to purge queue", e),
+  })
+}
+
+/**
+ * Requeue a batch — every entry on a filtered page, say. The API has no bulk
+ * route, so this is one request per entry, all issued at once; the result
+ * says how many moved and how many refused, and the list refreshes either
+ * way.
+ */
+export function useRequeueManyTraceDlq() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(ids.map((id) => traceDlqApi.requeue(id)))
+      const failed = results.filter((r) => r.status === "rejected")
+      return { requeued: results.length - failed.length, failed: failed.length, first: failed[0] }
+    },
+    onSuccess: ({ requeued, failed, first }) => {
+      queryClient.invalidateQueries({ queryKey: ["trace-dlq"] })
+      if (failed === 0) {
+        toast.success(`Requeued ${requeued} ${requeued === 1 ? "entry" : "entries"} for immediate retry`)
+      } else {
+        toastError(
+          `Requeued ${requeued}, ${failed} refused`,
+          first && first.status === "rejected" ? first.reason : undefined,
+        )
+      }
+    },
+    onError: (e) => toastError("Failed to requeue entries", e),
   })
 }

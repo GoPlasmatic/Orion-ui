@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { getTimeZonePreference } from "@/lib/time-zone"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -26,14 +27,90 @@ export function serverTime(value: string | number | null | undefined): number | 
   return Number.isNaN(t) ? null : t
 }
 
-export function formatDate(date: string) {
-  return parseServerDate(date).toLocaleDateString("en-US", {
+/**
+ * A short distance label for a server timestamp — `just now`, `12s ago`,
+ * `4m ago`, `3h ago`, `2d ago`, or `in 40m` for an instant still ahead. Null
+ * when the value does not parse. Pair it with the absolute `formatDate` in a
+ * `title`, so a live list reads at a glance and the exact instant is a hover
+ * away.
+ */
+export function formatRelative(
+  value: string | number | null | undefined,
+  now = Date.now()
+): string | null {
+  const t = serverTime(value)
+  if (t == null) return null
+  const diff = t - now
+  const abs = Math.abs(diff)
+  if (abs < 5_000) return "just now"
+  const unit =
+    abs < 60_000
+      ? `${Math.round(abs / 1000)}s`
+      : abs < 3_600_000
+        ? `${Math.round(abs / 60_000)}m`
+        : abs < 86_400_000
+          ? `${Math.round(abs / 3_600_000)}h`
+          : `${Math.round(abs / 86_400_000)}d`
+  return diff > 0 ? `in ${unit}` : `${unit} ago`
+}
+
+/**
+ * An absolute timestamp in the display zone (Engine → Display), with the zone
+ * named: `Sep 5, 2026, 05:36 PM GMT+5:30` or `… 12:06 PM UTC`. It used to omit
+ * the zone, so a timestamp on screen and one in a server log could differ by
+ * hours with nothing to say why.
+ */
+export function formatDate(date: string | number) {
+  const utc = getTimeZonePreference() === "utc"
+  return parseServerDate(date).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: utc ? "UTC" : undefined,
+    timeZoneName: "short",
   })
+}
+
+/** The time of day in the display zone, for an axis tick: `05:36 PM`. */
+export function formatClock(date: string | number): string {
+  const utc = getTimeZonePreference() === "utc"
+  return parseServerDate(date).toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: utc ? "UTC" : undefined,
+  })
+}
+
+/** The instant as the server wrote it, for tooltips: `2026-09-05T12:06:11.000Z`. */
+export function formatInstant(date: string | number): string {
+  const t = parseServerDate(date)
+  return Number.isNaN(t.getTime()) ? String(date) : t.toISOString()
+}
+
+/**
+ * Relative while it is recent, absolute once it is history: `12m ago` for
+ * anything under a day old, `formatDate` after that. For "Updated" columns
+ * and version lists, where the question is "how long ago" until it is not.
+ */
+export function formatWhen(date: string | number | null | undefined): string {
+  const t = serverTime(date)
+  if (t == null) return "—"
+  if (Date.now() - t < 86_400_000) return formatRelative(date) ?? formatDate(date as string | number)
+  return formatDate(date as string | number)
+}
+
+/**
+ * A `datetime-local` value ("YYYY-MM-DDTHH:mm") as RFC 3339 for the server,
+ * read in the display zone: local time by default, UTC when the preference
+ * says so — the same zone the timestamps beside the filter are shown in.
+ */
+export function toRfc3339(local: string): string | undefined {
+  if (!local) return undefined
+  const utc = getTimeZonePreference() === "utc"
+  const d = new Date(utc ? `${local}:00Z` : local)
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString()
 }
 
 /**
@@ -67,11 +144,16 @@ export function parseJson(value: string | null | undefined): unknown {
  * the export naming the CLI uses.
  */
 export function downloadJson(data: unknown, basename: string): void {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
+  downloadText(JSON.stringify(data, null, 2), basename, "json", "application/json")
+}
+
+/** Hand the browser a text file: `<basename>-<date>.<ext>`. */
+export function downloadText(text: string, basename: string, ext: string, mime: string): void {
+  const blob = new Blob([text], { type: mime })
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url
-  a.download = `${basename}-${new Date().toISOString().slice(0, 10)}.json`
+  a.download = `${basename}-${new Date().toISOString().slice(0, 10)}.${ext}`
   a.click()
   URL.revokeObjectURL(url)
 }

@@ -5,10 +5,13 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/shared/error-state"
+import { Breadcrumbs } from "@/components/shared/breadcrumbs"
+import { RetrySafetyWarning } from "@/components/shared/retry-safety-warning"
 import { occurrenceStatusBadgeClass } from "@/lib/status"
 import { isRetryable, occurrenceStatusLabel } from "@/lib/cron"
 import { formatDate, formatDuration, serverTime } from "@/lib/utils"
-import { ArrowLeft, AlertCircle, RotateCcw, ScrollText } from "lucide-react"
+import { RotateCcw, ScrollText } from "lucide-react"
 
 function Meta({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
@@ -32,7 +35,7 @@ const ms = (a: string | null | undefined, b: string | null | undefined): number 
  */
 export function OccurrenceDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { data: occ, isLoading, error } = useCronOccurrence(id ?? "")
+  const { data: occ, isLoading, error, refetch } = useCronOccurrence(id ?? "")
   const retry = useRetryOccurrence()
 
   if (isLoading) {
@@ -46,15 +49,12 @@ export function OccurrenceDetailPage() {
 
   if (error || !occ) {
     return (
-      <div className="space-y-6">
-        <Button variant="ghost" asChild>
-          <Link to="/schedules"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Schedules</Link>
-        </Button>
-        <div className="flex items-center gap-2 text-destructive">
-          <AlertCircle className="h-5 w-5" />
-          <p>Failed to load occurrence{id ? ` ${id}` : ""}.</p>
-        </div>
-      </div>
+      <ErrorState
+        title={`Failed to load occurrence${id ? ` ${id}` : ""}`}
+        error={error}
+        onRetry={() => refetch()}
+        backTo={{ to: "/schedules", label: "Back to Schedules" }}
+      />
     )
   }
 
@@ -64,11 +64,13 @@ export function OccurrenceDetailPage() {
 
   return (
     <div className="space-y-6">
-      <Button variant="ghost" asChild>
-        <Link to={`/schedules?channel_id=${encodeURIComponent(occ.channel_id)}`}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to Schedules
-        </Link>
-      </Button>
+      <Breadcrumbs
+        items={[
+          { label: "Schedules", to: "/schedules" },
+          { label: occ.channel_name, to: `/schedules?channel_id=${encodeURIComponent(occ.channel_id)}` },
+          { label: `Occurrence ${occ.id.slice(0, 8)}` },
+        ]}
+      />
 
       <Card>
         <CardHeader className="pb-3">
@@ -157,6 +159,10 @@ export function OccurrenceDetailPage() {
             this attempt happened. A workflow reads both at{" "}
             <code className="font-mono">metadata.trigger</code>.
           </p>
+
+          {isRetryable(occ.status) && (
+            <RetrySafetyWarning workflowId={occ.workflow_id} action="Retrying this occurrence" />
+          )}
 
           <div className="flex flex-wrap items-center gap-2 border-t pt-4">
             {occ.trace_id ? (

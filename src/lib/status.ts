@@ -135,6 +135,14 @@ const STATUS_CHART_COLORS: Record<string, string> = {
   error: "#EF476F",
   skipped_misfire: "#FFD167",
   skipped_singleton: "#FFD167",
+  // `orion_messages_total{status}` beyond ok/error: a timeout is the engine
+  // giving up (amber), `unauthorized` was refused at the edge and never ran
+  // (info blue, the colour the map paints it), a duplicate was suppressed by
+  // the dedup guard (muted). Without these all three fell to the same grey as
+  // `pending`, so a timeout read as a suppressed duplicate.
+  timeout: "#FFD167",
+  unauthorized: "#119FCD",
+  duplicate: "#7FAFC0",
 }
 
 export function statusChartColor(status: string): string {

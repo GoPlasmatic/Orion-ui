@@ -26,6 +26,13 @@ export default defineConfig({
               priority: 3,
             },
             { name: "react-flow", test: /node_modules[\\/]@xyflow[\\/]/, priority: 2 },
+            // Reached only through the lazy `json-editor.tsx`, so this chunk is
+            // fetched the first time an editor mounts, not on the dashboard.
+            {
+              name: "codemirror",
+              test: /node_modules[\\/](@codemirror|@lezer|codemirror|style-mod|w3c-keyname|crelt)[\\/]/,
+              priority: 2,
+            },
             { name: "tanstack", test: /node_modules[\\/]@tanstack[\\/]/, priority: 1 },
           ],
         },

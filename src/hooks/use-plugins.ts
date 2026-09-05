@@ -1,5 +1,6 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { toastError } from "@/lib/toast-error"
 import { pluginsApi } from "@/api/plugins"
 import type {
   CreatePluginRequest,
@@ -9,12 +10,11 @@ import type {
   UpdatePluginRequest,
 } from "@/api/types"
 
-const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
-
 export function usePlugins(params: ListPluginsParams = {}, enabled = true) {
   return useQuery({
     queryKey: ["plugins", params],
     queryFn: () => pluginsApi.list(params),
+    placeholderData: keepPreviousData,
     enabled,
   })
 }
@@ -51,7 +51,7 @@ export function useCreatePlugin() {
       queryClient.invalidateQueries({ queryKey: ["plugins"] })
       toast.success("Plugin uploaded as draft")
     },
-    onError: (e) => toast.error("Failed to upload plugin", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to upload plugin", e),
   })
 }
 
@@ -64,7 +64,7 @@ export function useUpdatePlugin() {
       queryClient.invalidateQueries({ queryKey: ["plugins"] })
       toast.success("Plugin updated")
     },
-    onError: (e) => toast.error("Failed to update plugin", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to update plugin", e),
   })
 }
 
@@ -77,7 +77,7 @@ export function useDeletePlugin() {
       queryClient.invalidateQueries({ queryKey: ["functions"] })
       toast.success("Plugin deleted")
     },
-    onError: (e) => toast.error("Failed to delete plugin", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to delete plugin", e),
   })
 }
 
@@ -100,7 +100,7 @@ export function useChangePluginStatus() {
       queryClient.invalidateQueries({ queryKey: ["health"] })
       toast.success(`Plugin ${req.status === "active" ? "activated" : req.status}`)
     },
-    onError: (e) => toast.error("Failed to change plugin status", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to change plugin status", e),
   })
 }
 
@@ -121,7 +121,7 @@ export function useCreatePluginVersion() {
       queryClient.invalidateQueries({ queryKey: ["plugins", id, "versions"] })
       toast.success("New plugin version created")
     },
-    onError: (e) => toast.error("Failed to create plugin version", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to create plugin version", e),
   })
 }
 

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { Link } from "react-router"
 import { usePackages, usePackage } from "@/hooks/use-packages"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -129,8 +130,15 @@ function PackageDetailPanel({ name }: { name: string }) {
 
   return (
     <Card className="h-fit">
-      <CardHeader>
+      <CardHeader className="flex flex-row items-start justify-between gap-2">
         <CardTitle className="text-base">{name}</CardTitle>
+        <Link
+          to={`/audit?resource_type=package&resource_id=${encodeURIComponent(name)}`}
+          className="shrink-0 text-xs text-primary underline-offset-2 hover:underline"
+          title="Every audit row recorded against this package — staged, applied, refused"
+        >
+          Audit rows
+        </Link>
       </CardHeader>
       <CardContent className="space-y-4">
         {isLoading || !data ? (

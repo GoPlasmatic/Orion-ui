@@ -8,6 +8,7 @@ import { OAuth2LoginEditor } from "@/components/shared/oauth2-login-editor"
 import { Callout } from "@/components/ui/callout"
 import {
   ConfigSection,
+  ConnectorField,
   NumberField,
   TextField,
   SelectField,
@@ -395,11 +396,12 @@ export function ChannelConfigEditor({ value, onChange, protocol }: ChannelConfig
                 value={cache.ttl_secs}
                 onChange={(v) => setSub("cache", "ttl_secs", v)}
               />
-              <TextField
+              <ConnectorField
                 label="Connector"
                 value={cache.connector}
                 onChange={(v) => setSub("cache", "connector", v)}
-                placeholder="idempotency-cache"
+                types={["cache"]}
+                includeEmpty="Choose a cache connector"
               />
             </div>
             <StringListField
@@ -441,11 +443,12 @@ export function ChannelConfigEditor({ value, onChange, protocol }: ChannelConfig
                 onChange={(v) => setSub("deduplication", "window_secs", v)}
               />
             </div>
-            <TextField
+            <ConnectorField
               label="Connector"
               value={dedup.connector}
               onChange={(v) => setSub("deduplication", "connector", v)}
-              placeholder="idempotency-cache"
+              types={["cache"]}
+              includeEmpty="Choose a cache connector"
             />
             <SelectField
               label="On backend error"

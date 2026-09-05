@@ -12,7 +12,7 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table"
-import { formatDuration } from "@/lib/utils"
+import { formatDate, formatDuration } from "@/lib/utils"
 import { statusChartColor } from "@/lib/status"
 
 const tooltipStyle = {
@@ -20,6 +20,12 @@ const tooltipStyle = {
   border: "1px solid var(--border)",
   borderRadius: 8,
   fontSize: 12,
+}
+
+function bucketLabel(ms: number): string {
+  if (ms < 60 * 60_000) return `${ms / 60_000} min`
+  if (ms < 24 * 60 * 60_000) return `${ms / 3_600_000} h`
+  return "1 day"
 }
 
 export function TraceAnalytics() {
@@ -30,6 +36,10 @@ export function TraceAnalytics() {
   // zeroes reads as a rendering bug rather than as good news.
   const failingChannels = a.channels.filter((c) => c.errorPct > 0)
   const busiestChannels = a.channels.slice(0, 8)
+  const span =
+    a.timeline.length > 0
+      ? `${formatDate(a.timeline[0].t)} – ${formatDate(a.timeline[a.timeline.length - 1].t + a.bucketMs)}`
+      : null
 
   return (
     <div className="space-y-4">
@@ -48,6 +58,59 @@ export function TraceAnalytics() {
           <option value="500">Last 500</option>
         </Select>
       </div>
+
+      {/* Over time: the rows carry created_at, so failures get a time axis
+          without a new endpoint. Bars are the traces that started in each
+          bucket, failed on top. */}
+      {!a.isLoading && a.timeline.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex flex-wrap items-baseline justify-between gap-2">
+              <span>Over time</span>
+              <span className="text-xs font-normal text-muted-foreground" title={span ?? undefined}>
+                {bucketLabel(a.bucketMs)} buckets · {span}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={160}>
+              <BarChart data={a.timeline} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+                <XAxis
+                  dataKey="label"
+                  tickLine={false}
+                  axisLine={false}
+                  interval="preserveStartEnd"
+                  minTickGap={40}
+                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  width={32}
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                />
+                <Tooltip
+                  cursor={{ fill: "var(--muted)", opacity: 0.4 }}
+                  contentStyle={tooltipStyle}
+                  labelFormatter={(_, payload) => {
+                    const t = (payload?.[0]?.payload as { t?: number } | undefined)?.t
+                    return t != null ? `${formatDate(t)} · ${bucketLabel(a.bucketMs)}` : ""
+                  }}
+                />
+                <Bar dataKey="ok" stackId="t" fill={statusChartColor("completed")} name="ok" />
+                <Bar
+                  dataKey="failed"
+                  stackId="t"
+                  fill={statusChartColor("failed")}
+                  name="failed"
+                  radius={[3, 3, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
 
       {a.isLoading ? (
         <Skeleton className="h-64 w-full" />

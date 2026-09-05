@@ -44,7 +44,14 @@ export function JsonViewer({
               ))}
             {label}
           </button>
-          <Button variant="ghost" size="sm" onClick={handleCopy} className="h-7 px-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleCopy}
+            className="h-7 px-2"
+            aria-label={copied ? "Copied" : "Copy JSON"}
+            title="Copy JSON"
+          >
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
           </Button>
         </div>

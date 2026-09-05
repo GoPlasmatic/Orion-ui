@@ -1,16 +1,19 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { toastError } from "@/lib/toast-error"
 import { cronApi } from "@/api/cron"
 import type { ListCronOccurrencesParams } from "@/api/types"
 
-const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
-
 /** Runtime state of every active schedule. Changes every minute, so it polls. */
-export function useCronStatus(options?: { refetchInterval?: number | false }) {
+export function useCronStatus(options?: { refetchInterval?: number | false; enabled?: boolean }) {
   return useQuery({
     queryKey: ["cron", "status"],
     queryFn: () => cronApi.status(),
     refetchInterval: options?.refetchInterval ?? 15_000,
+    // A pre-1.6 server has no scheduler routes; callers outside the Schedules
+    // page gate on `health.components.cron` so an old server is not polled
+    // for a 404 every fifteen seconds.
+    enabled: options?.enabled ?? true,
   })
 }
 
@@ -21,6 +24,7 @@ export function useCronOccurrences(
   return useQuery({
     queryKey: ["cron", "occurrences", params],
     queryFn: () => cronApi.listOccurrences(params),
+    placeholderData: keepPreviousData,
     refetchInterval: options?.refetchInterval,
     enabled: options?.enabled ?? true,
   })
@@ -47,6 +51,6 @@ export function useRetryOccurrence() {
       queryClient.invalidateQueries({ queryKey: ["cron"] })
       toast.success("Occurrence queued for another attempt")
     },
-    onError: (e) => toast.error("Failed to retry occurrence", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to retry occurrence", e),
   })
 }

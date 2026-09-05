@@ -1,5 +1,6 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { toastError } from "@/lib/toast-error"
 import { channelsApi } from "@/api/channels"
 import type {
   CreateChannelRequest,
@@ -9,12 +10,14 @@ import type {
   UpdateChannelRequest,
 } from "@/api/types"
 
-const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
-
 export function useChannels(params: ListChannelsParams = {}, enabled = true) {
   return useQuery({
     queryKey: ["channels", params],
     queryFn: () => channelsApi.list(params),
+    // Paging or filtering changes the query key; without this the table drops
+    // to a skeleton on every page turn instead of holding the last page while
+    // the next one loads. Every paginated list hook does the same.
+    placeholderData: keepPreviousData,
     enabled,
   })
 }
@@ -43,7 +46,7 @@ export function useCreateChannel() {
       queryClient.invalidateQueries({ queryKey: ["channels"] })
       toast.success("Channel created")
     },
-    onError: (e) => toast.error("Failed to create channel", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to create channel", e),
   })
 }
 
@@ -56,7 +59,7 @@ export function useUpdateChannel() {
       queryClient.invalidateQueries({ queryKey: ["channels"] })
       toast.success("Channel updated")
     },
-    onError: (e) => toast.error("Failed to update channel", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to update channel", e),
   })
 }
 
@@ -68,7 +71,7 @@ export function useDeleteChannel() {
       queryClient.invalidateQueries({ queryKey: ["channels"] })
       toast.success("Channel deleted")
     },
-    onError: (e) => toast.error("Failed to delete channel", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to delete channel", e),
   })
 }
 
@@ -82,7 +85,7 @@ export function useChangeChannelStatus() {
       queryClient.invalidateQueries({ queryKey: ["engine"] })
       toast.success(`Channel ${req.status === "active" ? "activated" : req.status}`)
     },
-    onError: (e) => toast.error("Failed to change channel status", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to change channel status", e),
   })
 }
 
@@ -95,7 +98,7 @@ export function useCreateChannelVersion() {
       queryClient.invalidateQueries({ queryKey: ["channels", id, "versions"] })
       toast.success("New channel version created")
     },
-    onError: (e) => toast.error("Failed to create channel version", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to create channel version", e),
   })
 }
 
@@ -130,7 +133,7 @@ export function useTriggerChannel() {
             : `Attempt ${occurrence.attempt} · ${occurrence.status}`,
       })
     },
-    onError: (e) => toast.error("Failed to trigger channel", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to trigger channel", e),
   })
 }
 

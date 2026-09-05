@@ -1,13 +1,14 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router"
 import { toast } from "sonner"
 import { usePlugins, useImportPlugins } from "@/hooks/use-plugins"
 import { useHealth } from "@/hooks/use-health"
 import { pluginsApi } from "@/api/plugins"
-import type { CreatePluginRequest, EntityStatus, Plugin } from "@/api/types"
+import type { CreatePluginRequest, EntityStatus, Plugin, SortOrder } from "@/api/types"
 import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
-import { listTableFeatures } from "@/lib/table"
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
+import { activatableRow, listTableFeatures, ROW_ACTIVATABLE } from "@/lib/table"
+import { useUrlFilters, nextSort } from "@/lib/use-url-filters"
+import { Table, TableHeader, TableBody, TableRow, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
@@ -20,55 +21,103 @@ import { PaginationFooter } from "@/components/shared/pagination"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { EmptyState } from "@/components/shared/empty-state"
 import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
+import { SortableHead } from "@/components/shared/sortable-head"
 import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
-import { formatDate, downloadJson } from "@/lib/utils"
+import { pluginHealthBadgeClass } from "@/lib/status"
+import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
 import { Blocks, Download, Plus, Upload } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, Plugin>()
 
 const FUNCTIONS_SHOWN = 3
 
-const columns = columnHelper.columns([
-  columnHelper.accessor("plugin_id", {
-    header: "Plugin",
-    cell: (info) => (
-      <div className="min-w-0">
-        <p className="font-mono text-sm font-medium">{info.getValue()}</p>
-        <p className="text-xs text-muted-foreground">{info.row.original.plugin_version}</p>
-      </div>
-    ),
-  }),
-  columnHelper.accessor("functions", {
-    header: "Functions",
-    cell: (info) => {
-      const fns = info.getValue()
-      return (
-        <div className="flex flex-wrap gap-1">
-          {fns.slice(0, FUNCTIONS_SHOWN).map((fn) => (
-            <Badge key={fn} variant="outline" className="font-mono text-[11px]">
-              {fn}
-            </Badge>
-          ))}
-          {fns.length > FUNCTIONS_SHOWN && (
-            <span className="text-xs text-muted-foreground">+{fns.length - FUNCTIONS_SHOWN}</span>
-          )}
+const FILTER_KEYS = ["status", "tag", "sort", "order"] as const
+
+/** Column id → the server's `sort_by` field. */
+const SORT_FIELDS: Record<string, string> = {
+  plugin_id: "plugin_id",
+  status: "status",
+  updated_at: "updated_at",
+}
+
+/** What this node did with a plugin version: loaded it, failed, or has no reason to. */
+type NodeLoad = { state: "loaded" | "failed"; detail?: string }
+
+/**
+ * Columns take this node's load map. Load state is per replica — a plugin
+ * active in the database may have failed to compile here — and the row is
+ * where that belongs, not only in a banner counting failures.
+ */
+function buildColumns(loads: ReadonlyMap<string, NodeLoad>) {
+  return columnHelper.columns([
+    columnHelper.accessor("plugin_id", {
+      header: "Plugin",
+      cell: (info) => (
+        <div className="min-w-0">
+          <p className="font-mono text-sm font-medium">{info.getValue()}</p>
+          <p className="text-xs text-muted-foreground">{info.row.original.plugin_version}</p>
         </div>
-      )
-    },
-  }),
-  columnHelper.accessor("status", {
-    header: "Status",
-    cell: (info) => <StatusBadge status={info.getValue()} />,
-  }),
-  columnHelper.accessor("version", {
-    header: "Version",
-    cell: (info) => <span className="text-muted-foreground">v{info.getValue()}</span>,
-  }),
-  columnHelper.accessor("updated_at", {
-    header: "Updated",
-    cell: (info) => <span className="text-muted-foreground">{formatDate(info.getValue())}</span>,
-  }),
-])
+      ),
+    }),
+    columnHelper.accessor("functions", {
+      header: "Functions",
+      cell: (info) => {
+        const fns = info.getValue()
+        return (
+          <div className="flex flex-wrap gap-1">
+            {fns.slice(0, FUNCTIONS_SHOWN).map((fn) => (
+              <Badge key={fn} variant="outline" className="font-mono text-[11px]">
+                {fn}
+              </Badge>
+            ))}
+            {fns.length > FUNCTIONS_SHOWN && (
+              <span className="text-xs text-muted-foreground">+{fns.length - FUNCTIONS_SHOWN}</span>
+            )}
+          </div>
+        )
+      },
+    }),
+    columnHelper.accessor("status", {
+      header: "Status",
+      cell: (info) => <StatusBadge status={info.getValue()} />,
+    }),
+    columnHelper.accessor("digest", {
+      id: "node",
+      header: "This node",
+      cell: (info) => {
+        const row = info.row.original
+        const load = loads.get(row.digest) ?? loads.get(`${row.plugin_id}@${row.version}`)
+        if (!load) {
+          return (
+            <span
+              className="text-xs text-muted-foreground"
+              title={row.status === "active" ? "Not reported by this node's health detail" : "Only an active version is loaded"}
+            >
+              —
+            </span>
+          )
+        }
+        return (
+          <Badge variant="outline" className={pluginHealthBadgeClass(load.state)} title={load.detail}>
+            {load.state === "loaded" ? "loaded" : "failed to load"}
+          </Badge>
+        )
+      },
+    }),
+    columnHelper.accessor("version", {
+      header: "Version",
+      cell: (info) => <span className="text-muted-foreground">v{info.getValue()}</span>,
+    }),
+    columnHelper.accessor("updated_at", {
+      header: "Updated",
+      cell: (info) => (
+        <span className="text-muted-foreground" title={formatDate(info.getValue())}>
+          {formatWhen(info.getValue())}
+        </span>
+      ),
+    }),
+  ])
+}
 
 /**
  * WebAssembly plugins (Orion 1.6): custom task functions in a sandbox. A
@@ -78,19 +127,47 @@ const columns = columnHelper.columns([
 export function PluginsPage() {
   const navigate = useNavigate()
   const { offset, reset: resetPage, prev, next } = usePagination()
-  const [statusFilter, setStatusFilter] = useState<EntityStatus | "">("")
-  const [tagFilter, setTagFilter] = useState("")
+  const { values: filters, set } = useUrlFilters(FILTER_KEYS)
+  const statusFilter = filters.status as EntityStatus | ""
+  const sortBy = SORT_FIELDS[filters.sort] ? filters.sort : ""
+  const sortOrder = (filters.order === "asc" || filters.order === "desc" ? filters.order : "") as SortOrder | ""
   const [showImport, setShowImport] = useState(false)
   const [exporting, setExporting] = useState(false)
   const { data: health } = useHealth()
   const importPlugins = useImportPlugins()
 
+  const update = (patch: Partial<Record<(typeof FILTER_KEYS)[number], string>>) => {
+    set(patch)
+    resetPage()
+  }
+
   const { data, isLoading, error } = usePlugins({
     limit: PAGE_SIZE,
     offset,
     status: statusFilter || undefined,
-    tag: tagFilter || undefined,
+    tag: filters.tag || undefined,
+    sort_by: sortBy || undefined,
+    sort_order: sortBy ? sortOrder || undefined : undefined,
   })
+
+  const loads = useMemo(() => {
+    const m = new Map<string, NodeLoad>()
+    for (const p of health?.plugins?.loaded ?? []) {
+      const entry: NodeLoad = {
+        state: "loaded",
+        detail: p.compile_ms != null ? `Compiled in ${Math.round(p.compile_ms)} ms` : undefined,
+      }
+      m.set(p.digest, entry)
+      m.set(`${p.plugin}@${p.version}`, entry)
+    }
+    for (const p of health?.plugins?.failed_to_load ?? []) {
+      const entry: NodeLoad = { state: "failed", detail: `${p.stage}: ${p.reason}` }
+      m.set(p.digest, entry)
+      m.set(`${p.plugin}@${p.version}`, entry)
+    }
+    return m
+  }, [health?.plugins])
+  const columns = useMemo(() => buildColumns(loads), [loads])
 
   const table = useTable({
     features: listTableFeatures,
@@ -106,7 +183,7 @@ export function PluginsPage() {
     try {
       const plugins = await pluginsApi.export({
         status: statusFilter || undefined,
-        tag: tagFilter || undefined,
+        tag: filters.tag || undefined,
         include_artifacts: true,
       })
       downloadJson(plugins, "orion-plugins")
@@ -165,7 +242,7 @@ export function PluginsPage() {
           {failedLoads.length > 0
             ? `${failedLoads.length} active plugin version${failedLoads.length === 1 ? "" : "s"} did not load on this node — the workflows naming ${failedLoads.length === 1 ? "its" : "their"} functions are quarantined.`
             : "An active plugin did not load on this node; the workflows naming its functions are quarantined."}{" "}
-          <Link to="/settings" className="underline underline-offset-2">
+          <Link to="/engine" className="underline underline-offset-2">
             See the health report
           </Link>
         </Callout>
@@ -174,10 +251,7 @@ export function PluginsPage() {
       <FilterBar>
         <Select
           value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value as EntityStatus | "")
-            resetPage()
-          }}
+          onChange={(e) => update({ status: e.target.value })}
           className={FILTER_W}
           aria-label="Filter by status"
         >
@@ -187,11 +261,8 @@ export function PluginsPage() {
           <option value="archived">Archived</option>
         </Select>
         <Input
-          value={tagFilter}
-          onChange={(e) => {
-            setTagFilter(e.target.value)
-            resetPage()
-          }}
+          value={filters.tag}
+          onChange={(e) => update({ tag: e.target.value })}
           placeholder="Filter by tag..."
           className={FILTER_W}
           aria-label="Filter by tag"
@@ -209,17 +280,26 @@ export function PluginsPage() {
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
-                    {flexRender(header.column.columnDef.header, header.getContext())}
-                  </TableHead>
-                ))}
+                {headerGroup.headers.map((header) => {
+                  const field = SORT_FIELDS[header.column.id]
+                  return (
+                    <SortableHead
+                      key={header.id}
+                      field={field}
+                      sort={sortBy}
+                      order={sortOrder}
+                      onSort={field ? () => update(nextSort({ sort: sortBy, order: sortOrder }, field, field === "updated_at")) : undefined}
+                    >
+                      {flexRender(header.column.columnDef.header, header.getContext())}
+                    </SortableHead>
+                  )
+                })}
               </TableRow>
             ))}
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              Array.from({ length: 4 }).map((_, i) => (
+              Array.from({ length: PAGE_SIZE }).map((_, i) => (
                 <TableRow key={i}>
                   {columns.map((_, j) => (
                     <TableCell key={j}>
@@ -252,8 +332,10 @@ export function PluginsPage() {
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
-                  className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => navigate(`/plugins/${encodeURIComponent(row.original.plugin_id)}`)}
+                  className={ROW_ACTIVATABLE}
+                  {...activatableRow(() =>
+                    navigate(`/plugins/${encodeURIComponent(row.original.plugin_id)}`),
+                  )}
                 >
                   {row.getAllCells().map((cell) => (
                     <TableCell key={cell.id}>

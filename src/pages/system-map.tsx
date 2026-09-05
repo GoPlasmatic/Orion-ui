@@ -1,9 +1,17 @@
-import { useMemo, useState } from "react"
-import { Link } from "react-router"
+import { useCallback, useMemo, useState } from "react"
+import { Link, useSearchParams } from "react-router"
 import { useChannels } from "@/hooks/use-channels"
 import { useWorkflows } from "@/hooks/use-workflows"
 import { useConnectors } from "@/hooks/use-connectors"
-import { useChannelTraffic } from "@/hooks/use-metrics"
+import {
+  DEFAULT_TRAFFIC_WINDOW,
+  TRAFFIC_WINDOWS,
+  trafficWindowLabel,
+  useChannelTraffic,
+} from "@/hooks/use-metrics"
+import { useMapFaults } from "@/hooks/use-faults"
+import { useCronStatus } from "@/hooks/use-cron"
+import { faultsFor } from "@/lib/faults"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -11,11 +19,13 @@ import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Callout } from "@/components/ui/callout"
+import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { PageHeader } from "@/components/shared/page-header"
 import { FilterBar } from "@/components/shared/filter-bar"
 import { EmptyState } from "@/components/shared/empty-state"
 import { TrafficMap } from "@/components/graph/traffic-map"
 import { InspectorPlaceholder, MapInspector } from "@/components/graph/map-inspector"
+import { HUB_THRESHOLD } from "@/components/graph/traffic-node"
 import { buildIndex } from "@/lib/topology"
 import { buildSystemGraph } from "@/lib/system-graph"
 import {
@@ -24,13 +34,23 @@ import {
   deriveLoad,
   formatPct,
   healthDot,
-  healthLabel,
+  legendFor,
   type ColorMetric,
   type HealthLevel,
   type SizeMetric,
 } from "@/lib/traffic-encoding"
 import { cn } from "@/lib/utils"
-import { AlertTriangle, Network, Pause, Play, Plug, Search } from "lucide-react"
+import {
+  AlertTriangle,
+  HelpCircle,
+  Network,
+  Pause,
+  Play,
+  Plug,
+  Search,
+  ShieldAlert,
+  Unplug,
+} from "lucide-react"
 
 /**
  * The System Map, as a live traffic view of the channel call graph.
@@ -45,17 +65,11 @@ import { AlertTriangle, Network, Pause, Play, Plug, Search } from "lucide-react"
  * encoding: dot area is throughput, colour is health, edge weight is the
  * caller's rate. What is busy and what is broken should be legible before you
  * read a single label.
+ *
+ * Every view setting lives in the URL — `select`, `q`, `tag`, `lifecycle`,
+ * `window`, `size`, `colour` — so a dashboard alert can land on the failing
+ * channel, and a link pasted into an incident thread opens the same view.
  */
-
-/**
- * Bounded by the metrics ring buffer — 60 samples at a 10s poll. Asking for
- * longer than the buffer holds would report a window it cannot actually cover.
- */
-const WINDOWS = [
-  { value: 60, label: "1 min" },
-  { value: 300, label: "5 min" },
-  { value: 600, label: "10 min" },
-]
 
 type LifecycleFilter = "active" | "all"
 
@@ -65,37 +79,163 @@ function formatSpan(seconds: number): string {
   return `last ${Math.round(seconds / 60)}m`
 }
 
-function LegendSwatch({ level }: { level: HealthLevel }) {
+function LegendSwatch({ level, label }: { level: HealthLevel; label: string }) {
   return (
     <span className="flex items-center gap-1.5">
-      <span className={cn("h-2 w-2 rounded-full", healthDot[level])} />
-      <span className="text-muted-foreground">{healthLabel[level]}</span>
+      <span className={cn("h-2 w-2 shrink-0 rounded-full", healthDot[level])} />
+      <span className="text-muted-foreground">{label}</span>
     </span>
   )
 }
+
+/**
+ * The encodings, written down. The map says a lot through shape — dot area,
+ * a hollow ring, a thick ring, a dashed border, a card that is small — and
+ * none of it was explained anywhere a person could read it.
+ */
+function MapHelpDialog({ colorMetric, onClose }: { colorMetric: ColorMetric; onClose: () => void }) {
+  const colorName = COLOR_METRICS.find((m) => m.value === colorMetric)?.label ?? "Health"
+  return (
+    <Dialog open onClose={onClose} aria-label="How to read the System Map">
+      <DialogHeader>
+        <DialogTitle>How to read this map</DialogTitle>
+      </DialogHeader>
+      <DialogBody className="text-sm">
+        <section className="space-y-1">
+          <p className="font-medium">Lanes and clusters</p>
+          <p className="text-muted-foreground">
+            Entry channels — reached over their route, or started by a schedule — sit in the left
+            lane. Each lane to the right is one more <code className="font-mono">channel_call</code>{" "}
+            hop from an entry, so a hub sits downstream of everything that reaches it. Entries that
+            call the same set of channels are boxed together as a cluster with one arrow per callee.
+          </p>
+        </section>
+        <section className="space-y-1">
+          <p className="font-medium">Colour · {colorName}</p>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+            {legendFor(colorMetric).map((entry) => (
+              <LegendSwatch key={entry.level} level={entry.level} label={entry.label} />
+            ))}
+          </div>
+        </section>
+        <section className="space-y-1">
+          <p className="font-medium">Size</p>
+          <p className="text-muted-foreground">
+            The dot's <em>area</em> is the selected size metric, scaled by square root against the
+            busiest channel on the canvas — ten times the traffic is a little over three times the
+            diameter, so one hub does not swallow the map.
+          </p>
+        </section>
+        <section className="space-y-1">
+          <p className="font-medium">Shapes</p>
+          <ul className="space-y-1 text-muted-foreground">
+            <li>
+              <span className="font-medium text-foreground">Hollow dot, </span>
+              <span className="font-mono">≤ n/m</span>: nothing reaches this channel from outside,
+              so the exporter carries no series for it. The rate is inherited from its callers and
+              is an upper bound.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Thick ring:</span> a hub — called by{" "}
+              {HUB_THRESHOLD} or more channels.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Dashed border:</span> named by a{" "}
+              <code className="font-mono">channel_call</code> but not registered. The call fails at
+              runtime.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Small card:</span> no traffic in the
+              window. Present for context, drawn quiet.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Edge width:</span> the caller's own
+              rate. Nothing attributes an arrival to a particular caller, so it is a bound, not a
+              measurement.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Dimming:</span> selecting a channel dims
+              everything outside its blast radius — one call away by default; the inspector widens
+              it to two hops or everything reachable.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Zoomed out:</span> cards become a dot
+              and a large name, so a channel can be found at overview scale. Zoom in for the
+              figures.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Clusters:</span> on a big map a crowd of
+              entries with the same callees folds into one summary box — count, combined rate,
+              worst health. Click the box to open it, click its frame to fold it again.
+            </li>
+          </ul>
+        </section>
+      </DialogBody>
+      <DialogFooter>
+        <Button onClick={onClose}>Close</Button>
+      </DialogFooter>
+    </Dialog>
+  )
+}
+
+const isSizeMetric = (v: string): v is SizeMetric => SIZE_METRICS.some((m) => m.value === v)
+const isColorMetric = (v: string): v is ColorMetric => COLOR_METRICS.some((m) => m.value === v)
 
 export function SystemMapPage() {
   const { data: channels, isLoading } = useChannels({ limit: 1000 })
   const { data: workflows } = useWorkflows({ limit: 1000 })
   const { data: connectors } = useConnectors({ limit: 1000 })
 
-  const [windowSec, setWindowSec] = useState(300)
-  const [paused, setPaused] = useState(false)
-  const [lifecycle, setLifecycle] = useState<LifecycleFilter>("active")
-  const [sizeMetric, setSizeMetric] = useState<SizeMetric>("rate")
-  const [colorMetric, setColorMetric] = useState<ColorMetric>("health")
-  const [search, setSearch] = useState("")
-  const [tag, setTag] = useState("")
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  // Selections made from a list rather than the canvas ask the canvas to travel.
-  const [revealToken, setRevealToken] = useState(0)
+  // View state is the URL. `replace` on every change so typing a search does
+  // not fill the history with one entry per keystroke.
+  const [params, setParams] = useSearchParams()
+  const setParam = useCallback(
+    (key: string, value: string | null) => {
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          if (value) next.set(key, value)
+          else next.delete(key)
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setParams],
+  )
+  const requestedWindow = Number(params.get("window"))
+  const windowSec = TRAFFIC_WINDOWS.some((w) => w.value === requestedWindow)
+    ? requestedWindow
+    : DEFAULT_TRAFFIC_WINDOW
+  const lifecycle: LifecycleFilter = params.get("lifecycle") === "all" ? "all" : "active"
+  const sizeParam = params.get("size") ?? ""
+  const sizeMetric: SizeMetric = isSizeMetric(sizeParam) ? sizeParam : "rate"
+  const colorParam = params.get("colour") ?? ""
+  const colorMetric: ColorMetric = isColorMetric(colorParam) ? colorParam : "health"
+  const search = params.get("q") ?? ""
+  const tag = params.get("tag") ?? ""
+  const selectedId = params.get("select") || null
+  // Blast radius: how far the focus reaches from the selection. One hop by
+  // default — in a connected system "everything reachable" dims nothing.
+  const hopsParam = params.get("hops")
+  const hops = hopsParam === "all" ? Infinity : hopsParam === "2" ? 2 : 1
 
+  const [paused, setPaused] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+  // Selections made from a list rather than the canvas ask the canvas to
+  // travel. A selection that arrived in the URL counts: the page opened on it.
+  const [revealToken, setRevealToken] = useState(() => (params.get("select") ? 1 : 0))
+
+  const setSelectedId = useCallback((id: string | null) => setParam("select", id), [setParam])
   function revealChannel(id: string) {
     setSelectedId(id)
     setRevealToken((t) => t + 1)
   }
 
   const traffic = useChannelTraffic(windowSec, paused)
+  // Quarantines, failed connectors and open breakers: what the counters
+  // cannot show, drawn on the nodes and connectors they touch.
+  const faults = useMapFaults()
 
   const idx = useMemo(
     () => buildIndex(channels?.data ?? [], workflows?.data ?? [], connectors?.data ?? []),
@@ -120,27 +260,54 @@ export function SystemMapPage() {
    * never severs a call from the thing on the other side of it.
    */
   const visible = useMemo(() => {
-    const term = search.trim().toLowerCase()
     let seeds = graph.nodes
 
     if (lifecycle === "active") seeds = seeds.filter((n) => n.status === "active")
     if (tag) seeds = seeds.filter((n) => n.tags.includes(tag))
-    if (term) {
-      seeds = seeds.filter(
-        (n) =>
-          n.name.toLowerCase().includes(term) ||
-          (n.route ?? "").toLowerCase().includes(term) ||
-          (n.workflowName ?? "").toLowerCase().includes(term) ||
-          n.tags.some((t) => t.toLowerCase().includes(term)),
-      )
-    }
 
     const ids = new Set(seeds.map((n) => n.id))
     for (const node of seeds) {
       for (const other of [...node.callers, ...node.callees]) ids.add(other)
     }
     return ids
-  }, [graph.nodes, lifecycle, tag, search])
+  }, [graph.nodes, lifecycle, tag])
+
+  /**
+   * Search highlights rather than filters: the hits stay lit and everything
+   * else dims, so the canvas holds still while a name is typed instead of
+   * re-laying out on every keystroke. Null when nothing is typed.
+   */
+  const matches = useMemo(() => {
+    const term = search.trim().toLowerCase()
+    if (!term) return null
+    return new Set(
+      graph.nodes
+        .filter(
+          (n) =>
+            visible.has(n.id) &&
+            (n.name.toLowerCase().includes(term) ||
+              (n.route ?? "").toLowerCase().includes(term) ||
+              (n.topic ?? "").toLowerCase().includes(term) ||
+              (n.workflowName ?? "").toLowerCase().includes(term) ||
+              n.tags.some((t) => t.toLowerCase().includes(term))),
+        )
+        .map((n) => n.id),
+    )
+  }, [graph.nodes, visible, search])
+
+  // A cron channel's next fire, for its card: the scheduler's own answer,
+  // asked only while the map holds a schedule (a pre-1.6 server has no route).
+  const hasSchedules = useMemo(() => graph.nodes.some((n) => n.schedule), [graph.nodes])
+  const { data: cronStatus } = useCronStatus({ enabled: hasSchedules })
+  const nextFire = useMemo(
+    () =>
+      new Map(
+        (cronStatus ?? [])
+          .filter((s) => s.next_fire_at)
+          .map((s) => [s.channel_name, s.next_fire_at as string]),
+      ),
+    [cronStatus],
+  )
 
   const selected = selectedId ? (graph.byId.get(selectedId) ?? null) : null
 
@@ -154,7 +321,16 @@ export function SystemMapPage() {
     [traffic.channels],
   )
 
-  const spanLabel = traffic.hasRate ? formatSpan(traffic.spanSec) : "waiting for a second sample"
+  const metricsOff = !traffic.isLoading && !traffic.available
+  const spanLabel = metricsOff
+    ? "metrics off"
+    : traffic.hasRate
+      ? formatSpan(traffic.spanSec)
+      : "waiting for a second sample"
+  const windowLabel = trafficWindowLabel(windowSec)
+  const quarantinedNames = [...faults.quarantined.keys()].filter((name) => graph.byId.has(name))
+  const failedConnectors = graph.connectors.filter((c) => faults.failedConnectors.has(c.name))
+  const legend = legendFor(colorMetric)
 
   if (isLoading) {
     return (
@@ -185,40 +361,69 @@ export function SystemMapPage() {
         description="Every live channel, entry points on the left and what they call to the right — dot size is throughput, colour is health"
       >
         <Button
-          variant={paused ? "outline" : "secondary"}
+          variant="outline"
           size="sm"
           onClick={() => setPaused((p) => !p)}
+          title={paused ? "Resume the 10 s metrics poll" : "Stop polling; the canvas holds still"}
         >
-          {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
-          {paused ? "Paused" : "Live"}
+          {paused ? (
+            <Play className="h-3.5 w-3.5" />
+          ) : (
+            <span className="relative flex h-3.5 w-3.5 items-center justify-center">
+              <span className="absolute h-2 w-2 animate-ping rounded-full bg-success/60" />
+              <Pause className="relative h-3.5 w-3.5" />
+            </span>
+          )}
+          {paused ? "Resume" : "Pause"}
         </Button>
         <Select
           value={String(windowSec)}
-          onChange={(e) => setWindowSec(Number(e.target.value))}
-          className="w-28"
+          onChange={(e) =>
+            setParam("window", e.target.value === String(DEFAULT_TRAFFIC_WINDOW) ? null : e.target.value)
+          }
+          className="w-40"
           aria-label="Traffic window"
+          title={
+            traffic.hasRate && traffic.spanSec < windowSec - 5
+              ? `${windowLabel} requested; only the ${spanLabel} is buffered so far`
+              : undefined
+          }
         >
-          {WINDOWS.map((w) => (
+          {TRAFFIC_WINDOWS.map((w) => (
             <option key={w.value} value={w.value}>
               {w.label}
+              {w.value === windowSec && traffic.hasRate && traffic.spanSec < w.value - 5
+                ? ` · ${spanLabel} so far`
+                : ""}
             </option>
           ))}
         </Select>
       </PageHeader>
 
       <FilterBar>
-        <div className="relative w-full sm:w-56">
+        <div className="relative w-full sm:w-64">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search channels, routes, tags…"
+            placeholder="Find a channel, route, topic or tag"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setParam("q", e.target.value || null)}
+            onKeyDown={(e) => {
+              // Enter selects the best match and travels to it; typing alone
+              // lights the matches and dims the rest.
+              if (e.key !== "Enter" || !matches) return
+              const term = search.trim().toLowerCase()
+              const hit =
+                graph.nodes.find((n) => matches.has(n.id) && n.name.toLowerCase() === term) ??
+                graph.nodes.find((n) => matches.has(n.id))
+              if (hit) revealChannel(hit.id)
+            }}
             className="pl-8"
+            aria-label="Search channels"
           />
         </div>
         <Select
           value={lifecycle}
-          onChange={(e) => setLifecycle(e.target.value as LifecycleFilter)}
+          onChange={(e) => setParam("lifecycle", e.target.value === "all" ? "all" : null)}
           className="w-full sm:w-40"
           aria-label="Lifecycle"
         >
@@ -228,7 +433,7 @@ export function SystemMapPage() {
         {graph.tags.length > 0 && (
           <Select
             value={tag}
-            onChange={(e) => setTag(e.target.value)}
+            onChange={(e) => setParam("tag", e.target.value || null)}
             className="w-full sm:w-36"
             aria-label="Tag"
           >
@@ -242,7 +447,7 @@ export function SystemMapPage() {
         )}
         <Select
           value={sizeMetric}
-          onChange={(e) => setSizeMetric(e.target.value as SizeMetric)}
+          onChange={(e) => setParam("size", e.target.value === "rate" ? null : e.target.value)}
           className="w-full sm:w-48"
           aria-label="Size by"
         >
@@ -254,8 +459,14 @@ export function SystemMapPage() {
         </Select>
         <Select
           value={colorMetric}
-          onChange={(e) => setColorMetric(e.target.value as ColorMetric)}
-          className="w-full sm:w-36"
+          onChange={(e) => {
+            const next = e.target.value
+            setParam("colour", next === "health" ? null : next)
+            // Colouring by lifecycle with only live channels shown is one
+            // colour; widen the filter so the mode has something to say.
+            if (next === "lifecycle" && lifecycle === "active") setParam("lifecycle", "all")
+          }}
+          className="w-full sm:w-40"
           aria-label="Colour by"
         >
           {COLOR_METRICS.map((m) => (
@@ -265,49 +476,111 @@ export function SystemMapPage() {
           ))}
         </Select>
 
-        <div className="ml-auto hidden items-center gap-3 text-[11px] lg:flex">
-          <LegendSwatch level="healthy" />
-          <LegendSwatch level="warning" />
-          <LegendSwatch level="critical" />
-          <LegendSwatch level="rejected" />
-          <LegendSwatch level="idle" />
+        <div className="ml-auto flex items-center gap-3 text-xs">
+          <div className="hidden flex-wrap items-center gap-3 md:flex">
+            {legend.map((entry) => (
+              <LegendSwatch key={entry.level} level={entry.level} label={entry.label} />
+            ))}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setHelpOpen(true)}
+            aria-label="How to read this map"
+            title="How to read this map"
+            className="text-muted-foreground"
+          >
+            <HelpCircle />
+          </Button>
         </div>
       </FilterBar>
 
-      {failing.length > 0 && (
+      {(failing.length > 0 || quarantinedNames.length > 0 || failedConnectors.length > 0) && (
         <Callout variant="destructive" className="py-2">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            <span className="font-medium">
-              {failing.length} channel{failing.length === 1 ? "" : "s"} failing in the {spanLabel}:
-            </span>
-            {failing.slice(0, 4).map((c) => (
-              <button
-                key={c.channel}
-                type="button"
-                onClick={() => revealChannel(c.channel)}
-                className="rounded font-mono underline underline-offset-2 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-              >
-                {c.channel} {formatPct(c.errorPct)}
-              </button>
-            ))}
-            {failing.length > 4 && <span>+{failing.length - 4} more</span>}
+          <div className="space-y-1 text-xs">
+            {failing.length > 0 && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span className="font-medium">
+                  {failing.length} channel{failing.length === 1 ? "" : "s"} failing in the {spanLabel}:
+                </span>
+                {failing.slice(0, 4).map((c) => (
+                  <button
+                    key={c.channel}
+                    type="button"
+                    onClick={() => revealChannel(c.channel)}
+                    className="rounded font-mono underline underline-offset-2 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  >
+                    {c.channel} {formatPct(c.errorPct)}
+                  </button>
+                ))}
+                {failing.length > 4 && <span>+{failing.length - 4} more</span>}
+              </div>
+            )}
+            {quarantinedNames.length > 0 && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+                <span className="font-medium">
+                  {quarantinedNames.length} quarantined — refused at load, route not served:
+                </span>
+                {quarantinedNames.slice(0, 4).map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => revealChannel(name)}
+                    className="rounded font-mono underline underline-offset-2 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                    title={faults.quarantined.get(name) || undefined}
+                  >
+                    {name}
+                  </button>
+                ))}
+                {quarantinedNames.length > 4 && <span>+{quarantinedNames.length - 4} more</span>}
+              </div>
+            )}
+            {failedConnectors.length > 0 && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <Unplug className="h-3.5 w-3.5 shrink-0" />
+                <span className="font-medium">
+                  {failedConnectors.length} connector{failedConnectors.length === 1 ? "" : "s"} failed
+                  to load — every task using {failedConnectors.length === 1 ? "it" : "them"} is failing:
+                </span>
+                {failedConnectors.map((c) => (
+                  <Link
+                    key={c.name}
+                    to={c.known ? `/connectors/${c.refId}?test=1` : "/connectors"}
+                    className="rounded font-mono underline underline-offset-2 hover:opacity-80"
+                  >
+                    {c.name} · {c.users.length} channel{c.users.length === 1 ? "" : "s"}
+                  </Link>
+                ))}
+              </div>
+            )}
           </div>
         </Callout>
       )}
 
-      {traffic.activeCount === 0 && (
+      {/* Two different reasons for a quiet map, and they used to share one
+          message that sent the operator to the console to "light it up". */}
+      {metricsOff ? (
         <Callout variant="muted" className="py-2 text-xs">
-          No channel has carried traffic in the {spanLabel}. Send a request from the{" "}
-          <Link to="/console" className="underline underline-offset-2">
-            Data Console
-          </Link>{" "}
-          and it will light up here.
+          Metrics are off on this server (<code className="font-mono">[metrics]</code> in the engine
+          config), so the map shows structure only — no rates, no health, no latency.
         </Callout>
+      ) : (
+        traffic.available &&
+        traffic.activeCount === 0 && (
+          <Callout variant="muted" className="py-2 text-xs">
+            No channel has carried traffic in the {spanLabel}. Send a request from the{" "}
+            <Link to="/console" className="underline underline-offset-2">
+              Data Console
+            </Link>{" "}
+            and it will light up here.
+          </Callout>
+        )
       )}
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <Card className="relative min-h-0 overflow-hidden p-0">
+        <Card className="relative min-h-[50vh] overflow-hidden p-0 lg:min-h-0">
           <TrafficMap
             graph={graph}
             traffic={traffic}
@@ -316,11 +589,20 @@ export function SystemMapPage() {
             sizeMetric={sizeMetric}
             colorMetric={colorMetric}
             revealToken={revealToken}
+            faults={faults}
+            hops={hops}
+            highlight={matches}
+            nextFire={nextFire}
             onSelect={(node) => setSelectedId(node?.id ?? null)}
           />
-          <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border bg-card/90 px-2 py-1 text-[10px] text-muted-foreground shadow-xs backdrop-blur">
-            {visible.size} of {graph.nodes.length} channels · {traffic.activeCount} carrying
-            traffic · {spanLabel}
+          <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border bg-card/90 px-2 py-1 text-xs text-muted-foreground shadow-xs backdrop-blur">
+            {visible.size} of {graph.nodes.length} channels ·{" "}
+            {matches
+              ? matches.size === 0
+                ? `nothing matches "${search.trim()}" · `
+                : `${matches.size} match${matches.size === 1 ? "" : "es"} · `
+              : ""}
+            {traffic.activeCount} carrying traffic · {spanLabel}
           </div>
         </Card>
 
@@ -329,10 +611,15 @@ export function SystemMapPage() {
             <MapInspector
               node={selected}
               traffic={traffic.byChannel.get(selected.id)}
+              series={traffic.seriesFor(selected.id)}
               load={load.get(selected.id)}
               graph={graph}
               connectorsByName={connectorsByName}
+              faults={faultsFor(selected, faults)}
+              mapFaults={faults}
               spanLabel={spanLabel}
+              hops={hops}
+              onHopsChange={(next) => setParam("hops", next === 1 ? null : next === 2 ? "2" : "all")}
               onSelect={(node) => revealChannel(node.id)}
               onClose={() => setSelectedId(null)}
             />
@@ -342,32 +629,70 @@ export function SystemMapPage() {
         </Card>
       </div>
 
+      {/* Below `lg` the inspector column is gone; the same panel rises as a
+          sheet, so a selection on a laptop split screen is not a dim canvas
+          and nothing else. */}
+      {selected && (
+        <div
+          className="fixed inset-x-0 bottom-0 z-40 h-[55vh] overflow-hidden rounded-t-xl border-t bg-card shadow-lg lg:hidden"
+          role="dialog"
+          aria-label={`${selected.name} on the map`}
+        >
+          <MapInspector
+            node={selected}
+            traffic={traffic.byChannel.get(selected.id)}
+            series={traffic.seriesFor(selected.id)}
+            load={load.get(selected.id)}
+            graph={graph}
+            connectorsByName={connectorsByName}
+            faults={faultsFor(selected, faults)}
+            mapFaults={faults}
+            spanLabel={spanLabel}
+            hops={hops}
+            onHopsChange={(next) => setParam("hops", next === 1 ? null : next === 2 ? "2" : "all")}
+            onSelect={(node) => revealChannel(node.id)}
+            onClose={() => setSelectedId(null)}
+          />
+        </div>
+      )}
+
       {/* Connectors ride the nodes that reference them rather than being nodes:
           one used by 51 of 62 workflows would add an edge everywhere and
           distinguish nothing. Fan-in is the interesting number, so show that. */}
       {graph.connectors.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <span className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             <Plug className="h-3 w-3" />
             Connectors
           </span>
-          {graph.connectors.map((c) => (
-            <Link key={c.name} to={c.known ? `/connectors/${c.refId}` : "/connectors"}>
-              <Badge
-                variant="outline"
-                className={cn(
-                  "gap-1 text-[10px] transition-colors hover:bg-accent",
-                  !c.known && "border-dashed",
-                  c.known && !c.enabled && "opacity-60",
-                )}
+          {graph.connectors.map((c) => {
+            const failed = faults.failedConnectors.has(c.name)
+            return (
+              <Link
+                key={c.name}
+                to={c.known ? `/connectors/${c.refId}${failed ? "?test=1" : ""}` : "/connectors"}
+                title={failed ? "Failed to load — every task using it is failing" : undefined}
               >
-                {c.name}
-                <span className="font-mono text-muted-foreground">{c.users.length}</span>
-              </Badge>
-            </Link>
-          ))}
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "gap-1 text-xs transition-colors hover:bg-accent",
+                    !c.known && "border-dashed",
+                    c.known && !c.enabled && "opacity-60",
+                    failed && "border-destructive/60 text-destructive",
+                  )}
+                >
+                  {failed && <Unplug className="h-3 w-3" />}
+                  {c.name}
+                  <span className="font-mono text-muted-foreground">{c.users.length}</span>
+                </Badge>
+              </Link>
+            )
+          })}
         </div>
       )}
+
+      {helpOpen && <MapHelpDialog colorMetric={colorMetric} onClose={() => setHelpOpen(false)} />}
     </div>
   )
 }

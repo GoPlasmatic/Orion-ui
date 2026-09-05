@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { toastError } from "@/lib/toast-error"
 import { engineApi } from "@/api/engine"
 
 export function useEngineStatus() {
@@ -19,8 +20,6 @@ export function useEngineReload() {
       toast.success("Engine reloaded")
     },
     onError: (e) =>
-      toast.error("Failed to reload engine", {
-        description: e instanceof Error ? e.message : undefined,
-      }),
+      toastError("Failed to reload engine", e),
   })
 }

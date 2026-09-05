@@ -20,10 +20,13 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { StatusBadge } from "@/components/shared/status-badge"
 import { LifecycleActions } from "@/components/shared/lifecycle-actions"
 import { VersionHistory } from "@/components/shared/version-history"
+import { VersionCompare } from "@/components/shared/version-compare"
 import { JsonViewer } from "@/components/shared/json-viewer"
+import { ErrorState } from "@/components/shared/error-state"
+import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { pluginHealthBadgeClass } from "@/lib/status"
 import { formatDate, formatDuration } from "@/lib/utils"
-import { ArrowLeft, AlertCircle, GitBranch, Pencil, ShieldCheck } from "lucide-react"
+import { GitBranch, Pencil, ShieldCheck } from "lucide-react"
 
 function shortDigest(digest: string): string {
   const hex = digest.startsWith("sha256:") ? digest.slice(7) : digest
@@ -36,12 +39,7 @@ function ManifestFunction({ fn }: { fn: PluginManifestFunction }) {
   return (
     <div className="rounded-md border p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Link
-          to={`/functions?q=${encodeURIComponent(fn.name)}`}
-          className="font-mono text-sm font-medium hover:underline"
-        >
-          {fn.name}
-        </Link>
+        <span className="font-mono text-sm font-medium">{fn.name}</span>
         {fn.category && (
           <Badge variant="secondary" className="text-xs">
             {fn.category}
@@ -96,7 +94,7 @@ export function PluginDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const pluginId = id ?? ""
-  const { data: plugin, isLoading, error } = usePlugin(pluginId)
+  const { data: plugin, isLoading, error, refetch } = usePlugin(pluginId)
   const { data: versions, isLoading: versionsLoading } = usePluginVersions(pluginId)
   const { data: dependencies } = usePluginDependencies(pluginId)
   const statusDryRun = usePluginStatusDryRun()
@@ -116,15 +114,12 @@ export function PluginDetailPage() {
 
   if (error || !plugin) {
     return (
-      <div className="space-y-6">
-        <Button variant="ghost" asChild>
-          <Link to="/plugins"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Plugins</Link>
-        </Button>
-        <div className="flex items-center gap-2 text-destructive">
-          <AlertCircle className="h-5 w-5" />
-          <p>{error instanceof Error ? error.message : "Failed to load plugin."}</p>
-        </div>
-      </div>
+      <ErrorState
+        title="Failed to load plugin"
+        error={error}
+        onRetry={() => refetch()}
+        backTo={{ to: "/plugins", label: "Back to Plugins" }}
+      />
     )
   }
 
@@ -135,12 +130,10 @@ export function PluginDetailPage() {
 
   return (
     <div className="space-y-6">
-      <Button variant="ghost" asChild>
-        <Link to="/plugins"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Plugins</Link>
-      </Button>
+      <Breadcrumbs items={[{ label: "Plugins", to: "/plugins" }, { label: plugin.plugin_id }]} />
 
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="font-mono text-2xl font-bold">{plugin.plugin_id}</h1>
             <StatusBadge status={plugin.status} />
@@ -252,11 +245,9 @@ export function PluginDetailPage() {
                     <dt className="text-muted-foreground">Functions</dt>
                     <dd className="mt-1 flex flex-wrap gap-1">
                       {plugin.functions.map((fn) => (
-                        <Link key={fn} to={`/functions?q=${encodeURIComponent(fn)}`}>
-                          <Badge variant="outline" className="font-mono text-xs transition-colors hover:bg-accent">
-                            {fn}
-                          </Badge>
-                        </Link>
+                        <Badge key={fn} variant="outline" className="font-mono text-xs">
+                          {fn}
+                        </Badge>
                       ))}
                     </dd>
                   </div>
@@ -379,7 +370,13 @@ export function PluginDetailPage() {
         </TabsContent>
 
         <TabsContent value="versions">
-          <VersionHistory versions={versions} isLoading={versionsLoading} />
+          <div className="space-y-6">
+            <VersionHistory versions={versions} isLoading={versionsLoading} />
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold">Compare versions</h3>
+              <VersionCompare versions={versions} isLoading={versionsLoading} />
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

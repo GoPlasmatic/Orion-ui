@@ -103,20 +103,19 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 | Feature | Description |
 |---------|-------------|
 | **Operations** | Live KPIs at a glance — requests/min, error rate, average and p95 latency, and a "what needs attention" feed |
-| **System Map** | Every live channel on one canvas, laid out by role — entry channels, then what they call, tier by tier — with live traffic, health and latency drawn on the nodes and edges; click any channel for its blast radius |
+| **System Map** | Every live channel on one canvas, laid out by role — entry channels, then what they call, tier by tier — with live traffic, health and latency drawn on the nodes and edges; click any channel for its blast radius (1 · 2 · all hops). Level of detail by zoom and collapsible clusters keep 60+ channels readable |
 | **Channels** | Full lifecycle management — create, edit, version, activate/archive, bulk import, structured config editor (rate limits with key logic, cache with key logic, dedup, CORS, validation logic, tracing, response cookies, inbound OAuth2 / OIDC sign-in, Kafka transport, cron schedules) |
 | **Schedules** | Cron channels as first-class: a structured schedule editor (six-field expression, IANA zone, payload, misfire and concurrency policy), what is scheduled and when it next fires, the durable occurrence ledger with retry, and "Trigger now" |
 | **Plugins** | Custom task functions as sandboxed WebAssembly components — upload a manifest and component from the browser, validate, activate with pre-flight, see which workflows depend on it, per-function invocation metrics, and this node's load state |
-| **Workflows** | Full authoring — create/edit drafts with a visual JSONLogic condition editor, server-side validation, dry-run testing, import/export, version compare, and canary rollout controls; visual DAG (tree/flow/graph views) |
+| **Workflows** | Full authoring — create/edit drafts with a visual JSONLogic condition editor, a steps editor with completion from the function catalogue, lint to the line and a live diagram, server-side validation, dry-run testing, import/export, version compare, and canary rollout controls; visual DAG (tree/flow/graph views) |
 | **Connectors** | Create and manage HTTP, database, Kafka, cache, storage, and Elasticsearch connectors — including per-operation gates on db/es (make a connector delete-proof with one toggle) |
-| **Functions** | Searchable reference of every workflow function — Orion handlers, engine built-ins and active plugins' functions — with its input schema, what a retry costs, and which fields are JSONLogic or take a secret |
 | **Circuit Breakers** | Monitor and reset per-connector circuit breakers |
 | **Traces** | Execution history (sync, async, Kafka and cron runs) with per-task detail and latency/error analytics |
 | **Audit Log** | Who changed what, when — across every admin operation |
 | **Data Console** | Send test requests to any channel — including REST-routed channels by method and path — with optional profiling |
 | **Health** | The whole `/health` report, component by component, with the admin-only detail — background tasks, plugin loads, the scheduler's own numbers — and what each degraded state means |
-| **Backups** | Create and list database backups from Settings (SQLite) |
-| **Polish** | Command palette (⌘K), light/dark themes, density modes, empty states, import wizards |
+| **Backups** | Create and list database backups from Engine (SQLite) |
+| **Polish** | Command palette (⌘K, or `?`), `g` + key page shortcuts, light/dark/system themes, density modes, times in local or UTC, a collapsible sidebar and a drawer on narrow screens, a first-run checklist, empty states, import wizards, unsaved-changes guard on every form |
 
 ## Pages
 
@@ -126,7 +125,6 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 | `/system-map` | Live traffic map of the channel call graph |
 | `/channels`, `/channels/new`, `/channels/:id`, `/channels/:id/edit` | Channel list, creation, detail, editing |
 | `/workflows`, `/workflows/new`, `/workflows/:id`, `/workflows/:id/edit` | Workflow list, authoring, visual DAG detail with dry-run and rollout |
-| `/functions` | Workflow function reference (input schemas, retry safety, which fields are expressions or take a `{"secret": …}`) |
 | `/plugins`, `/plugins/new`, `/plugins/:id`, `/plugins/:id/edit` | WebAssembly plugin list, upload, detail (manifest, dependants, invocations, load state), editing |
 | `/packages` | Promotion receipts (read-only) |
 | `/connectors`, `/connectors/new`, `/connectors/:id`, `/connectors/:id/edit` | Connector management |
@@ -136,7 +134,7 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 | `/trace-dlq` | Async dead-letter queue — inspect, requeue, purge |
 | `/audit` | Audit log |
 | `/console` | Data console for test requests (channel or REST method + path) |
-| `/settings` | Health report, engine reload, backups, and API docs |
+| `/engine` | Health report, engine reload, backups, and API docs (`/settings` redirects here) |
 
 ## How It Works
 

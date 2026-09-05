@@ -1,8 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { toastError } from "@/lib/toast-error"
 import { backupApi } from "@/api/backup"
-
-const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
 
 export function useBackups() {
   return useQuery({
@@ -19,6 +18,6 @@ export function useCreateBackup() {
       queryClient.invalidateQueries({ queryKey: ["backups"] })
       toast.success("Backup created", { description: backup.filename })
     },
-    onError: (e) => toast.error("Failed to create backup", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to create backup", e),
   })
 }

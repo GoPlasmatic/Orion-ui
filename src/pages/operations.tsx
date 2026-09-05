@@ -1,5 +1,5 @@
-import type { ReactNode } from "react"
-import { useNavigate } from "react-router"
+import { useMemo, useState } from "react"
+import { Link, useNavigate, useSearchParams } from "react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   BarChart,
@@ -9,16 +9,27 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts"
+import type { LucideIcon } from "lucide-react"
 import { useEngineStatus } from "@/hooks/use-engine"
-import { useHealth } from "@/hooks/use-health"
-import { useMetrics } from "@/hooks/use-metrics"
 import { useTraces } from "@/hooks/use-traces"
-import { useCircuitBreakers } from "@/hooks/use-connectors"
+import { useTraceDlq } from "@/hooks/use-trace-dlq"
+import { useAuditLogs } from "@/hooks/use-audit"
+import { useChannels } from "@/hooks/use-channels"
+import { useConnectors } from "@/hooks/use-connectors"
 import { useWorkflows } from "@/hooks/use-workflows"
+import { useCronStatus } from "@/hooks/use-cron"
+import {
+  DEFAULT_TRAFFIC_WINDOW,
+  TRAFFIC_WINDOWS,
+  useCronMetrics,
+} from "@/hooks/use-metrics"
+import { useAttentionItems, type AttentionItem, type AttentionKind } from "@/hooks/use-attention"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Select } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Table,
   TableHeader,
@@ -28,19 +39,30 @@ import {
   TableCell,
 } from "@/components/ui/table"
 import { PageHeader } from "@/components/shared/page-header"
+import { GettingStarted } from "@/components/shared/getting-started"
+import { isFirstRun } from "@/lib/onboarding"
 import { Sparkline } from "@/components/ui/sparkline"
-import { formatDate, formatDuration, cn } from "@/lib/utils"
-import { traceStatusBadgeClass, statusChartColor, isComponentFault } from "@/lib/status"
-import { componentRoute } from "@/lib/health"
+import { formatDate, formatDuration, formatRelative, serverTime, cn } from "@/lib/utils"
+import {
+  traceStatusBadgeClass,
+  statusChartColor,
+  occurrenceStatusBadgeClass,
+} from "@/lib/status"
+import { errorLevel, healthText } from "@/lib/traffic-encoding"
+import { auditResourceRoute } from "@/lib/audit-routes"
+import { buildIndex } from "@/lib/topology"
+import { buildSystemGraph } from "@/lib/system-graph"
 import {
   Activity,
   RefreshCw,
   AlertTriangle,
   Blocks,
+  CalendarClock,
   ZapOff,
   CircleOff,
   CheckCircle2,
   ChevronRight,
+  Network,
   Plug,
   ShieldAlert,
 } from "lucide-react"
@@ -49,19 +71,32 @@ import {
 const OUTCOME_ROWS = 8
 /** Rows a summary table shows before deferring to its own page. */
 const TABLE_ROWS = 8
-/** Failure share at which a channel is worth naming on the dashboard. */
-const ERRORING_PCT = 1
+/** Stack order for the outcome chart: what ran first, what did not after. */
+const OUTCOME_ORDER = ["ok", "error", "timeout", "unauthorized", "duplicate"]
+/** Schedules due within this long make the "next runs" strip. */
+const UPCOMING_MS = 24 * 60 * 60 * 1000
 
-/** One actionable item in "Needs attention", ordered by how bad it is. */
-interface Alert {
-  key: string
-  /** 0 is worst. Sorted on, so the list order is stable across polls. */
-  severity: number
-  tone: "destructive" | "warning"
-  icon: ReactNode
-  label: string
-  detail: string
-  onClick: () => void
+const KIND_ICON: Record<AttentionKind, LucideIcon> = {
+  quarantine: ShieldAlert,
+  connector: Plug,
+  plugin: Blocks,
+  erroring: AlertTriangle,
+  occurrence: CalendarClock,
+  component: AlertTriangle,
+  task: Activity,
+  breaker: ZapOff,
+  trace: AlertTriangle,
+}
+
+/** A short span for a label: "48 s", "4 m 20 s", "1 h 5 m". */
+function formatSpan(seconds: number): string {
+  const s = Math.round(seconds)
+  if (s < 60) return `${s} s`
+  const m = Math.floor(s / 60)
+  const rem = s % 60
+  if (m < 60) return rem ? `${m} m ${rem} s` : `${m} m`
+  const h = Math.floor(m / 60)
+  return `${h} h ${m % 60} m`
 }
 
 function formatUptime(seconds: number): string {
@@ -73,35 +108,36 @@ function formatUptime(seconds: number): string {
   return `${m}m`
 }
 
-function relativeTime(ts: number | null): string {
-  if (!ts) return "—"
-  const s = Math.max(0, Math.round((Date.now() - ts) / 1000))
-  if (s < 60) return `${s}s ago`
-  const m = Math.floor(s / 60)
-  return `${m}m ago`
-}
-
 function KpiCard({
   title,
   value,
   unit,
+  hint,
   series,
   colorClass,
+  valueClass,
+  to,
 }: {
   title: string
   value: string
   unit?: string
+  /** What the number covers — a window, or since start. */
+  hint?: string
   series?: number[]
   colorClass?: string
+  /** Colours the figure itself when it crosses a band; unset leaves it plain. */
+  valueClass?: string
+  /** Where the card leads; a KPI with nowhere to go is a dead end. */
+  to?: string
 }) {
-  return (
-    <Card>
+  const card = (
+    <Card interactive={!!to} className="h-full">
       <CardHeader className="pb-1">
         <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="flex items-end justify-between gap-2">
-          <p className="text-2xl font-bold tabular-nums">
+          <p className={cn("text-2xl font-bold tabular-nums", valueClass)}>
             {value}
             {unit && <span className="ml-1 text-sm font-normal text-muted-foreground">{unit}</span>}
           </p>
@@ -109,8 +145,16 @@ function KpiCard({
             <Sparkline values={series} className={cn("w-24", colorClass)} />
           )}
         </div>
+        {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
       </CardContent>
     </Card>
+  )
+  return to ? (
+    <Link to={to} className="block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+      {card}
+    </Link>
+  ) : (
+    card
   )
 }
 
@@ -118,202 +162,325 @@ export function OperationsPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
+  // The window every windowed figure on this page shares, in the URL like the
+  // map's so a link carries it.
+  const [params, setParams] = useSearchParams()
+  const requestedWindow = Number(params.get("window"))
+  const windowSec = TRAFFIC_WINDOWS.some((w) => w.value === requestedWindow)
+    ? requestedWindow
+    : DEFAULT_TRAFFIC_WINDOW
+
+  const { items: alerts, traffic, metrics, breakers, hasCron, channelIdByName, windowLabel, now } =
+    useAttentionItems(windowSec)
   const { data: engine } = useEngineStatus()
-  const { data: health } = useHealth()
-  const metrics = useMetrics()
   // `orion_workflow_duration_seconds{workflow}` labels by workflow *id* (the
   // authored id, never a caller-supplied value — that is what bounds the label
   // cardinality). Join against the list so the table reads as names.
-  const { data: workflowList } = useWorkflows({ limit: 200 })
-  const { data: breakers } = useCircuitBreakers({ refetchInterval: 15_000 })
+  const { data: workflowList } = useWorkflows({ limit: 1000 })
+  const { data: channelList } = useChannels({ limit: 1000 })
+  const { data: connectorList } = useConnectors({ limit: 1000 })
   const { data: recentTraces } = useTraces(
     { limit: 6, sort_by: "created_at", sort_order: "desc" },
     { refetchInterval: 15_000 },
   )
-  const { data: failedTraces } = useTraces(
-    { limit: 5, status: "failed", sort_by: "created_at", sort_order: "desc" },
-    { refetchInterval: 15_000 },
-  )
+  const { data: recentChanges } = useAuditLogs({ limit: 6 }, { refetchInterval: 30_000 })
+  // Backlogs. An async failure queue is the most important number an operator
+  // is not shown anywhere else on the front page.
+  const { data: dlq } = useTraceDlq({ limit: 1 }, { refetchInterval: 30_000 })
+  const { data: dlqExhausted } = useTraceDlq({ limit: 1, exhausted: true }, { refetchInterval: 30_000 })
+  const { data: schedules } = useCronStatus({ enabled: hasCron })
+  const cron = useCronMetrics()
+  const [recentTab, setRecentTab] = useState("traces")
 
-  const isHealthy = health?.status === "ok"
+  // The call graph, for the coverage line: a channel reached only by
+  // `channel_call` has no ingress series and can never "serve a request" as
+  // the exporter counts it, so it is reported as internal rather than idle.
+  const graph = useMemo(() => {
+    const channels = channelList?.data ?? []
+    if (channels.length === 0) return null
+    return buildSystemGraph(buildIndex(channels, workflowList?.data ?? [], connectorList?.data ?? []))
+  }, [channelList?.data, workflowList?.data, connectorList?.data])
 
-  // ---- Needs attention ----
-  //
-  // Only things a person should go and do something about.
-  //
-  // This list used to include every channel that had not served a request,
-  // which on any real system is most of them: 52 of 62 here, rendering three
-  // thousand pixels of "No traffic" rows that buried the two open breakers and
-  // pushed every other card off the screen. An idle channel is the normal
-  // resting state, not an incident — and a channel reached only by
-  // `channel_call` has no ingress counter at all, so it was *never* going to
-  // leave the list however busy it got. Channel coverage is a statistic; it now
-  // reads as one, underneath, next to the map that shows it properly.
-  const openBreakers = Object.entries(breakers?.breakers ?? {}).filter(
-    ([, state]) => state !== "closed",
-  )
-  /**
-   * Channels the metrics say are failing.
-   *
-   * The failed-trace query cannot stand in for this. On this stack
-   * `auth-send-otp` answers HTTP 500 `ENGINE_ERROR` on every request and
-   * records **no trace at all** — the failure happens outside the path that
-   * persists one. So `admin/traces?status=failed` returned zero while
-   * `orion_messages_total{status="error"}` sat at 100%, and the dashboard
-   * called it all clear. The counters are the more reliable witness.
-   *
-   * These are cumulative since the engine started, not windowed, so the detail
-   * line says so rather than implying it is happening right now.
-   */
-  const erroringChannels = metrics.channels
-    .filter((c) => c.failed > 0 && c.errorPct >= ERRORING_PCT)
-    .sort((a, b) => b.errorPct - a.errorPct || a.channel.localeCompare(b.channel))
-  const quarantined = health?.channels?.quarantined ?? []
-  const failedConnectors = health?.connectors?.failed_to_load ?? []
-  // A plugin version this node could not load quarantines every workflow
-  // naming its functions — the same silent failure as a failed connector.
-  const failedPlugins = health?.plugins?.failed_to_load ?? []
-  // `plugins: disabled` is a configured state, not a fault; `isComponentFault`
-  // keeps it (and only it) out of the list.
-  const degraded = Object.entries(health?.components ?? {}).filter(([, state]) =>
-    isComponentFault(state),
-  )
-  const failed = failedTraces?.data ?? []
+  // Nothing live yet: the checklist leads, everything else waits below it.
+  const firstRun =
+    !!engine && !!channelList && !!workflowList && isFirstRun({ activeChannels: engine.channels.length })
+  const firstRunState = {
+    workflows: workflowList?.total ?? workflowList?.data.length ?? 0,
+    activeWorkflows: engine?.active_workflows ?? 0,
+    channels: channelList?.total ?? channelList?.data.length ?? 0,
+    activeChannels: engine?.channels.length ?? 0,
+    traces: recentTraces?.data.length ?? 0,
+  }
 
-  // Severity first, then name, so a poll every 15s does not reshuffle the list
-  // under the pointer.
-  const alerts: Alert[] = [
-    ...quarantined.map(({ channel, reason }) => ({
-      key: `quarantine-${channel}`,
-      severity: 0,
-      tone: "destructive" as const,
-      icon: <ShieldAlert className="h-4 w-4 text-destructive" />,
-      label: `Quarantined: ${channel}`,
-      // The engine names why — an unresolved reference, a secret read where
-      // it would be recorded — and that is the whole remedy.
-      detail: reason || "Refused at load — the route is not being served",
-      onClick: () => navigate("/channels"),
-    })),
-    ...failedConnectors.map((connector) => ({
-      key: `conn-${connector}`,
-      severity: 1,
-      tone: "destructive" as const,
-      icon: <Plug className="h-4 w-4 text-destructive" />,
-      label: `Connector failed to load: ${connector}`,
-      detail: "Every task using it is failing",
-      onClick: () => navigate("/connectors"),
-    })),
-    ...failedPlugins.map((issue) => ({
-      key: `plugin-${issue.plugin}-${issue.version}`,
-      severity: 1,
-      tone: "destructive" as const,
-      icon: <Blocks className="h-4 w-4 text-destructive" />,
-      label: `Plugin not loaded: ${issue.plugin} v${issue.version}`,
-      detail: `${issue.stage}: ${issue.reason}`,
-      onClick: () => navigate(`/plugins/${encodeURIComponent(issue.plugin)}`),
-    })),
-    ...erroringChannels.map((c) => ({
-      key: `err-${c.channel}`,
-      severity: 2,
-      tone: "destructive" as const,
-      icon: <AlertTriangle className="h-4 w-4 text-destructive" />,
-      label: `Erroring: ${c.channel}`,
-      detail: `${c.errorPct.toFixed(c.errorPct >= 10 ? 0 : 1)}% of processed requests failed since the engine started (${c.failed.toLocaleString()})`,
-      onClick: () => navigate(`/traces?channel=${encodeURIComponent(c.channel)}`),
-    })),
-    ...degraded.map(([component, state]) => ({
-      key: `comp-${component}`,
-      severity: 3,
-      tone: "warning" as const,
-      icon: <AlertTriangle className="h-4 w-4 text-warning" />,
-      label: `${component} is ${state}`,
-      detail:
-        component === "cron"
-          ? "Declared schedules are not running — every liveness signal is green"
-          : component === "engine_reload"
-            ? "The last reload failed; this node serves the previous generation"
-            : component === "config_propagation"
-              ? "A change committed here has not reached the peers"
-              : "Reported by /health",
-      onClick: () => navigate(componentRoute(component)),
-    })),
-    ...(breakers?.enabled ? openBreakers : []).map(([key, state]) => ({
-      key: `brk-${key}`,
-      severity: 4,
-      tone: "warning" as const,
-      icon: <ZapOff className="h-4 w-4 text-warning" />,
-      label: `Circuit breaker ${state}`,
-      detail: `${key} · this replica only`,
-      onClick: () => navigate("/circuit-breakers"),
-    })),
-    ...failed.map((t) => ({
-      key: `fail-${t.id}`,
-      severity: 5,
-      tone: "destructive" as const,
-      icon: <AlertTriangle className="h-4 w-4 text-destructive" />,
-      label: `Failed: ${t.channel}`,
-      detail: t.error_message ?? formatDate(t.created_at),
-      onClick: () => navigate(`/traces/${t.id}`),
-    })),
-  ].sort((a, b) => a.severity - b.severity || a.label.localeCompare(b.label))
+  const windowed = traffic.hasRate
+  // The buffer holds only what this page has seen: a dashboard opened a minute
+  // ago does not have five minutes of history, and the label must not imply
+  // it does. The same "so far" the map's window selector shows.
+  const spanShort = windowed && traffic.spanSec < windowSec
+  const covered = spanShort ? ` · ${formatSpan(traffic.spanSec)} so far` : ""
+  // Two spellings of the same span: a label ("last 5 min") and a clause that
+  // reads inside a sentence ("in the last 5 min" / "since the engine started").
+  const basis = windowed ? `last ${windowLabel}${covered}` : "since the engine started"
+  const inBasis = windowed
+    ? `in the last ${windowLabel}${spanShort ? ` (${formatSpan(traffic.spanSec)} buffered so far)` : ""}`
+    : "since the engine started"
+  const openBreakers = breakers?.enabled
+    ? Object.values(breakers.breakers ?? {}).filter((s) => s !== "closed").length
+    : 0
 
   /**
-   * Busiest channels, but anything with errors first.
+   * Busiest channels in the window, anything with errors first.
    *
-   * `metrics.channels` is volume-ordered, and a straight top-8 of it let the KPI
-   * strip report a 10% error rate above a table where every visible row read
-   * 0.0% — the one failing channel sat at rank 9 and never appeared. A summary
-   * table that hides the exception is worse than no table.
+   * A straight top-8 by volume once let the KPI strip report a 10% error rate
+   * above a table where every visible row read 0.0% — the one failing channel
+   * sat at rank 9 and never appeared. A summary table that hides the exception
+   * is worse than no table.
    */
-  const topChannels = [...metrics.channels]
+  const topChannels = (
+    windowed
+      ? traffic.channels
+          .filter((c) => c.windowed > 0)
+          .map((c) => ({
+            channel: c.channel,
+            rate: c.ratePerMin,
+            errorPct: c.errorPct ?? 0,
+            p95Ms: c.p95Ms,
+            requests: c.windowed,
+          }))
+      : metrics.channels.map((c) => ({
+          channel: c.channel,
+          rate: c.ratePerMin,
+          errorPct: c.errorPct,
+          p95Ms: c.p95Ms,
+          requests: c.total,
+        }))
+  )
     .sort(
       (a, b) =>
         Number(a.errorPct <= 0) - Number(b.errorPct <= 0) ||
-        b.total - a.total ||
+        b.requests - a.requests ||
         a.channel.localeCompare(b.channel),
     )
     .slice(0, TABLE_ROWS)
   const promotedErrors = topChannels.some((c) => c.errorPct > 0)
 
-  // Coverage, as a statistic rather than an alert.
+  // Coverage, as a statistic rather than an alert. Three numbers, because "6
+  // of 62 have served a request" was true and misleading: most of the rest are
+  // reached inside the engine and the exporter cannot see them at all.
   const servingChannels = new Set(metrics.channels.filter((c) => c.total > 0).map((c) => c.channel))
   const totalChannels = engine?.channels.length ?? 0
+  const coverage = (() => {
+    if (!graph) return null
+    let serving = 0
+    let internal = 0
+    let idle = 0
+    for (const n of graph.nodes) {
+      if (n.unresolved || n.status !== "active") continue
+      if (servingChannels.has(n.id)) serving++
+      else if (n.callers.length > 0) internal++
+      else idle++
+    }
+    return { serving, internal, idle }
+  })()
 
-  // ---- Outcome distribution (generic per-channel terminal status mix) ----
-  const outcome = metrics.outcomeByChannel.filter((c) => c.channel)
+  // ---- Outcome distribution ----
+  //
+  // Each channel's *share* of outcomes inside the window rather than raw
+  // counts: with counts the busiest channel set the scale and a 1% error
+  // segment on it was a hairline, while a small channel failing every request
+  // was a short bar that read as "quiet". The count is in the tooltip.
+  const outcomeSource = windowed
+    ? traffic.channels
+        .filter((c) => c.windowed > 0)
+        .map((c) => ({
+          channel: c.channel,
+          segments: Object.entries(c.byStatus).map(([status, value]) => ({ status, value })),
+        }))
+    : metrics.outcomeByChannel.filter((c) => c.channel)
   const workflowNames = new Map((workflowList?.data ?? []).map((w) => [w.workflow_id, w.name]))
   const outcomeStatuses = Array.from(
-    new Set(outcome.flatMap((c) => c.segments.map((s) => s.status))),
-  )
-  const outcomeData = outcome.map((c) => {
+    new Set(outcomeSource.flatMap((c) => c.segments.map((s) => s.status))),
+  ).sort((a, b) => {
+    const ia = OUTCOME_ORDER.indexOf(a)
+    const ib = OUTCOME_ORDER.indexOf(b)
+    return (ia === -1 ? OUTCOME_ORDER.length : ia) - (ib === -1 ? OUTCOME_ORDER.length : ib) || a.localeCompare(b)
+  })
+  const outcomeData = outcomeSource.map((c) => {
     const row: Record<string, number | string> = { channel: c.channel }
     let total = 0
+    let failed = 0
     for (const s of c.segments) {
-      row[s.status] = s.value
       total += s.value
+      if (s.status === "error" || s.status === "timeout") failed += s.value
+      row[`__count_${s.status}`] = s.value
     }
+    for (const s of c.segments) row[s.status] = total > 0 ? (s.value / total) * 100 : 0
     row.__total = total
+    row.__failed = failed
     return row
   })
-  // Busiest first and capped: the chart's height was `rows * 44` with no
-  // ceiling, so a system with 60 active channels rendered a 2,600px card.
   const shownOutcomes = [...outcomeData]
-    .sort((a, b) => (b.__total as number) - (a.__total as number))
+    .sort(
+      (a, b) =>
+        Number((b.__failed as number) > 0) - Number((a.__failed as number) > 0) ||
+        (b.__total as number) - (a.__total as number),
+    )
     .slice(0, OUTCOME_ROWS)
 
+  // Schedules due soon, soonest first.
+  const upcoming = (schedules ?? [])
+    .map((s) => ({ ...s, at: serverTime(s.next_fire_at) }))
+    .filter((s): s is typeof s & { at: number } => s.at != null && s.at - now <= UPCOMING_MS)
+    .sort((a, b) => a.at - b.at)
+  const nextRun = upcoming[0]
+  const cronPending = cron.pending ?? (schedules ?? []).reduce((n, s) => n + (s.pending ?? 0), 0)
+
   const handleRefresh = () => {
-    for (const key of ["metrics", "engine", "health", "traces", "connectors"]) {
+    for (const key of [
+      "metrics",
+      "engine",
+      "health",
+      "traces",
+      "connectors",
+      "channels",
+      "cron",
+      "trace-dlq",
+      "audit-logs",
+    ]) {
       queryClient.invalidateQueries({ queryKey: [key] })
     }
   }
 
+  const errorRateLevel = errorLevel(traffic.errorPct)
+
+  const recentCard = (
+    <Card className="flex flex-col">
+      <Tabs value={recentTab} onValueChange={setRecentTab} defaultValue="traces">
+        <CardHeader className="flex h-[3.25rem] shrink-0 flex-row items-center justify-between pb-2">
+          <TabsList className="h-8">
+            <TabsTrigger value="traces">Recent traces</TabsTrigger>
+            <TabsTrigger value="changes">Recent changes</TabsTrigger>
+          </TabsList>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate(recentTab === "traces" ? "/traces" : "/audit")}
+          >
+            View all
+          </Button>
+        </CardHeader>
+        <CardContent className="flex-1">
+          {recentTab === "traces" ? (
+            recentTraces?.data && recentTraces.data.length > 0 ? (
+              <div className="space-y-2" role="list">
+                {recentTraces.data.map((trace) => (
+                  <button
+                    key={trace.id}
+                    type="button"
+                    role="listitem"
+                    className="flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors outline-none hover:border-border-strong hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/60"
+                    onClick={() => navigate(`/traces/${trace.id}`)}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <Badge variant="outline" className={traceStatusBadgeClass(trace.status)}>
+                        {trace.status}
+                      </Badge>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{trace.channel}</p>
+                        {trace.status === "failed" && trace.error_message && (
+                          <p className="truncate text-xs text-destructive" title={trace.error_message}>
+                            {trace.error_message}
+                          </p>
+                        )}
+                      </div>
+                      <Badge variant="outline" className="shrink-0 text-xs">
+                        {trace.mode}
+                      </Badge>
+                    </div>
+                    <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                      <span title={formatDate(trace.created_at)}>
+                        {formatRelative(trace.created_at, now) ?? formatDate(trace.created_at)}
+                      </span>
+                      {trace.duration_ms != null && (
+                        <span className="block">{formatDuration(trace.duration_ms)}</span>
+                      )}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="py-4 text-sm text-muted-foreground">No recent traces</p>
+            )
+          ) : recentChanges?.data && recentChanges.data.length > 0 ? (
+            // "What changed?" is the first question after an incident; the
+            // audit log used to be four clicks from here.
+            <div className="space-y-2" role="list">
+              {recentChanges.data.map((entry) => {
+                const to = auditResourceRoute(entry.resource_type, entry.resource_id)
+                return (
+                  <div
+                    key={entry.id}
+                    role="listitem"
+                    className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm"
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <Badge variant="outline" className="shrink-0">
+                        {entry.action}
+                      </Badge>
+                      <span className="shrink-0 text-xs text-muted-foreground">{entry.resource_type}</span>
+                      {to ? (
+                        <Link to={to} className="truncate font-mono text-xs text-primary hover:underline">
+                          {entry.resource_id}
+                        </Link>
+                      ) : (
+                        <span className="truncate font-mono text-xs">{entry.resource_id}</span>
+                      )}
+                    </div>
+                    <span className="shrink-0 text-right text-xs text-muted-foreground">
+                      <span className="block">{entry.principal}</span>
+                      <span title={formatDate(entry.created_at)}>
+                        {formatRelative(entry.created_at, now) ?? formatDate(entry.created_at)}
+                      </span>
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="py-4 text-sm text-muted-foreground">No changes recorded</p>
+          )}
+        </CardContent>
+      </Tabs>
+    </Card>
+  )
+
   return (
     <div className="space-y-6">
       <PageHeader title="Operations" description="Live engine activity and what needs attention">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span className="text-xs text-muted-foreground">
-            {metrics.available ? `live · updated ${relativeTime(metrics.lastUpdated)}` : "metrics offline"}
+            {traffic.available
+              ? `live · updated ${formatRelative(traffic.lastUpdated, now) ?? "—"}`
+              : "metrics offline"}
           </span>
+          <Select
+            value={String(windowSec)}
+            onChange={(e) =>
+              setParams(
+                e.target.value === String(DEFAULT_TRAFFIC_WINDOW) ? {} : { window: e.target.value },
+                { replace: true },
+              )
+            }
+            className="w-28"
+            aria-label="Traffic window"
+            title="Every windowed figure on this page covers this long"
+          >
+            {TRAFFIC_WINDOWS.map((w) => (
+              <option key={w.value} value={w.value}>
+                {w.label}
+              </option>
+            ))}
+          </Select>
           <Button variant="outline" size="sm" onClick={handleRefresh}>
             <RefreshCw className="h-4 w-4" />
             Refresh
@@ -321,14 +488,19 @@ export function OperationsPage() {
         </div>
       </PageHeader>
 
+      {firstRun && <GettingStarted state={firstRunState} />}
+
       {/* Health strip */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-8 gap-y-3 py-4 text-sm">
           <div className="flex items-center gap-2">
             <Activity className="h-4 w-4 text-muted-foreground" />
-            {health ? (
-              <Badge variant="outline" className={traceStatusBadgeClass(isHealthy ? "completed" : "failed")}>
-                {health.status}
+            {engine ? (
+              <Badge
+                variant="outline"
+                className={traceStatusBadgeClass(alerts.length === 0 ? "completed" : "failed")}
+              >
+                {alerts.length === 0 ? "all clear" : `${alerts.length} to look at`}
               </Badge>
             ) : (
               <Skeleton className="h-5 w-16" />
@@ -341,47 +513,119 @@ export function OperationsPage() {
             value={engine ? `${engine.active_workflows}/${engine.workflows_count} active` : "—"}
           />
           <Strip label="Channels" value={engine ? String(engine.channels.length) : "—"} />
+          {breakers?.instance_id && (
+            <Strip
+              label="Node"
+              value={breakers.instance_id.slice(0, 8)}
+              mono
+              title={`${breakers.instance_id} — breaker state and plugin load state are per replica`}
+            />
+          )}
         </CardContent>
       </Card>
 
-      {/* KPI cards */}
-      {metrics.available ? (
+      {/* KPI strip — every figure over the selected window */}
+      {traffic.available ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard
             title="Requests / min"
-            value={metrics.requestRatePerMin == null ? "—" : Math.round(metrics.requestRatePerMin).toLocaleString()}
-            series={metrics.requestRateSeries}
+            value={traffic.totalRatePerMin == null ? "—" : Math.round(traffic.totalRatePerMin).toLocaleString()}
+            hint={windowed ? basis : "waiting for a second sample"}
+            series={traffic.series.rate}
             colorClass="text-chart-1"
+            to="/system-map"
           />
           <KpiCard
             title="Error rate"
-            value={metrics.errorRatePct == null ? "—" : metrics.errorRatePct.toFixed(1)}
-            unit={metrics.errorRatePct == null ? undefined : "%"}
-            series={metrics.errorRateSeries}
+            value={traffic.errorPct == null ? "—" : traffic.errorPct.toFixed(1)}
+            unit={traffic.errorPct == null ? undefined : "%"}
+            hint={traffic.errorPct == null ? `no traffic ${inBasis}` : basis}
+            series={traffic.series.errorPct}
             colorClass="text-destructive"
+            // The same bands the map paints — a figure past them reads in ink.
+            valueClass={
+              errorRateLevel === "warning" || errorRateLevel === "critical"
+                ? healthText[errorRateLevel]
+                : undefined
+            }
+            to="/traces?status=failed"
           />
           <KpiCard
             title="Avg latency"
-            value={metrics.avgLatencyMs == null ? "—" : formatDuration(metrics.avgLatencyMs)}
-            series={metrics.avgLatencySeries}
+            value={traffic.meanMs == null ? "—" : formatDuration(traffic.meanMs)}
+            hint={traffic.meanMs == null ? undefined : basis}
+            series={traffic.series.meanMs}
             colorClass="text-chart-3"
           />
-          <KpiCard title="Latency p95" value={metrics.p95Ms == null ? "—" : formatDuration(metrics.p95Ms)} />
+          <KpiCard
+            title="Latency p95"
+            value={traffic.p95Ms == null ? "—" : formatDuration(traffic.p95Ms)}
+            hint={traffic.p95Ms == null ? undefined : basis}
+          />
         </div>
       ) : (
         <Card>
           <CardContent className="py-6 text-sm text-muted-foreground">
             Metrics are unavailable. Enable <code className="font-mono">[metrics]</code> on the
-            Orion engine to see live request rate, error rate, and latency.
+            Orion engine to see live request rate, error rate, latency, outcomes and per-channel
+            traffic. Health, backlogs, traces and the attention list below do not depend on it.
           </CardContent>
         </Card>
       )}
+
+      {/* Backlogs — what is waiting on a person, and what is due */}
+      <div className={cn("grid gap-4 sm:grid-cols-2", hasCron ? "lg:grid-cols-4" : "lg:grid-cols-2")}>
+        <KpiCard
+          title="Trace DLQ"
+          value={dlq?.total == null ? "—" : dlq.total.toLocaleString()}
+          hint={
+            dlq?.total == null
+              ? "async failures waiting on a retry"
+              : `${(dlqExhausted?.total ?? 0).toLocaleString()} exhausted · async failures waiting on a retry`
+          }
+          valueClass={(dlqExhausted?.total ?? 0) > 0 ? "text-destructive" : undefined}
+          to="/trace-dlq"
+        />
+        <KpiCard
+          title="Open breakers"
+          value={breakers ? String(openBreakers) : "—"}
+          hint={breakers && !breakers.enabled ? "breakers are disabled on this engine" : "this node only"}
+          valueClass={openBreakers > 0 ? "text-warning" : undefined}
+          to="/circuit-breakers"
+        />
+        {hasCron && (
+          <KpiCard
+            title="Cron backlog"
+            value={cronPending.toLocaleString()}
+            hint={
+              cron.lagP95Sec != null
+                ? `lag p95 ${cron.lagP95Sec.toFixed(1)}s · ${cron.leaseRenewalFailures} lease renewals lost`
+                : "occurrences waiting for a worker"
+            }
+            valueClass={cronPending > 0 ? "text-warning" : undefined}
+            to="/schedules"
+          />
+        )}
+        {hasCron && (
+          <KpiCard
+            title="Next scheduled run"
+            value={nextRun ? (formatRelative(nextRun.at, now) ?? "—") : "—"}
+            hint={
+              nextRun
+                ? `${nextRun.channel_name}${nextRun.last_status ? ` · last run ${nextRun.last_status}` : ""}`
+                : "nothing due in the next 24 h"
+            }
+            to="/schedules"
+          />
+        )}
+      </div>
 
       {/* Paired cards stretch rather than start-align: with each list bounded and
           scrolling inside its own card, equal heights remove the dead column a
           tall card used to leave beside a short one. */}
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* Needs attention */}
+        {/* Needs attention — the list lives in hooks/use-attention.ts, which the
+            sidebar counts too, so the badge and this card cannot disagree. */}
         <Card className="flex min-h-0 flex-col">
           <CardHeader className="flex h-[3.25rem] shrink-0 flex-row items-center justify-between pb-2">
             <CardTitle>Needs attention</CardTitle>
@@ -400,22 +644,25 @@ export function OperationsPage() {
                 <CheckCircle2 className="h-5 w-5 text-success" />
                 <p className="text-sm font-medium">All clear</p>
                 <p className="max-w-xs text-xs text-muted-foreground">
-                  Nothing quarantined, no connector or plugin failed to load, no channel erroring,
-                  no open circuit breakers, no failed traces recently.
+                  Nothing quarantined, no connector or plugin failed to load, no channel failing{" "}
+                  {inBasis}, no scheduled run failed in the last day, no background task
+                  restarted, no open circuit breakers, no failed traces in the last hour.
                 </p>
               </div>
             ) : (
               // Bounded and scrolled: a dashboard card reports how much there is
               // and shows the worst of it. It does not grow until it owns the page.
-              <div className="max-h-[19rem] space-y-2 overflow-y-auto pr-1">
+              <div className="max-h-[19rem] space-y-2 overflow-y-auto pr-1" role="list">
                 {alerts.map((a) => (
                   <AttentionRow
                     key={a.key}
-                    icon={a.icon}
-                    label={a.label}
-                    detail={a.detail}
-                    tone={a.tone}
-                    onClick={a.onClick}
+                    item={a}
+                    onOpen={() => navigate(a.to)}
+                    onMap={
+                      a.channel
+                        ? () => navigate(`/system-map?select=${encodeURIComponent(a.channel as string)}`)
+                        : undefined
+                    }
                   />
                 ))}
               </div>
@@ -423,12 +670,34 @@ export function OperationsPage() {
 
             <div className="mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
               <CircleOff className="h-3.5 w-3.5" />
-              <span>
-                <span className="font-medium tabular-nums text-foreground">
-                  {servingChannels.size}
-                </span>{" "}
-                of {totalChannels} channels have served a request since the engine started
-              </span>
+              {!traffic.available ? (
+                <span>
+                  <span className="font-medium tabular-nums text-foreground">{totalChannels}</span>{" "}
+                  channels loaded · which of them serve needs{" "}
+                  <code className="font-mono">[metrics]</code>
+                </span>
+              ) : coverage ? (
+                <span>
+                  <span className="font-medium tabular-nums text-foreground">{coverage.serving}</span>{" "}
+                  serving ·{" "}
+                  <span
+                    className="font-medium tabular-nums text-foreground"
+                    title="Reached only by channel_call — dispatched inside the engine, so the exporter carries no series for them"
+                  >
+                    {coverage.internal}
+                  </span>{" "}
+                  internal (unmetered) ·{" "}
+                  <span className="font-medium tabular-nums text-foreground">{coverage.idle}</span>{" "}
+                  idle since the engine started
+                </span>
+              ) : (
+                <span>
+                  <span className="font-medium tabular-nums text-foreground">
+                    {servingChannels.size}
+                  </span>{" "}
+                  of {totalChannels} channels have served a request since the engine started
+                </span>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -441,239 +710,338 @@ export function OperationsPage() {
           </CardContent>
         </Card>
 
-        {/* Outcome distribution */}
-        <Card className="flex min-h-0 flex-col">
-          <CardHeader className="flex h-[3.25rem] shrink-0 flex-row items-center justify-between pb-2">
-            <CardTitle>Outcomes by channel</CardTitle>
-            {outcomeData.length > OUTCOME_ROWS && (
+        {traffic.available ? (
+          <Card className="flex min-h-0 flex-col">
+            <CardHeader className="flex h-[3.25rem] shrink-0 flex-row items-center justify-between pb-2">
+              <CardTitle>Outcomes by channel</CardTitle>
               <span className="text-xs text-muted-foreground">
-                top {OUTCOME_ROWS} of {outcomeData.length}
+                {outcomeData.length > OUTCOME_ROWS ? `top ${OUTCOME_ROWS} of ${outcomeData.length} · ` : ""}
+                {basis}
               </span>
-            )}
-          </CardHeader>
-          <CardContent className="min-h-0 flex-1">
-            {outcomeData.length === 0 ? (
-              <p className="py-4 text-sm text-muted-foreground">No message activity yet.</p>
-            ) : (
-              <ResponsiveContainer width="100%" height={Math.max(140, shownOutcomes.length * 34)}>
-                <BarChart data={shownOutcomes} layout="vertical" margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
-                  <XAxis type="number" hide />
-                  <YAxis
-                    type="category"
-                    dataKey="channel"
-                    width={110}
-                    tickLine={false}
-                    axisLine={false}
-                    tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
-                  />
-                  <Tooltip
-                    cursor={{ fill: "var(--muted)", opacity: 0.4 }}
-                    contentStyle={{
-                      background: "var(--popover)",
-                      border: "1px solid var(--border)",
-                      borderRadius: 8,
-                      fontSize: 12,
-                    }}
-                  />
-                  {outcomeStatuses.map((s, i) => (
-                    <Bar
-                      key={s}
-                      dataKey={s}
-                      stackId="a"
-                      fill={statusChartColor(s)}
-                      radius={i === outcomeStatuses.length - 1 ? [0, 4, 4, 0] : 0}
-                    />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
+            </CardHeader>
+            <CardContent className="min-h-0 flex-1">
+              {outcomeData.length === 0 ? (
+                <p className="py-4 text-sm text-muted-foreground">No message activity {inBasis}.</p>
+              ) : (
+                <>
+                  <ResponsiveContainer width="100%" height={Math.max(140, shownOutcomes.length * 34)}>
+                    <BarChart
+                      data={shownOutcomes}
+                      layout="vertical"
+                      margin={{ top: 4, right: 8, bottom: 4, left: 8 }}
+                    >
+                      <XAxis type="number" hide domain={[0, 100]} />
+                      <YAxis
+                        type="category"
+                        dataKey="channel"
+                        width={110}
+                        tickLine={false}
+                        axisLine={false}
+                        tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
+                      />
+                      <Tooltip
+                        cursor={{ fill: "var(--muted)", opacity: 0.4 }}
+                        contentStyle={{
+                          background: "var(--popover)",
+                          border: "1px solid var(--border)",
+                          borderRadius: 8,
+                          fontSize: 12,
+                        }}
+                        formatter={(value, name, item) => {
+                          const row = (item as { payload?: Record<string, unknown> }).payload
+                          const count = row?.[`__count_${String(name)}`]
+                          const share = `${Number(value).toFixed(1)}%`
+                          return [
+                            typeof count === "number" ? `${share} · ${count.toLocaleString()}` : share,
+                            String(name),
+                          ]
+                        }}
+                      />
+                      {outcomeStatuses.map((s, i) => (
+                        <Bar
+                          key={s}
+                          dataKey={s}
+                          stackId="a"
+                          fill={statusChartColor(s)}
+                          radius={i === outcomeStatuses.length - 1 ? [0, 4, 4, 0] : 0}
+                          className="cursor-pointer"
+                          onClick={(entry) => {
+                            const rec = entry as unknown as { payload?: { channel?: unknown }; channel?: unknown }
+                            const channel = rec?.payload?.channel ?? rec?.channel
+                            if (typeof channel === "string") {
+                              navigate(`/traces?channel=${encodeURIComponent(channel)}`)
+                            }
+                          }}
+                        />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    {outcomeStatuses.map((s) => (
+                      <span key={s} className="inline-flex items-center gap-1.5">
+                        <span
+                          className="h-2 w-2 rounded-full"
+                          style={{ background: statusChartColor(s) }}
+                        />
+                        {s}
+                      </span>
+                    ))}
+                    <span className="ml-auto">share of each channel's outcomes</span>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          recentCard
+        )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Top channels */}
-        <Card className="flex flex-col">
-          <CardHeader className="flex h-[3.25rem] shrink-0 flex-row items-center justify-between pb-2">
-            <CardTitle>Top channels</CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => navigate("/channels")}>
-              View all
-            </Button>
-          </CardHeader>
-          <CardContent className="flex-1">
-            {metrics.channels.length === 0 ? (
-              <p className="py-4 text-sm text-muted-foreground">No channel metrics yet.</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Channel</TableHead>
-                    <TableHead className="text-right">Req / min</TableHead>
-                    <TableHead className="text-right">Error %</TableHead>
-                    <TableHead className="text-right">p95</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {topChannels.map((c) => (
-                    <TableRow key={c.channel}>
-                      <TableCell className="max-w-0 truncate font-medium" title={c.channel}>
-                        {c.channel}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {c.ratePerMin == null ? "—" : Math.round(c.ratePerMin)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        <span
-                          className={c.errorPct > 0 ? "text-destructive" : "text-muted-foreground"}
-                        >
-                          {c.errorPct.toFixed(1)}%
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">
-                        {formatDuration(c.p95Ms)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">
-                        {c.total.toLocaleString()}
-                      </TableCell>
+      {traffic.available && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {/* Top channels */}
+          <Card className="flex flex-col">
+            <CardHeader className="flex h-[3.25rem] shrink-0 flex-row items-center justify-between pb-2">
+              <CardTitle>Top channels</CardTitle>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">{basis}</span>
+                <Button variant="ghost" size="sm" onClick={() => navigate("/channels")}>
+                  View all
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="flex-1">
+              {topChannels.length === 0 ? (
+                <p className="py-4 text-sm text-muted-foreground">No channel traffic {inBasis}.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Channel</TableHead>
+                      <TableHead className="text-right">Req / min</TableHead>
+                      <TableHead className="text-right">Error %</TableHead>
+                      <TableHead className="text-right">p95</TableHead>
+                      <TableHead className="text-right">{windowed ? "Requests" : "Total"}</TableHead>
+                      <TableHead className="w-px" />
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-            {promotedErrors && (
+                  </TableHeader>
+                  <TableBody>
+                    {topChannels.map((c) => {
+                      const id = channelIdByName.get(c.channel)
+                      const mapTo = `/system-map?select=${encodeURIComponent(c.channel)}`
+                      return (
+                        <TableRow
+                          key={c.channel}
+                          className="cursor-pointer"
+                          tabIndex={0}
+                          onClick={() => navigate(id ? `/channels/${id}` : mapTo)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && e.target === e.currentTarget) e.currentTarget.click()
+                          }}
+                        >
+                          <TableCell className="min-w-32 max-w-0 truncate font-medium" title={c.channel}>
+                            {c.channel}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {c.rate == null ? "—" : Math.round(c.rate)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            <span
+                              className={c.errorPct > 0 ? "text-destructive" : "text-muted-foreground"}
+                            >
+                              {c.errorPct.toFixed(1)}%
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">
+                            {formatDuration(c.p95Ms)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">
+                            {c.requests.toLocaleString()}
+                          </TableCell>
+                          <TableCell className="pl-0">
+                            <Link
+                              to={mapTo}
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex rounded p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                              aria-label={`Open ${c.channel} in the System Map`}
+                              title="Open in the System Map"
+                            >
+                              <Network className="h-3.5 w-3.5" />
+                            </Link>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              )}
               <p className="mt-3 text-xs text-muted-foreground">
-                Channels with errors are listed first, then by volume.
+                {promotedErrors ? "Channels with errors are listed first, then by volume. " : ""}
+                Every column is {inBasis}. Channels reached only by{" "}
+                <code className="font-mono">channel_call</code> carry no series and are not listed.
               </p>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        {/* Recent traces */}
-        <Card className="flex flex-col">
-          <CardHeader className="flex h-[3.25rem] shrink-0 flex-row items-center justify-between pb-2">
-            <CardTitle>Recent traces</CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => navigate("/traces")}>
+          {recentCard}
+        </div>
+      )}
+
+      {/* Due soon. A nightly job that fails never enters the DLQ and may leave
+          no trace, so its place on the front page is here and in the list above. */}
+      {hasCron && (
+        <Card>
+          <CardHeader className="flex h-[3.25rem] flex-row items-center justify-between pb-2">
+            <CardTitle>Scheduled in the next 24 h</CardTitle>
+            <Button variant="ghost" size="sm" onClick={() => navigate("/schedules")}>
               View all
             </Button>
           </CardHeader>
-          <CardContent className="flex-1">
-            {recentTraces?.data && recentTraces.data.length > 0 ? (
-              <div className="space-y-2">
-                {recentTraces.data.map((trace) => (
-                  <button
-                    key={trace.id}
-                    type="button"
-                    className="flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors outline-none hover:border-border-strong hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/60"
-                    onClick={() => navigate(`/traces/${trace.id}`)}
+          <CardContent>
+            {upcoming.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {(schedules ?? []).length === 0
+                  ? "No active cron channel."
+                  : "Nothing is due in the next 24 hours."}
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {upcoming.slice(0, 8).map((s) => (
+                  <Link
+                    key={s.channel_id}
+                    to={`/schedules?channel_id=${encodeURIComponent(s.channel_id)}`}
+                    className="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors hover:border-border-strong hover:bg-muted/50"
+                    title={`${s.schedule} ${s.timezone} · next ${formatDate(s.next_fire_at as string)}`}
                   >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <Badge variant="outline" className={traceStatusBadgeClass(trace.status)}>
-                        {trace.status}
+                    <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="font-medium">{s.channel_name}</span>
+                    <span className="text-xs text-muted-foreground">{formatRelative(s.at, now)}</span>
+                    {s.last_status && (
+                      <Badge
+                        variant="outline"
+                        className={cn("text-xs", occurrenceStatusBadgeClass(s.last_status))}
+                        title="Last run"
+                      >
+                        {s.last_status}
                       </Badge>
-                      <span className="truncate text-sm font-medium">{trace.channel}</span>
-                      <Badge variant="outline" className="shrink-0 text-xs">
-                        {trace.mode}
-                      </Badge>
-                    </div>
-                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                      {formatDate(trace.created_at)}
-                    </span>
-                  </button>
+                    )}
+                    {s.pending > 0 && (
+                      <span className="text-xs text-warning" title="Occurrences waiting for a worker">
+                        {s.pending} pending
+                      </span>
+                    )}
+                  </Link>
                 ))}
               </div>
-            ) : (
-              <p className="py-4 text-sm text-muted-foreground">No recent traces</p>
             )}
           </CardContent>
         </Card>
-      </div>
+      )}
 
       {/* Workflow cost — new in Orion 1.2. `orion_workflow_duration_seconds`
           measures a whole run and `orion_task_duration_seconds` its task
-          bodies, so the difference is the engine's own overhead. Before 1.2
-          this existed only as a residual inside the opt-in per-request
-          profile, where it absorbed everything else unmeasured. */}
-      <Card>
-        <CardHeader className="flex h-[3.25rem] flex-row items-center justify-between pb-2">
-          <CardTitle>Workflow cost</CardTitle>
-          <Button variant="ghost" size="sm" onClick={() => navigate("/workflows")}>
-            View all
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {metrics.workflows.length === 0 ? (
-            <p className="py-4 text-sm text-muted-foreground">
-              No workflow runs recorded yet. A workflow skipped by its condition or rollout gate is
-              not measured.
-            </p>
-          ) : (
-            <>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Workflow</TableHead>
-                    <TableHead className="text-right">Runs</TableHead>
-                    <TableHead className="text-right">Mean</TableHead>
-                    <TableHead className="text-right">p95</TableHead>
-                    <TableHead className="text-right">Engine</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {metrics.workflows.slice(0, TABLE_ROWS).map((w) => (
-                    <TableRow
-                      key={w.workflow}
-                      className={workflowNames.has(w.workflow) ? "cursor-pointer" : undefined}
-                      onClick={
-                        workflowNames.has(w.workflow)
-                          ? () => navigate(`/workflows/${w.workflow}`)
-                          : undefined
-                      }
-                    >
-                      <TableCell className="font-medium" title={w.workflow}>
-                        {workflowNames.get(w.workflow) ?? w.workflow}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">
-                        {w.runs.toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatDuration(w.meanMs)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">
-                        {formatDuration(w.p95Ms)}
-                      </TableCell>
-                      <TableCell
-                        className="text-right tabular-nums text-muted-foreground"
-                        title={
-                          w.taskMs == null
-                            ? undefined
-                            : `${formatDuration(w.taskMs)} in ${w.taskCount} task${w.taskCount === 1 ? "" : "s"}, ${formatDuration(w.overheadMs)} in the engine`
-                        }
-                      >
-                        {formatDuration(w.overheadMs)}
-                        {w.overheadPct != null && (
-                          <span className="ml-1 text-xs">({w.overheadPct.toFixed(0)}%)</span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              <p className="mt-3 text-xs text-muted-foreground">
-                <span className="font-medium">Engine</span> is the run minus its task bodies —
-                condition evaluation, group gating, loop bookkeeping and audit writes.
+          bodies, so the difference is the engine's own overhead. Cumulative:
+          the histograms are windowable, but the overhead subtraction across
+          two of them is not worth the noise at short windows. */}
+      {traffic.available && (
+        <Card>
+          <CardHeader className="flex h-[3.25rem] flex-row items-center justify-between pb-2">
+            <CardTitle>Workflow cost</CardTitle>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">since the engine started</span>
+              <Button variant="ghost" size="sm" onClick={() => navigate("/workflows")}>
+                View all
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {metrics.workflows.length === 0 ? (
+              <p className="py-4 text-sm text-muted-foreground">
+                No workflow runs recorded yet. A workflow skipped by its condition or rollout gate is
+                not measured.
               </p>
-            </>
-          )}
-        </CardContent>
-      </Card>
+            ) : (
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Workflow</TableHead>
+                      <TableHead className="text-right">Runs</TableHead>
+                      <TableHead className="text-right">Mean</TableHead>
+                      <TableHead className="text-right">p95</TableHead>
+                      <TableHead className="text-right">Engine</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {metrics.workflows.slice(0, TABLE_ROWS).map((w) => (
+                      <TableRow
+                        key={w.workflow}
+                        className={workflowNames.has(w.workflow) ? "cursor-pointer" : undefined}
+                        tabIndex={workflowNames.has(w.workflow) ? 0 : undefined}
+                        onClick={
+                          workflowNames.has(w.workflow)
+                            ? () => navigate(`/workflows/${w.workflow}`)
+                            : undefined
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") e.currentTarget.click()
+                        }}
+                      >
+                        <TableCell className="font-medium" title={w.workflow}>
+                          {workflowNames.get(w.workflow) ?? w.workflow}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {w.runs.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatDuration(w.meanMs)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {formatDuration(w.p95Ms)}
+                        </TableCell>
+                        <TableCell
+                          className="text-right tabular-nums text-muted-foreground"
+                          title={
+                            w.taskMs == null
+                              ? undefined
+                              : `${formatDuration(w.taskMs)} in ${w.taskCount} task${w.taskCount === 1 ? "" : "s"}, ${formatDuration(w.overheadMs)} in the engine`
+                          }
+                        >
+                          {formatDuration(w.overheadMs)}
+                          {w.overheadPct != null && (
+                            <span className="ml-1 text-xs">({w.overheadPct.toFixed(0)}%)</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  <span className="font-medium">Engine</span> is the run minus its task bodies —
+                  condition evaluation, group gating, loop bookkeeping and audit writes.
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
 
-function Strip({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Strip({
+  label,
+  value,
+  mono,
+  title,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+  title?: string
+}) {
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col" title={title}>
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className={cn("font-medium", mono && "font-mono")}>{value}</span>
     </div>
@@ -681,36 +1049,55 @@ function Strip({ label, value, mono }: { label: string; value: string; mono?: bo
 }
 
 function AttentionRow({
-  icon,
-  label,
-  detail,
-  tone,
-  onClick,
+  item,
+  onOpen,
+  onMap,
 }: {
-  icon: ReactNode
-  label: string
-  detail: string
-  tone: Alert["tone"]
-  onClick: () => void
+  item: AttentionItem
+  onOpen: () => void
+  onMap?: () => void
 }) {
+  const Icon = KIND_ICON[item.kind]
+  const iconTone = item.tone === "destructive" ? "text-destructive" : "text-warning"
   return (
-    <button
-      onClick={onClick}
+    <div
+      role="listitem"
       className={cn(
-        "flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/60",
+        "flex items-stretch rounded-lg border transition-colors",
         // A quarantined channel and a warm circuit breaker are not the same
         // news; the row said they were.
-        tone === "destructive"
+        item.tone === "destructive"
           ? "border-destructive/30 hover:border-destructive/50"
           : "border-warning/30 hover:border-warning/50",
       )}
     >
-      {icon}
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{label}</p>
-        <p className="truncate text-xs text-muted-foreground">{detail}</p>
-      </div>
-      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-    </button>
+      <button
+        onClick={onOpen}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-l-lg px-3 py-2 text-left transition-colors outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        <Icon className={cn("h-4 w-4 shrink-0", iconTone)} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium" title={item.label}>
+            {item.label}
+          </p>
+          {/* Two lines, not one: the detail is the remedy, and a quarantine
+              reason cut off at the card edge is a remedy withheld. */}
+          <p className="line-clamp-2 text-xs text-muted-foreground" title={item.detail}>
+            {item.detail}
+          </p>
+        </div>
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+      </button>
+      {onMap && (
+        <button
+          onClick={onMap}
+          className="flex shrink-0 items-center gap-1 border-l border-inherit px-2.5 text-xs text-muted-foreground transition-colors outline-none hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+          title={`Open ${item.label} in the System Map`}
+        >
+          <Network className="h-3.5 w-3.5" />
+          Map
+        </button>
+      )}
+    </div>
   )
 }

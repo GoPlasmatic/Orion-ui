@@ -1,7 +1,12 @@
 import { useState } from "react"
-import { Link } from "react-router"
-import { dataApi } from "@/api/data"
+import { Link, useLocation, useSearchParams } from "react-router"
+import { dataApi, type ExtraHeaders } from "@/api/data"
 import { useChannels } from "@/hooks/use-channels"
+import { useTrace, useTraces } from "@/hooks/use-traces"
+import { tracesApi } from "@/api/traces"
+import { firstTaskPayload } from "@/lib/trace-payload"
+import { toastError } from "@/lib/toast-error"
+import { traceStatusBadgeClass } from "@/lib/status"
 import type {
   AsyncSubmitResponse,
   Channel,
@@ -12,16 +17,17 @@ import type {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
+import { JsonEditor } from "@/components/shared/json-editor"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Callout } from "@/components/ui/callout"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Skeleton } from "@/components/ui/skeleton"
 import { PageHeader } from "@/components/shared/page-header"
 import { JsonViewer } from "@/components/shared/json-viewer"
-import { formatDate } from "@/lib/utils"
-import { ExternalLink, Send } from "lucide-react"
+import { formatDate, formatDuration, formatRelative } from "@/lib/utils"
+import { Braces, ExternalLink, History, Plus, Send, X } from "lucide-react"
 
 const SAMPLE_PAYLOAD = '{\n  "example": "value"\n}'
 const isBlankPayload = (p: string) => {
@@ -37,6 +43,21 @@ const BODYLESS = new Set(["GET", "HEAD"])
 const isRestChannel = (c: Channel | undefined): c is Channel =>
   !!c?.route_pattern && (c.protocol === "rest" || c.protocol === "http")
 
+/**
+ * Kept in this browser only. Both used to vanish on reload: the request
+ * history, and the headers a guarded channel needs — which had nowhere to be
+ * entered at all, so a channel with `auth` set could not be tested from here.
+ */
+const HISTORY_KEY = "orion-console-history"
+const HEADERS_KEY = "orion-console-headers"
+const HISTORY_MAX = 8
+
+interface HeaderRow {
+  key: string
+  value: string
+  enabled: boolean
+}
+
 interface HistoryEntry {
   channel: string
   payload: string
@@ -48,6 +69,35 @@ interface HistoryEntry {
   /** Capability token from an async 202; required to poll that trace. */
   traceToken?: string
   at: string
+  elapsedMs?: number
+}
+
+function loadJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? (JSON.parse(raw) as T) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function saveJson(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // Private mode or a full quota: the console still works, it just forgets.
+  }
+}
+
+const loadHeaders = (channel: string): HeaderRow[] =>
+  loadJson<Record<string, HeaderRow[]>>(HEADERS_KEY, {})[channel] ?? []
+
+function saveHeaders(channel: string, rows: HeaderRow[]) {
+  if (!channel) return
+  const store = loadJson<Record<string, HeaderRow[]>>(HEADERS_KEY, {})
+  if (rows.length === 0) delete store[channel]
+  else store[channel] = rows
+  saveJson(HEADERS_KEY, store)
 }
 
 function fmtMs(ms: number | undefined): string {
@@ -138,6 +188,48 @@ function traceLink(traceId: string, token?: string) {
 }
 
 /**
+ * Where an async submission got to. The trace is written before it runs, so
+ * the first read is pending; the hook polls while it is pending or running
+ * and stops once it settles, so the answer arrives here without leaving the
+ * console. The token from the 202 is what authorises the read.
+ */
+function AsyncOutcome({ traceId, token }: { traceId: string; token?: string }) {
+  const { data: trace, isLoading, error } = useTrace(traceId, token)
+  if (error) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        The trace could not be read from here — open it to follow the run.
+      </p>
+    )
+  }
+  if (isLoading || !trace) {
+    return <p className="text-xs text-muted-foreground">Waiting for the trace to be written…</p>
+  }
+  const settled = trace.status !== "pending" && trace.status !== "running"
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm">
+      <Badge variant="outline" className={traceStatusBadgeClass(trace.status)}>
+        {trace.status}
+      </Badge>
+      {!settled && <span className="text-xs text-muted-foreground">polling every 2 s</span>}
+      {settled && trace.duration_ms != null && (
+        <span className="text-xs text-muted-foreground">{formatDuration(trace.duration_ms)}</span>
+      )}
+      {trace.error && (
+        <span className="min-w-0 truncate font-mono text-xs text-destructive" title={trace.error}>
+          {trace.error}
+        </span>
+      )}
+      {settled && !trace.error && (
+        <span className="text-xs text-muted-foreground">
+          settled {formatRelative(trace.completed_at ?? trace.created_at) ?? ""}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
  * A 200 does not mean the workflow succeeded: a failed task still answers 200
  * with the failure in `errors`. Since 1.1 the code names the real failure
  * rather than a flat TASK_ERROR, so it is worth surfacing rather than leaving
@@ -172,31 +264,108 @@ function TaskErrors({
   )
 }
 
+/**
+ * `/console?channel=<name>` opens with that channel selected and its REST
+ * route seeded — the channel page and the map inspector link here. A trace's
+ * "re-send" hands the payload over in router state. The list has to be loaded
+ * before the form can seed from it, so the page waits for it only when a
+ * channel was asked for; a bare `/console` mounts at once.
+ */
 export function ConsolePage() {
-  const [channel, setChannel] = useState("")
-  const [payload, setPayload] = useState('{\n  \n}')
+  const [params, setParams] = useSearchParams()
+  const location = useLocation()
+  const requested = params.get("channel") ?? ""
+  // `?method=&path=` complete a REST deep link: a route named by another
+  // page lands here ready to send.
+  const requestedMethod = params.get("method") ?? undefined
+  const requestedPath = params.get("path") ?? undefined
+  const handed = (location.state as { payload?: unknown } | null)?.payload
+  const initialPayload =
+    handed !== undefined && handed !== null ? JSON.stringify(handed, null, 2) : undefined
+  const { data: channels, isLoading } = useChannels({ limit: 200 })
+
+  if (requested && isLoading) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Data Console" description="Send test requests to channels" />
+        <Skeleton className="h-96 w-full" />
+      </div>
+    )
+  }
+
+  return (
+    <ConsoleForm
+      channels={channels?.data ?? []}
+      initialChannel={requested}
+      initialPayload={initialPayload}
+      initialMethod={requestedMethod}
+      initialPath={requestedPath}
+      onChannelChange={(name) => setParams(name ? { channel: name } : {}, { replace: true })}
+    />
+  )
+}
+
+function ConsoleForm({
+  channels,
+  initialChannel,
+  initialPayload,
+  initialMethod,
+  initialPath,
+  onChannelChange: syncUrl,
+}: {
+  channels: Channel[]
+  initialChannel: string
+  initialPayload?: string
+  initialMethod?: string
+  initialPath?: string
+  /** Keeps the URL in step so the selected channel survives a reload and a paste. */
+  onChannelChange: (name: string) => void
+}) {
+  // A cron channel (1.6) registers no route and is not reachable at
+  // `data/{name}` — running it here would execute the workflow outside its
+  // ledger and outside its singleton lock, which is why the server refuses
+  // it. Its manual path is "Trigger now" on the channel.
+  const cronChannels = channels.filter((c) => c.protocol === "cron")
+  const channelList = channels.filter((c) => c.protocol !== "cron")
+  const initial = channelList.find((c) => c.name === initialChannel)
+
+  // Seeded once, in the initializers — the same derivation `onChannelChange`
+  // performs on a pick — rather than in an effect that syncs state after mount.
+  const [channel, setChannel] = useState(initial?.name ?? "")
+  const [payload, setPayload] = useState(initialPayload ?? (initial ? SAMPLE_PAYLOAD : "{\n  \n}"))
   const [sync, setSync] = useState(true)
   const [profile, setProfile] = useState(false)
-  const [method, setMethod] = useState("POST")
-  const [path, setPath] = useState("")
+  const [method, setMethod] = useState(() => {
+    if (!isRestChannel(initial)) return "POST"
+    const allowed = (initial.methods ?? []).map((m) => m.toUpperCase())
+    const asked = initialMethod?.toUpperCase()
+    if (asked && (allowed.length === 0 || allowed.includes(asked))) return asked
+    return allowed[0] ?? "POST"
+  })
+  const [path, setPath] = useState(() =>
+    isRestChannel(initial) ? (initialPath ?? initial.route_pattern ?? "") : "",
+  )
+  const [loadingTrace, setLoadingTrace] = useState(false)
+  const [headers, setHeaders] = useState<HeaderRow[]>(() => loadHeaders(initial?.name ?? ""))
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ProcessResponse | null>(null)
   // An async submission answers with a receipt, not a result — kept separately
   // so the sync response renderer never has to guess which shape it holds.
   const [receipt, setReceipt] = useState<AsyncSubmitResponse | null>(null)
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [history, setHistory] = useState<HistoryEntry[]>([])
-
-  const { data: channels } = useChannels({ limit: 200 })
-  // A cron channel (1.6) registers no route and is not reachable at
-  // `data/{name}` — running it here would execute the workflow outside its
-  // ledger and outside its singleton lock, which is why the server refuses
-  // it. Its manual path is "Trigger now" on the channel.
-  const cronChannels = (channels?.data ?? []).filter((c) => c.protocol === "cron")
-  const channelList = (channels?.data ?? []).filter((c) => c.protocol !== "cron")
+  const [history, setHistory] = useState<HistoryEntry[]>(() => loadJson<HistoryEntry[]>(HISTORY_KEY, []))
 
   const selected = channelList.find((c) => c.name === channel)
   const restMode = isRestChannel(selected)
+  // The newest trace through the selected channel: its input is the payload
+  // most worth re-sending. The list row is payload-free; the button fetches
+  // the trace itself when asked.
+  const { data: lastTraces } = useTraces(
+    { channel: channel || undefined, limit: 1, sort_by: "created_at", sort_order: "desc" },
+    { enabled: !!channel },
+  )
+  const lastTraceId = lastTraces?.data[0]?.id
   const bodyless = restMode && BODYLESS.has(method)
 
   const profileResult = result?._orion?.profile
@@ -206,10 +375,23 @@ export function ConsolePage() {
   const traceToken = receipt?.trace_token
   const taskErrors = result?.errors ?? []
 
+  // What a guarded channel expects, so the 401 is explained before it happens.
+  const authMode = selected?.config.auth?.mode
+  const authHeader = (selected?.config.auth?.header ?? (authMode === "jwt" ? (selected?.config.auth?.source?.header ?? "Authorization") : "Authorization")).toLowerCase()
+  const hasAuthHeader = headers.some((h) => h.enabled && h.key.trim().toLowerCase() === authHeader)
+
+  const updateHeaders = (rows: HeaderRow[]) => {
+    setHeaders(rows)
+    saveHeaders(channel, rows)
+  }
+
   // Pre-fill a starter payload when a channel is picked and the editor is empty;
-  // seed method/path from the channel's REST route when it has one.
+  // seed method/path from the channel's REST route when it has one; recall the
+  // headers last used with it.
   const onChannelChange = (value: string) => {
     setChannel(value)
+    syncUrl(value)
+    setHeaders(loadHeaders(value))
     if (value && isBlankPayload(payload)) setPayload(SAMPLE_PAYLOAD)
     const next = channelList.find((c) => c.name === value)
     if (isRestChannel(next)) {
@@ -222,16 +404,47 @@ export function ConsolePage() {
 
   const restore = (h: HistoryEntry) => {
     setChannel(h.channel)
+    syncUrl(h.channel)
+    setHeaders(loadHeaders(h.channel))
     setPayload(h.payload)
     setSync(h.sync)
     if (h.method) setMethod(h.method)
     if (h.path) setPath(h.path)
   }
 
+  const fillFromLastTrace = async () => {
+    if (!lastTraceId) return
+    setLoadingTrace(true)
+    try {
+      const trace = await tracesApi.get(lastTraceId)
+      const input = firstTaskPayload(trace)
+      if (!input) {
+        setError("The last trace kept no request payload — nothing to reuse")
+        return
+      }
+      setPayload(JSON.stringify(input, null, 2))
+      setError(null)
+    } catch (e) {
+      toastError("Could not read the last trace", e)
+    } finally {
+      setLoadingTrace(false)
+    }
+  }
+
+  const formatPayload = () => {
+    try {
+      setPayload(JSON.stringify(JSON.parse(payload), null, 2))
+      setError(null)
+    } catch {
+      setError("Payload is not valid JSON")
+    }
+  }
+
   const handleSend = async () => {
     setError(null)
     setResult(null)
     setReceipt(null)
+    setElapsedMs(null)
 
     if (!channel.trim()) {
       setError("Channel name is required")
@@ -255,15 +468,19 @@ export function ConsolePage() {
       }
     }
 
+    const extra: ExtraHeaders = {}
+    for (const h of headers) if (h.enabled && h.key.trim()) extra[h.key.trim()] = h.value
+
     setLoading(true)
     const isAsync = !restMode && !sync
+    const started = performance.now()
     try {
       let entryStatus: string | undefined
       let entryTraceId: string | undefined
       let entryTraceToken: string | undefined
 
       if (isAsync) {
-        const ack = await dataApi.processAsync(channel, { data: data ?? {} })
+        const ack = await dataApi.processAsync(channel, { data: data ?? {} }, extra)
         setReceipt(ack)
         entryStatus = "accepted"
         entryTraceId = ack.trace_id
@@ -274,16 +491,19 @@ export function ConsolePage() {
               method,
               path,
               data !== undefined ? { data } : undefined,
-              profile
+              profile,
+              extra
             )
-          : await dataApi.processSync(channel, { data: data ?? {} }, profile)
+          : await dataApi.processSync(channel, { data: data ?? {} }, profile, extra)
         setResult(res)
         entryStatus = res.status
         entryTraceId = res.id
       }
+      const took = performance.now() - started
+      setElapsedMs(took)
 
-      setHistory((prev) =>
-        [
+      setHistory((prev) => {
+        const next = [
           {
             channel,
             payload,
@@ -294,15 +514,24 @@ export function ConsolePage() {
             traceId: entryTraceId,
             traceToken: entryTraceToken,
             at: new Date().toISOString(),
+            elapsedMs: took,
           },
           ...prev,
-        ].slice(0, 8)
-      )
+        ].slice(0, HISTORY_MAX)
+        saveJson(HISTORY_KEY, next)
+        return next
+      })
     } catch (e) {
+      setElapsedMs(performance.now() - started)
       setError(e instanceof Error ? e.message : "Request failed")
     } finally {
       setLoading(false)
     }
+  }
+
+  /** Mod-Enter inside the editor: send, unless a send is already in flight. */
+  const sendFromEditor = () => {
+    if (!loading) void handleSend()
   }
 
   return (
@@ -346,7 +575,7 @@ export function ConsolePage() {
               <div className="flex gap-2">
                 <div className="w-32">
                   <Label>Method</Label>
-                  <Select value={method} onChange={(e) => setMethod(e.target.value)}>
+                  <Select value={method} onChange={(e) => setMethod(e.target.value)} aria-label="Method">
                     {((selected?.methods?.length ?? 0) > 0
                       ? selected!.methods!.map((m) => m.toUpperCase())
                       : REST_METHODS
@@ -362,6 +591,7 @@ export function ConsolePage() {
                     onChange={(e) => setPath(e.target.value)}
                     className="font-mono"
                     placeholder={selected?.route_pattern ?? "/orders/42"}
+                    aria-label="Path"
                   />
                   <p className="mt-1 text-xs text-muted-foreground">
                     Route pattern: <code>{selected?.route_pattern}</code> — replace{" "}
@@ -371,25 +601,125 @@ export function ConsolePage() {
               </div>
             )}
 
+            {/* Headers: the credential a guarded channel checks, an
+                idempotency key for a dedup guard, a tenant header a key logic
+                reads. Remembered per channel in this browser. */}
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <Label className="mb-0">Headers</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => updateHeaders([...headers, { key: "", value: "", enabled: true }])}
+                >
+                  <Plus /> Add header
+                </Button>
+              </div>
+              {authMode && !hasAuthHeader && (
+                <Callout variant="warning" icon={false} className="mb-2 px-3 py-2 text-xs">
+                  This channel checks <span className="font-mono">{authMode}</span> auth on the{" "}
+                  <span className="font-mono">{authHeader}</span> header. Without it the request
+                  answers 401 and no workflow runs.
+                </Callout>
+              )}
+              {headers.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  None. Headers are remembered per channel in this browser only.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {headers.map((row, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Checkbox
+                        checked={row.enabled}
+                        onCheckedChange={(on) =>
+                          updateHeaders(headers.map((h, j) => (j === i ? { ...h, enabled: on } : h)))
+                        }
+                        aria-label={`Send header ${row.key || i + 1}`}
+                      />
+                      <Input
+                        value={row.key}
+                        onChange={(e) =>
+                          updateHeaders(headers.map((h, j) => (j === i ? { ...h, key: e.target.value } : h)))
+                        }
+                        placeholder="x-api-key"
+                        className="w-44 font-mono text-xs"
+                        aria-label={`Header ${i + 1} name`}
+                      />
+                      <Input
+                        value={row.value}
+                        onChange={(e) =>
+                          updateHeaders(headers.map((h, j) => (j === i ? { ...h, value: e.target.value } : h)))
+                        }
+                        placeholder="value"
+                        className="flex-1 font-mono text-xs"
+                        aria-label={`Header ${i + 1} value`}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => updateHeaders(headers.filter((_, j) => j !== i))}
+                        aria-label={`Remove header ${row.key || i + 1}`}
+                        className="text-muted-foreground"
+                      >
+                        <X />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {!bodyless && (
               <div>
                 <div className="mb-1 flex items-center justify-between">
                   <Label className="mb-0">JSON Payload</Label>
-                  <button
-                    type="button"
-                    onClick={() => setPayload(SAMPLE_PAYLOAD)}
-                    className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                  >
-                    Insert sample
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={formatPayload}
+                      className="flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    >
+                      <Braces className="h-3 w-3" /> Format
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPayload(SAMPLE_PAYLOAD)}
+                      className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    >
+                      Insert sample
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void fillFromLastTrace()}
+                      disabled={!lastTraceId || loadingTrace}
+                      className="flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
+                      title={
+                        !channel
+                          ? "Pick a channel first"
+                          : !lastTraceId
+                            ? "No trace has run through this channel yet"
+                            : "The newest trace's request, as its first task saw it"
+                      }
+                    >
+                      <History className="h-3 w-3" /> {loadingTrace ? "Loading…" : "Last trace's input"}
+                    </button>
+                  </div>
                 </div>
-                <Textarea
+                <JsonEditor
                   value={payload}
-                  onChange={(e) => setPayload(e.target.value)}
-                  rows={12}
-                  className="font-mono text-sm"
-                  placeholder='{ "key": "value" }'
+                  onChange={setPayload}
+                  height="16rem"
+                  aria-label="JSON payload"
+                  onRun={sendFromEditor}
                 />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  <kbd className="rounded border bg-muted px-1 font-mono">⌘</kbd>{" "}
+                  <kbd className="rounded border bg-muted px-1 font-mono">↵</kbd> sends. A syntax
+                  error is underlined as you type.
+                </p>
               </div>
             )}
 
@@ -435,8 +765,25 @@ export function ConsolePage() {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                Response
+              <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+                <span className="flex items-center gap-2">
+                  Response
+                  {result?.status && (
+                    <Badge variant="outline" className="font-mono text-xs">
+                      {result.status}
+                    </Badge>
+                  )}
+                  {receipt && (
+                    <Badge variant="outline" className="font-mono text-xs">
+                      202 accepted
+                    </Badge>
+                  )}
+                  {elapsedMs != null && (
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {formatDuration(elapsedMs)} round trip
+                    </span>
+                  )}
+                </span>
                 {traceId && (
                   <Button variant="outline" size="sm" asChild>
                     <Link to={traceLink(traceId, traceToken).to} state={traceLink(traceId, traceToken).state}>
@@ -449,11 +796,12 @@ export function ConsolePage() {
             <CardContent className="space-y-3">
               {taskErrors.length > 0 && <TaskErrors errors={taskErrors} requestId={result?.request_id} />}
               {receipt ? (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <p className="text-sm">
-                    Accepted for asynchronous processing. The result is not returned here — follow
-                    the trace.
+                    Accepted for asynchronous processing. The result is not returned here — the
+                    trace is followed below until it settles.
                   </p>
+                  <AsyncOutcome traceId={receipt.trace_id} token={receipt.trace_token} />
                   <JsonViewer data={receipt} maxHeight="200px" />
                 </div>
               ) : result ? (
@@ -471,7 +819,19 @@ export function ConsolePage() {
           {history.length > 0 && (
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Recent requests</CardTitle>
+                <CardTitle className="flex items-center justify-between text-sm">
+                  Recent requests
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHistory([])
+                      saveJson(HISTORY_KEY, [])
+                    }}
+                    className="text-xs font-normal text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  >
+                    Clear
+                  </button>
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-1">
                 {history.map((h, i) => (
@@ -491,8 +851,13 @@ export function ConsolePage() {
                       {h.status && (
                         <span className="shrink-0 text-xs text-muted-foreground">{h.status}</span>
                       )}
-                      <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                        {formatDate(h.at)}
+                      {h.elapsedMs != null && (
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {formatDuration(h.elapsedMs)}
+                        </span>
+                      )}
+                      <span className="ml-auto shrink-0 text-xs text-muted-foreground" title={formatDate(h.at)}>
+                        {formatRelative(h.at) ?? formatDate(h.at)}
                       </span>
                     </button>
                     {h.traceId && (

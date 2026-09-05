@@ -1,34 +1,57 @@
 import { useMemo, useState } from "react"
-import { useNavigate } from "react-router"
+import { useLocation, useNavigate } from "react-router"
 import { useChannels } from "@/hooks/use-channels"
 import { useWorkflows } from "@/hooks/use-workflows"
 import { useConnectors } from "@/hooks/use-connectors"
 import { usePlugins } from "@/hooks/use-plugins"
 import { useTheme } from "@/lib/use-theme"
+import { NAV_ITEMS } from "@/lib/nav"
 import { Dialog } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import {
   Search,
-  Gauge,
-  Network,
   Radio,
   GitBranch,
   Plug,
   Blocks,
-  Activity,
   CalendarClock,
-  Inbox,
-  Package,
-  ZapOff,
-  FileText,
-  FunctionSquare,
-  Terminal,
-  Settings,
   Plus,
   Upload,
   SunMoon,
+  Network,
+  Send,
+  Activity,
+  Pencil,
   type LucideIcon,
 } from "lucide-react"
+
+/** Rows per group with an empty query; the entity lists run to hundreds. */
+const GROUP_CAP_IDLE = 6
+/** Rows per group once something is typed. */
+const GROUP_CAP_SEARCH = 12
+
+/** The last few commands run, in this browser — the thing most likely to be wanted again. */
+const RECENT_KEY = "orion-palette-recent"
+const RECENT_MAX = 5
+
+function loadRecent(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : []
+  } catch {
+    return []
+  }
+}
+
+function recordRecent(id: string) {
+  try {
+    const next = [id, ...loadRecent().filter((x) => x !== id)].slice(0, RECENT_MAX)
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next))
+  } catch {
+    // Private mode: nothing remembered, nothing broken.
+  }
+}
 
 interface Command {
   id: string
@@ -59,9 +82,12 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
 function CommandPaletteBody({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate()
+  const { pathname } = useLocation()
   const { resolvedTheme, setTheme } = useTheme()
   const [query, setQuery] = useState("")
   const [active, setActive] = useState(0)
+  // Read once per opening; the palette remounts each time it opens.
+  const [recent] = useState(loadRecent)
 
   // The entity lists are fetched only while the palette is mounted.
   const { data: channels } = useChannels({ limit: 200 })
@@ -75,23 +101,16 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
   }
 
   const commands = useMemo<Command[]>(() => {
-    const nav: Command[] = [
-      { id: "nav-ops", label: "Operations", group: "Go to", icon: Gauge, run: () => go("/") },
-      { id: "nav-map", label: "System Map", group: "Go to", icon: Network, run: () => go("/system-map") },
-      { id: "nav-channels", label: "Channels", group: "Go to", icon: Radio, run: () => go("/channels") },
-      { id: "nav-workflows", label: "Workflows", group: "Go to", icon: GitBranch, run: () => go("/workflows") },
-      { id: "nav-connectors", label: "Connectors", group: "Go to", icon: Plug, run: () => go("/connectors") },
-      { id: "nav-functions", label: "Functions", group: "Go to", icon: FunctionSquare, run: () => go("/functions") },
-      { id: "nav-plugins", label: "Plugins", group: "Go to", icon: Blocks, keywords: "wasm webassembly custom functions", run: () => go("/plugins") },
-      { id: "nav-packages", label: "Packages", group: "Go to", icon: Package, keywords: "promotion receipts release", run: () => go("/packages") },
-      { id: "nav-traces", label: "Traces", group: "Go to", icon: Activity, run: () => go("/traces") },
-      { id: "nav-schedules", label: "Schedules", group: "Go to", icon: CalendarClock, keywords: "cron occurrences scheduled jobs", run: () => go("/schedules") },
-      { id: "nav-trace-dlq", label: "Trace DLQ", group: "Go to", icon: Inbox, keywords: "dead letter queue retry failed async", run: () => go("/trace-dlq") },
-      { id: "nav-breakers", label: "Circuit Breakers", group: "Go to", icon: ZapOff, run: () => go("/circuit-breakers") },
-      { id: "nav-audit", label: "Audit Log", group: "Go to", icon: FileText, run: () => go("/audit") },
-      { id: "nav-console", label: "Data Console", group: "Go to", icon: Terminal, run: () => go("/console") },
-      { id: "nav-settings", label: "Settings", group: "Go to", icon: Settings, run: () => go("/settings") },
-    ]
+    // One registry with the sidebar (lib/nav.ts): a page is added once.
+    const nav: Command[] = NAV_ITEMS.map((item) => ({
+      id: `nav-${item.to}`,
+      label: item.label,
+      hint: item.shortcut ? `g ${item.shortcut}` : undefined,
+      group: "Go to",
+      icon: item.icon,
+      keywords: item.keywords,
+      run: () => go(item.to),
+    }))
 
     const actions: Command[] = [
       { id: "act-new-channel", label: "Create channel", group: "Actions", icon: Plus, run: () => go("/channels/new") },
@@ -112,6 +131,67 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
         },
       },
     ]
+
+    // What the page under the palette is about. On a channel: the map, a test
+    // request, its traces, and its editor while it is a draft. On a workflow
+    // draft: its editor. Nothing that mutates without the page's own pre-flight.
+    const contextual: Command[] = []
+    const channelMatch = /^\/channels\/([^/]+)/.exec(pathname)
+    const channel = channelMatch
+      ? (channels?.data ?? []).find((c) => c.channel_id === decodeURIComponent(channelMatch[1]))
+      : undefined
+    if (channel) {
+      contextual.push({
+        id: `ctx-map-${channel.channel_id}`,
+        label: `Open ${channel.name} in the System Map`,
+        group: "This page",
+        icon: Network,
+        keywords: "map topology callers",
+        run: () => go(`/system-map?select=${encodeURIComponent(channel.name)}`),
+      })
+      if (channel.protocol !== "cron") {
+        contextual.push({
+          id: `ctx-test-${channel.channel_id}`,
+          label: `Send a test request to ${channel.name}`,
+          group: "This page",
+          icon: Send,
+          keywords: "console try",
+          run: () => go(`/console?channel=${encodeURIComponent(channel.name)}`),
+        })
+      }
+      contextual.push({
+        id: `ctx-traces-${channel.channel_id}`,
+        label: `Traces for ${channel.name}`,
+        group: "This page",
+        icon: Activity,
+        keywords: "runs history failed",
+        run: () => go(`/traces?channel=${encodeURIComponent(channel.name)}`),
+      })
+      if (channel.status === "draft") {
+        contextual.push({
+          id: `ctx-edit-${channel.channel_id}`,
+          label: `Edit ${channel.name}`,
+          group: "This page",
+          icon: Pencil,
+          keywords: "draft change",
+          run: () => go(`/channels/${channel.channel_id}/edit`),
+        })
+      }
+    }
+    const workflowMatch = /^\/workflows\/([^/]+)/.exec(pathname)
+    const workflow = workflowMatch
+      ? (workflows?.data ?? []).find((w) => w.workflow_id === decodeURIComponent(workflowMatch[1]))
+      : undefined
+    if (workflow?.status === "draft") {
+      contextual.push({
+        id: `ctx-edit-wf-${workflow.workflow_id}`,
+        label: `Edit ${workflow.name}`,
+        group: "This page",
+        icon: Pencil,
+        keywords: "draft change steps",
+        run: () => go(`/workflows/${workflow.workflow_id}/edit`),
+      })
+    }
 
     const entities: Command[] = [
       ...(channels?.data ?? []).map((c) => ({
@@ -151,16 +231,56 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
       })),
     ]
 
-    return [...nav, ...actions, ...entities]
-  }, [channels, workflows, connectors, plugins, resolvedTheme]) // eslint-disable-line react-hooks/exhaustive-deps
+    return [...contextual, ...nav, ...actions, ...entities]
+  }, [channels, workflows, connectors, plugins, resolvedTheme, pathname]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** Run a command and remember it. */
+  const runCommand = (c: Command) => {
+    recordRecent(c.id)
+    c.run()
+  }
+
+  /**
+   * Ranked, then capped per group. An exact name beats a prefix beats a
+   * substring beats a keyword hit, so typing a channel's name lands on the
+   * channel rather than on whichever page happens to mention it; and with
+   * nothing typed the palette shows a few of each kind rather than every
+   * entity it fetched.
+   */
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return commands
-    return commands.filter((c) =>
-      `${c.label} ${c.group} ${c.hint ?? ""} ${c.keywords ?? ""}`.toLowerCase().includes(q)
-    )
-  }, [commands, query])
+    const cap = q ? GROUP_CAP_SEARCH : GROUP_CAP_IDLE
+    const rank = (c: Command): number => {
+      if (!q) return 0
+      const label = c.label.toLowerCase()
+      if (label === q) return 0
+      if (label.startsWith(q)) return 1
+      if (label.includes(q)) return 2
+      if (`${c.group} ${c.hint ?? ""} ${c.keywords ?? ""}`.toLowerCase().includes(q)) return 3
+      return -1
+    }
+    const ranked = commands
+      .map((c, index) => ({ c, index, r: rank(c) }))
+      .filter((x) => x.r >= 0)
+      .sort((a, b) => a.r - b.r || a.index - b.index)
+    const perGroup = new Map<string, number>()
+    const out: Command[] = []
+    // With nothing typed, what was run last leads — as its own group, so the
+    // same command can still appear under its kind below.
+    if (!q) {
+      for (const id of recent) {
+        const found = commands.find((c) => c.id === id)
+        if (found) out.push({ ...found, id: `recent-${found.id}`, group: "Recent" })
+      }
+    }
+    for (const { c } of ranked) {
+      const n = perGroup.get(c.group) ?? 0
+      if (n >= cap) continue
+      perGroup.set(c.group, n + 1)
+      out.push(c)
+    }
+    return out
+  }, [commands, query, recent])
 
   // Clamp during render rather than syncing in an effect: the filtered set shrinks
   // as the query narrows, which can leave the stored index past the last row.
@@ -175,18 +295,20 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
       setActive(Math.max(activeIndex - 1, 0))
     } else if (e.key === "Enter") {
       e.preventDefault()
-      filtered[activeIndex]?.run()
+      const c = filtered[activeIndex]
+      if (c) runCommand(c)
     }
   }
 
-  // Group consecutive results by their group label for section headers.
+  // Results are ranked across groups, so group them by label rather than by
+  // adjacency, keeping the order each group first appeared in.
   const groups = useMemo(() => {
     const acc: { group: string; items: Command[] }[] = []
-    filtered.forEach((c) => {
-      const last = acc[acc.length - 1]
-      if (last && last.group === c.group) last.items.push(c)
+    for (const c of filtered) {
+      const existing = acc.find((g) => g.group === c.group)
+      if (existing) existing.items.push(c)
       else acc.push({ group: c.group, items: [c] })
-    })
+    }
     return acc
   }, [filtered])
 
@@ -221,7 +343,7 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
                   <button
                     key={c.id}
                     type="button"
-                    onClick={() => c.run()}
+                    onClick={() => runCommand(c)}
                     onMouseMove={() => setActive(idx)}
                     className={cn(
                       "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-sm",
@@ -231,7 +353,7 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
                     <c.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <span className="flex-1 truncate">{c.label}</span>
                     {c.hint && (
-                      <span className="shrink-0 text-xs uppercase tracking-wide text-muted-foreground/60">
+                      <span className="shrink-0 font-mono text-xs text-muted-foreground/60">
                         {c.hint}
                       </span>
                     )}
@@ -241,6 +363,23 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
             </div>
           ))
         )}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t px-4 py-2 text-xs text-muted-foreground">
+        <span>
+          <kbd className="rounded border bg-muted px-1 font-mono">↑</kbd>{" "}
+          <kbd className="rounded border bg-muted px-1 font-mono">↓</kbd> move
+        </span>
+        <span>
+          <kbd className="rounded border bg-muted px-1 font-mono">↵</kbd> open
+        </span>
+        <span>
+          <kbd className="rounded border bg-muted px-1 font-mono">esc</kbd> close
+        </span>
+        <span className="ml-auto">
+          anywhere: <kbd className="rounded border bg-muted px-1 font-mono">g</kbd> then a key
+          jumps to a page, <kbd className="rounded border bg-muted px-1 font-mono">?</kbd> opens
+          this
+        </span>
       </div>
     </Dialog>
   )

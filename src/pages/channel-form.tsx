@@ -6,6 +6,7 @@ import {
   useUpdateChannel,
   useValidateChannel,
 } from "@/hooks/use-channels"
+import { useWorkflows } from "@/hooks/use-workflows"
 import type {
   Channel,
   ChannelConfig,
@@ -17,24 +18,30 @@ import type {
   ValidationResponse,
 } from "@/api/types"
 import { cronTransport, stripCronRefusedConfig } from "@/lib/cron"
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { Callout } from "@/components/ui/callout"
 import { PageHeader } from "@/components/shared/page-header"
+import { Breadcrumbs } from "@/components/shared/breadcrumbs"
+import { FormError } from "@/components/shared/form-error"
+import { TagsInput } from "@/components/shared/tags-input"
+import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog"
 import { ValidationResults } from "@/components/shared/validation-results"
 import { ChannelConfigEditor } from "@/components/shared/channel-config-editor"
 import { CronTransportEditor } from "@/components/shared/cron-transport-editor"
-import { ArrowLeft, Save, ShieldCheck } from "lucide-react"
+import { Save, ShieldCheck } from "lucide-react"
 
 const CHANNEL_TYPES: ChannelType[] = ["sync", "async"]
 // `cron` (1.6) is the fourth protocol: started by a clock, not a caller.
 const PROTOCOLS: ChannelProtocol[] = ["rest", "http", "kafka", "cron"]
+const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 
 const isProtocol = (v: string | null): v is ChannelProtocol =>
   v !== null && (PROTOCOLS as string[]).includes(v)
@@ -55,6 +62,9 @@ function ChannelForm({
   const createChannel = useCreateChannel()
   const updateChannel = useUpdateChannel()
   const validateChannel = useValidateChannel()
+  // The picker's options. A workflow is bound by its slug id, which nobody
+  // should have to remember or retype.
+  const { data: workflowList } = useWorkflows({ limit: 1000 })
 
   const startProtocol = existing?.protocol ?? initialProtocol ?? "rest"
   const [name, setName] = useState(existing?.name ?? "")
@@ -68,23 +78,37 @@ function ChannelForm({
   const [cron, setCron] = useState<CronTransportConfig>(
     () => cronTransport(existing) ?? CRON_STARTER
   )
-  const [methods, setMethods] = useState((existing?.methods ?? []).join(", "))
+  const [methods, setMethods] = useState<string[]>(() =>
+    (existing?.methods ?? []).map((m) => m.toUpperCase())
+  )
   const [routePattern, setRoutePattern] = useState(existing?.route_pattern ?? "")
   const [topic, setTopic] = useState(existing?.topic ?? "")
   const [consumerGroup, setConsumerGroup] = useState(existing?.consumer_group ?? "")
   const [workflowId, setWorkflowId] = useState(existing?.workflow_id ?? "")
   const [priority, setPriority] = useState(String(existing?.priority ?? 0))
+  const [tags, setTags] = useState<string[]>(existing?.tags ?? [])
   const [config, setConfig] = useState<ChannelConfig>(existing?.config ?? {})
   const [transportConfig, setTransportConfig] = useState(() => {
     const tc = existing?.transport_config
     return tc && Object.keys(tc).length > 0 ? JSON.stringify(tc, null, 2) : ""
   })
   const [transportError, setTransportError] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<unknown>(null)
   const [validation, setValidation] = useState<ValidationResponse | null>(null)
+
+  // Everything the payload is built from, as one string, so "has anything
+  // changed since the form opened" is one comparison.
+  const snapshot = JSON.stringify({
+    name, description, channelType, protocol, cron, methods, routePattern, topic,
+    consumerGroup, workflowId, priority, tags, config, transportConfig,
+  })
+  const [initialSnapshot] = useState(snapshot)
+  const { blocker, markSaved } = useUnsavedChanges(snapshot !== initialSnapshot)
 
   const backTo = existing ? `/channels/${existing.channel_id}` : "/channels"
   const isCron = protocol === "cron"
+  const workflows = workflowList?.data ?? []
+  const workflowKnown = !workflowId || workflows.some((w) => w.workflow_id === workflowId)
 
   /**
    * Switching to cron on a draft: the caller-shaped fields have no meaning and
@@ -96,12 +120,18 @@ function ChannelForm({
     if (next === "cron") {
       setChannelType("async")
       setConfig((c) => stripCronRefusedConfig(c))
-      setMethods("")
+      setMethods([])
       setRoutePattern("")
       setTopic("")
       setConsumerGroup("")
     }
   }
+
+  const toggleMethod = (method: string, on: boolean) =>
+    setMethods((prev) => {
+      const without = prev.filter((m) => m !== method)
+      return on ? HTTP_METHODS.filter((m) => m === method || without.includes(m)) : without
+    })
 
   /**
    * Assemble the request, or return null after setting `error`. Shared by Save
@@ -113,11 +143,6 @@ function ChannelForm({
       setError("Name is required")
       return null
     }
-
-    const methodList = methods
-      .split(",")
-      .map((m) => m.trim().toUpperCase())
-      .filter(Boolean)
 
     let transport: Record<string, unknown> | undefined
     if (isCron) {
@@ -145,7 +170,7 @@ function ChannelForm({
       description: description || undefined,
       // A cron channel registers no route and no subscription; each of these
       // is refused there rather than ignored.
-      methods: !isCron && methodList.length > 0 ? methodList : undefined,
+      methods: !isCron && methods.length > 0 ? methods : undefined,
       route_pattern: !isCron && routePattern ? routePattern : undefined,
       topic: !isCron && topic ? topic : undefined,
       consumer_group: !isCron && consumerGroup ? consumerGroup : undefined,
@@ -155,6 +180,7 @@ function ChannelForm({
       priority: Number(priority) || 0,
       channel_type: isCron ? "async" : channelType,
       protocol,
+      tags,
     }
   }
 
@@ -165,7 +191,7 @@ function ChannelForm({
     if (!payload) return
     validateChannel.mutate(payload, {
       onSuccess: setValidation,
-      onError: (e) => setError(e instanceof Error ? e.message : "Validation failed"),
+      onError: setError,
     })
   }
 
@@ -190,18 +216,25 @@ function ChannelForm({
         workflow_id: payload.workflow_id,
         config: payload.config,
         priority: payload.priority,
+        tags: payload.tags,
       }
       updateChannel.mutate(
         { id: existing.channel_id, req },
         {
-          onSuccess: () => navigate(`/channels/${existing.channel_id}`),
-          onError: (e) => setError(e instanceof Error ? e.message : "Update failed"),
+          onSuccess: () => {
+            markSaved()
+            navigate(`/channels/${existing.channel_id}`)
+          },
+          onError: setError,
         }
       )
     } else {
       createChannel.mutate(payload, {
-        onSuccess: (c) => navigate(`/channels/${c.channel_id}`),
-        onError: (e) => setError(e instanceof Error ? e.message : "Create failed"),
+        onSuccess: (c) => {
+          markSaved()
+          navigate(`/channels/${c.channel_id}`)
+        },
+        onError: setError,
       })
     }
   }
@@ -210,11 +243,13 @@ function ChannelForm({
 
   return (
     <div className="space-y-6">
-      <Button variant="ghost" asChild>
-        <Link to={backTo}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back
-        </Link>
-      </Button>
+      <Breadcrumbs
+        items={[
+          { label: "Channels", to: "/channels" },
+          ...(existing ? [{ label: existing.name, to: backTo }] : []),
+          { label: isEdit ? "Edit" : isCron ? "New cron channel" : "New channel" },
+        ]}
+      />
 
       <PageHeader
         title={isEdit ? "Edit Channel" : isCron ? "Create Cron Channel" : "Create Channel"}
@@ -231,7 +266,7 @@ function ChannelForm({
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <Label>Name</Label>
+            <Label required>Name</Label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -247,11 +282,21 @@ function ChannelForm({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label hint={isCron ? "A cron channel is always async" : undefined}>Type</Label>
+              <Label
+                hint={
+                  isCron
+                    ? "A cron channel is always async"
+                    : isEdit
+                      ? "Fixed after create"
+                      : "Fixed after create — a new channel is needed to change it"
+                }
+              >
+                Type
+              </Label>
               {isEdit || isCron ? (
                 <div className="pt-1"><Badge variant="outline">{channelType}</Badge></div>
               ) : (
-                <Select value={channelType} onChange={(e) => setChannelType(e.target.value as ChannelType)}>
+                <Select value={channelType} onChange={(e) => setChannelType(e.target.value as ChannelType)} aria-label="Channel type">
                   {CHANNEL_TYPES.map((t) => (
                     <option key={t} value={t}>{t}</option>
                   ))}
@@ -259,7 +304,7 @@ function ChannelForm({
               )}
             </div>
             <div>
-              <Label>Protocol</Label>
+              <Label hint={isEdit ? "Fixed after create" : "Fixed after create"}>Protocol</Label>
               {isEdit ? (
                 <div className="pt-1"><Badge variant="outline" className="uppercase">{protocol}</Badge></div>
               ) : (
@@ -276,40 +321,51 @@ function ChannelForm({
             </div>
           </div>
 
-          {isCron ? (
-            <div>
-              <Label>Priority</Label>
-              <Input type="number" value={priority} onChange={(e) => setPriority(e.target.value)} />
-            </div>
-          ) : (
+          {!isCron && (
             <>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Methods</Label>
-                  <Input
-                    value={methods}
-                    onChange={(e) => setMethods(e.target.value)}
-                    placeholder="GET, POST"
-                    aria-label="HTTP methods"
-                  />
-                </div>
-                <div>
-                  <Label>Priority</Label>
-                  <Input type="number" value={priority} onChange={(e) => setPriority(e.target.value)} />
+              <div>
+                <Label hint="Which verbs the route answers; a REST channel needs at least one.">
+                  Methods
+                </Label>
+                <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1" role="group" aria-label="HTTP methods">
+                  {HTTP_METHODS.map((m) => (
+                    <label key={m} className="flex cursor-pointer items-center gap-1.5 font-mono text-sm">
+                      <Checkbox
+                        checked={methods.includes(m)}
+                        onCheckedChange={(on) => toggleMethod(m, on)}
+                        aria-label={m}
+                      />
+                      {m}
+                    </label>
+                  ))}
                 </div>
               </div>
 
               <div>
-                <Label>Route Pattern</Label>
+                <Label hint="Matched byte-exactly; {param} segments become metadata.">
+                  Route Pattern
+                </Label>
                 <Input
                   value={routePattern}
                   onChange={(e) => setRoutePattern(e.target.value)}
                   placeholder="/api/v1/orders"
                   aria-label="Route pattern"
+                  className="font-mono"
                 />
               </div>
             </>
           )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label hint="Higher wins when two channels match the same request.">Priority</Label>
+              <Input type="number" value={priority} onChange={(e) => setPriority(e.target.value)} aria-label="Priority" />
+            </div>
+            <div>
+              <Label hint="Filters the list, the map and the export.">Tags</Label>
+              <TagsInput value={tags} onChange={setTags} placeholder="orders, billing" aria-label="Tags" />
+            </div>
+          </div>
 
           {isCron && <CronTransportEditor value={cron} onChange={setCron} />}
 
@@ -359,26 +415,44 @@ function ChannelForm({
           <div>
             <Label
               required={isCron}
-              hint={isCron ? "The workflow the schedule runs; the payload arrives where a request body would." : undefined}
+              hint={
+                isCron
+                  ? "The workflow the schedule runs; the payload arrives where a request body would."
+                  : "What the channel runs. Activating the channel needs this workflow active."
+              }
             >
-              Linked Workflow ID
+              Linked workflow
             </Label>
-            <Input
+            <Select
               value={workflowId}
               onChange={(e) => setWorkflowId(e.target.value)}
-              aria-label="Linked workflow ID"
-            />
+              aria-label="Linked workflow"
+            >
+              <option value="">{isCron ? "Choose a workflow" : "None yet"}</option>
+              {!workflowKnown && (
+                <option value={workflowId}>{workflowId} · not in the list</option>
+              )}
+              {(["active", "draft", "archived"] as const).map((status) => {
+                const group = workflows.filter((w) => w.status === status)
+                if (group.length === 0) return null
+                return (
+                  <optgroup key={status} label={status}>
+                    {group.map((w) => (
+                      <option key={w.workflow_id} value={w.workflow_id}>
+                        {w.name} · {w.workflow_id}
+                      </option>
+                    ))}
+                  </optgroup>
+                )
+              })}
+            </Select>
           </div>
 
           <ChannelConfigEditor value={config} onChange={setConfig} protocol={protocol} />
 
           {validation && <ValidationResults result={validation} validLabel="Channel is valid." />}
 
-          {error && (
-            <Callout variant="destructive">
-              {error}
-            </Callout>
-          )}
+          <FormError error={error} />
 
           <div className="flex justify-end gap-2">
             <Button variant="outline" asChild>
@@ -390,11 +464,13 @@ function ChannelForm({
             </Button>
             <Button onClick={handleSubmit} disabled={isPending}>
               <Save className="h-4 w-4" />
-              {isPending ? "Saving..." : "Save"}
+              {isPending ? "Saving..." : isEdit ? "Save Draft" : "Create Draft"}
             </Button>
           </div>
         </CardContent>
       </Card>
+
+      <UnsavedChangesDialog blocker={blocker} />
     </div>
   )
 }

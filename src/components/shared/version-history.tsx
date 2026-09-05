@@ -1,5 +1,5 @@
 import { StatusBadge } from "@/components/shared/status-badge"
-import { formatDate } from "@/lib/utils"
+import { formatDate, formatWhen } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { EntityStatus, PaginatedResponse } from "@/api/types"
 
@@ -44,7 +44,9 @@ export function VersionHistory({ versions, isLoading }: VersionHistoryProps) {
             <span className="text-sm font-medium">v{v.version}</span>
             <StatusBadge status={v.status} />
           </div>
-          <span className="text-xs text-muted-foreground">{formatDate(v.created_at)}</span>
+          <span className="text-xs text-muted-foreground" title={formatDate(v.created_at)}>
+            {formatWhen(v.created_at)}
+          </span>
         </div>
       ))}
     </div>

@@ -1,24 +1,28 @@
 import { useState } from "react"
-import { Link, useLocation, useParams, useSearchParams } from "react-router"
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router"
 import { useTrace } from "@/hooks/use-traces"
+import { useChannel } from "@/hooks/use-channels"
 import type { ExecutionStep } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { JsonViewer } from "@/components/shared/json-viewer"
+import { ErrorState } from "@/components/shared/error-state"
+import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { formatDate, formatDuration, cn } from "@/lib/utils"
 import { traceStatusBadgeClass, stepResultBadgeClass, stepResultDotClass } from "@/lib/status"
-import { ArrowLeft, ChevronDown, ChevronRight, AlertCircle } from "lucide-react"
-
-/** Normalise the parsed task_trace_json into a list of execution steps. */
-function extractSteps(raw: unknown): ExecutionStep[] {
-  if (Array.isArray(raw)) return raw as ExecutionStep[]
-  if (raw && typeof raw === "object" && Array.isArray((raw as { steps?: unknown }).steps)) {
-    return (raw as { steps: ExecutionStep[] }).steps
-  }
-  return []
-}
+import { extractSteps, firstTaskPayload } from "@/lib/trace-payload"
+import { toast } from "sonner"
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  GitBranch,
+  Search,
+  Send,
+} from "lucide-react"
 
 const humanize = (key: string) =>
   key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
@@ -52,7 +56,18 @@ function VerdictTile({ label, value }: { label: string; value: Scalar }) {
   )
 }
 
-function TaskStep({ step, index, isLast }: { step: ExecutionStep; index: number; isLast: boolean }) {
+function TaskStep({
+  step,
+  index,
+  isLast,
+  share,
+}: {
+  step: ExecutionStep
+  index: number
+  isLast: boolean
+  /** This step's duration as a share of the longest step, for the bar. */
+  share: number | null
+}) {
   const [open, setOpen] = useState(false)
   const result = typeof step.result === "string" ? step.result.toLowerCase() : undefined
   const label = step.task_name || step.task_id || step.function || `Task ${index + 1}`
@@ -68,7 +83,17 @@ function TaskStep({ step, index, isLast }: { step: ExecutionStep; index: number;
           stepResultDotClass(result),
         )}
       />
-      <div className="mb-2 rounded-md border">
+      <div className="mb-2 overflow-hidden rounded-md border">
+        {/* The slow step is visible without expanding anything: a bar scaled
+            to the longest step in the run. */}
+        {share != null && (
+          <div className="h-1 w-full bg-muted" aria-hidden>
+            <div
+              className={cn("h-1", result === "error" ? "bg-destructive" : "bg-chart-1")}
+              style={{ width: `${Math.max(2, share * 100)}%` }}
+            />
+          </div>
+        )}
         <button
           onClick={() => setOpen(!open)}
           className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50"
@@ -116,19 +141,26 @@ export function TraceDetailPage() {
   // before 1.6; the server itself sends the token as the `x-trace-token`
   // header either way.
   const location = useLocation()
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const stateToken = (location.state as { traceToken?: string } | null)?.traceToken
-  const { data: trace, isLoading, error } = useTrace(
+  const routeState = location.state as { traceToken?: string; siblings?: string[] } | null
+  const stateToken = routeState?.traceToken
+  // The list hands over the ids on the page it was showing, so the detail can
+  // step through them; there is no time-range API to find a neighbour by.
+  const siblings = routeState?.siblings ?? []
+  const { data: trace, isLoading, error, refetch } = useTrace(
     id ?? "",
     stateToken ?? searchParams.get("token") ?? undefined
   )
+  // The trace names its channel; the channel names the workflow that ran.
+  const { data: channel } = useChannel(trace?.channel_id ?? "")
   const [showRaw, setShowRaw] = useState(false)
 
   if (isLoading) {
     return (
       <div className="space-y-6">
         <Button variant="ghost" asChild>
-          <Link to="/traces"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Traces</Link>
+          <Link to="/traces"><ChevronLeft className="mr-2 h-4 w-4" /> Back to Traces</Link>
         </Button>
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-40 w-full" />
@@ -139,15 +171,12 @@ export function TraceDetailPage() {
 
   if (error || !trace) {
     return (
-      <div className="space-y-6">
-        <Button variant="ghost" asChild>
-          <Link to="/traces"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Traces</Link>
-        </Button>
-        <div className="flex items-center gap-2 text-destructive">
-          <AlertCircle className="h-5 w-5" />
-          <p>Failed to load trace{id ? ` ${id}` : ""}.</p>
-        </div>
-      </div>
+      <ErrorState
+        title={`Failed to load trace${id ? ` ${id}` : ""}`}
+        error={error}
+        onRetry={() => refetch()}
+        backTo={{ to: "/traces", label: "Back to Traces" }}
+      />
     )
   }
 
@@ -155,12 +184,57 @@ export function TraceDetailPage() {
   const resultErrors = result?.errors
   const taskSteps = extractSteps(trace.task_trace_json)
   const { scalars, nested } = splitOutput(result?.data)
+  const longestStep = Math.max(0, ...taskSteps.map((s) => s.duration_ms ?? 0))
+  const position = siblings.indexOf(trace.id)
+  const prevId = position > 0 ? siblings[position - 1] : null
+  const nextId = position >= 0 && position < siblings.length - 1 ? siblings[position + 1] : null
+  // The request as the first task saw it — the closest thing to the original
+  // input the trace keeps. Re-sending it is how a failure gets reproduced.
+  const firstPayload = firstTaskPayload(trace)
+  const canResend = !!trace.channel && trace.mode !== "cron" && firstPayload !== null
+  const copyId = () => {
+    navigator.clipboard
+      ?.writeText(trace.id)
+      .then(() => toast.success("Trace id copied"))
+      .catch(() => toast.error("Could not copy the trace id"))
+  }
 
   return (
     <div className="space-y-6">
-      <Button variant="ghost" asChild>
-        <Link to="/traces"><ArrowLeft className="mr-2 h-4 w-4" /> Back to Traces</Link>
-      </Button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Breadcrumbs
+          items={[
+            { label: "Traces", to: "/traces" },
+            ...(trace.channel ? [{ label: trace.channel, to: `/traces?channel=${encodeURIComponent(trace.channel)}` }] : []),
+            { label: trace.id.slice(0, 8) },
+          ]}
+        />
+        {siblings.length > 1 && (
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!prevId}
+              onClick={() => prevId && navigate(`/traces/${prevId}`, { state: routeState })}
+              aria-label="Newer trace"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" /> Newer
+            </Button>
+            <span className="px-1 tabular-nums">
+              {position + 1} of {siblings.length}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!nextId}
+              onClick={() => nextId && navigate(`/traces/${nextId}`, { state: routeState })}
+              aria-label="Older trace"
+            >
+              Older <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
+      </div>
 
       {/* Verdict header — leads with the outcome */}
       <Card>
@@ -181,7 +255,19 @@ export function TraceDetailPage() {
               )
             )}
             <span className="text-sm text-muted-foreground">{formatDuration(trace.duration_ms)}</span>
-            <span className="ml-auto font-mono text-xs text-muted-foreground">{trace.id}</span>
+            <span className="ml-auto flex items-center gap-1 font-mono text-xs text-muted-foreground">
+              {trace.id}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={copyId}
+                aria-label="Copy trace id"
+                title="Copy trace id"
+                className="text-muted-foreground"
+              >
+                <Copy />
+              </Button>
+            </span>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -206,6 +292,37 @@ export function TraceDetailPage() {
               {trace.error}
             </pre>
           )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            {channel?.workflow_id && (
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/workflows/${channel.workflow_id}`} title="The workflow this channel runs">
+                  <GitBranch className="h-3.5 w-3.5" /> Workflow {channel.workflow_id}
+                </Link>
+              </Button>
+            )}
+            {trace.status === "failed" && trace.channel && (
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/traces?channel=${encodeURIComponent(trace.channel)}&status=failed`}>
+                  <Search className="h-3.5 w-3.5" /> Similar failures
+                </Link>
+              </Button>
+            )}
+            {canResend && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  navigate(`/console?channel=${encodeURIComponent(trace.channel as string)}`, {
+                    state: { payload: firstPayload },
+                  })
+                }
+                title="Open the console with this run's request payload, as the first task saw it"
+              >
+                <Send className="h-3.5 w-3.5" /> Re-send in console
+              </Button>
+            )}
+          </div>
 
           {scalars.length > 0 && (
             <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -232,7 +349,13 @@ export function TraceDetailPage() {
           <CardContent>
             <ol className="relative">
               {taskSteps.map((step, i) => (
-                <TaskStep key={i} step={step} index={i} isLast={i === taskSteps.length - 1} />
+                <TaskStep
+                  key={i}
+                  step={step}
+                  index={i}
+                  isLast={i === taskSteps.length - 1}
+                  share={longestStep > 0 && step.duration_ms != null ? step.duration_ms / longestStep : null}
+                />
               ))}
             </ol>
           </CardContent>

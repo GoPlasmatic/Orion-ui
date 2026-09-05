@@ -18,9 +18,12 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { TraceAnalytics } from "@/components/traces/trace-analytics"
 import { EmptyState } from "@/components/shared/empty-state"
 import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
-import { formatDate, formatDuration } from "@/lib/utils"
+import { formatDate, formatDuration, formatRelative } from "@/lib/utils"
 import { traceStatusBadgeClass } from "@/lib/status"
-import { ArrowUpDown, ArrowUp, ArrowDown, Activity } from "lucide-react"
+import { ArrowUpDown, ArrowUp, ArrowDown, Activity, Pause, Play } from "lucide-react"
+
+/** Poll cadence while the list is live — one trace row is cheap. */
+const LIVE_INTERVAL_MS = 5_000
 
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, Trace>()
@@ -45,10 +48,26 @@ const columns = columnHelper.columns([
     header: "Mode",
     cell: (info) => <Badge variant="outline">{info.getValue()}</Badge>,
   }),
+  // The row carries the failure reason; making the operator open every failed
+  // trace to read it was the single most repeated click in an incident.
+  columnHelper.accessor("error_message", {
+    header: "Error",
+    cell: (info) => {
+      const message = info.getValue()
+      if (!message) return <span className="text-muted-foreground">—</span>
+      return (
+        <span className="block max-w-xs truncate text-sm text-destructive" title={message}>
+          {message}
+        </span>
+      )
+    },
+  }),
   columnHelper.accessor("created_at", {
     header: "Created",
     cell: (info) => (
-      <span className="text-muted-foreground">{formatDate(info.getValue())}</span>
+      <span className="text-muted-foreground" title={formatDate(info.getValue())}>
+        {formatRelative(info.getValue()) ?? formatDate(info.getValue())}
+      </span>
     ),
   }),
   columnHelper.accessor("duration_ms", {
@@ -79,6 +98,9 @@ export function TracesPage() {
   // operator into an unfiltered list and asking them to retype the name.
   const [channelFilter, setChannelFilter] = useState(() => params.get("channel") ?? "")
   const [modeFilter, setModeFilter] = useState<TraceMode | "">("")
+  // Off by default: a list that reorders itself under the pointer is the wrong
+  // default for reading, and the right one for watching an incident unfold.
+  const [live, setLive] = useState(false)
 
   // Keep the URL in step so the filtered view is linkable and survives a reload.
   function updateChannelFilter(value: string) {
@@ -93,16 +115,19 @@ export function TracesPage() {
   // This page shows a count, so it opts into the total explicitly — every other
   // trace read (analytics, the operations dashboard) leaves it off and does not
   // pay for the scan.
-  const { data, isLoading } = useTraces({
-    limit: PAGE_SIZE,
-    offset,
-    include_total: true,
-    sort_by: sortBy,
-    sort_order: sortOrder,
-    status: statusFilter || undefined,
-    channel: channelFilter || undefined,
-    mode: modeFilter || undefined,
-  })
+  const { data, isLoading } = useTraces(
+    {
+      limit: PAGE_SIZE,
+      offset,
+      include_total: true,
+      sort_by: sortBy,
+      sort_order: sortOrder,
+      status: statusFilter || undefined,
+      channel: channelFilter || undefined,
+      mode: modeFilter || undefined,
+    },
+    { refetchInterval: live ? LIVE_INTERVAL_MS : undefined },
+  )
 
   const table = useTable({
     features: listTableFeatures,
@@ -133,7 +158,25 @@ export function TracesPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Traces" description="Execution history and monitoring" />
+      <PageHeader title="Traces" description="Execution history and monitoring">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setLive((v) => !v)}
+          aria-pressed={live}
+          title={live ? "Stop refreshing the list" : `Refresh the list every ${LIVE_INTERVAL_MS / 1000} s`}
+        >
+          {live ? (
+            <span className="relative flex h-3.5 w-3.5 items-center justify-center">
+              <span className="absolute h-2 w-2 animate-ping rounded-full bg-success/60" />
+              <Pause className="relative h-3.5 w-3.5" />
+            </span>
+          ) : (
+            <Play className="h-3.5 w-3.5" />
+          )}
+          {live ? "Pause" : "Live"}
+        </Button>
+      </PageHeader>
 
       <Tabs defaultValue="list">
         <TabsList>
@@ -233,7 +276,17 @@ export function TracesPage() {
                 <TableRow
                   key={row.id}
                   className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => navigate(`/traces/${row.original.id}`)}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.click()
+                  }}
+                  // The visible page travels along, so the detail can step to
+                  // the previous and next trace without a time-range API.
+                  onClick={() =>
+                    navigate(`/traces/${row.original.id}`, {
+                      state: { siblings: (data?.data ?? []).map((t) => t.id) },
+                    })
+                  }
                 >
                   {row.getAllCells().map((cell) => (
                     <TableCell key={cell.id}>

@@ -1,12 +1,14 @@
-import { useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router"
 import { DataLogicEditor } from "@goplasmatic/datalogic-ui"
+import { WorkflowVisualizer } from "@goplasmatic/dataflow-ui"
 import {
   useWorkflow,
   useCreateWorkflow,
   useUpdateWorkflow,
   useValidateWorkflow,
 } from "@/hooks/use-workflows"
+import { useFunctions } from "@/hooks/use-functions"
 import type { JsonLogicValue, Step, ValidationResponse, Workflow } from "@/api/types"
 import {
   countGroups,
@@ -16,18 +18,38 @@ import {
   lintSteps,
   type StepIssue,
 } from "@/lib/workflow-steps"
+import { rangeAtPath } from "@/lib/json-path"
+import { stepCompletions } from "@/lib/workflow-completions"
+import { toVisualizerWorkflow } from "@/lib/workflow-mapper"
 import { useTheme } from "@/lib/use-theme"
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Callout } from "@/components/ui/callout"
 import { PageHeader } from "@/components/shared/page-header"
+import { Breadcrumbs } from "@/components/shared/breadcrumbs"
+import { FormError } from "@/components/shared/form-error"
+import { TagsInput } from "@/components/shared/tags-input"
+import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog"
 import { ValidationResults } from "@/components/shared/validation-results"
-import { ArrowLeft, Braces, Layers, Network, OctagonX, Plus, Save, ShieldCheck, Trash2 } from "lucide-react"
+import { JsonEditor } from "@/components/shared/json-editor"
+import type { Diagnostic, JsonEditorHandle, LintContext } from "@/lib/editor-types"
+import {
+  Braces,
+  Eye,
+  EyeOff,
+  Layers,
+  Network,
+  OctagonX,
+  Plus,
+  Save,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react"
 
 /** One task, as inserted by "Add task". */
 const SAMPLE_TASK = `{
@@ -84,6 +106,9 @@ const SAMPLE_GROUP = `{
   ]
 }`
 
+/** How long the preview waits after the last keystroke before re-laying out. */
+const PREVIEW_DEBOUNCE_MS = 350
+
 /** Every id already in use, across tasks and groups alike. */
 function collectIds(steps: Step[]): Set<string> {
   const ids = new Set<string>()
@@ -114,6 +139,12 @@ function uniquifyIds(step: unknown, taken: Set<string>): unknown {
   }
   if (Array.isArray(node.tasks)) node.tasks.forEach((child) => uniquifyIds(child, taken))
   return node
+}
+
+/** A lint finding with the place in the document it was found. */
+interface PositionedIssue extends StepIssue {
+  from?: number
+  to?: number
 }
 
 /**
@@ -182,12 +213,11 @@ function ConditionEditor({
 
       {mode === "json" ? (
         <div>
-          <Textarea
+          <JsonEditor
             value={jsonText}
-            onChange={(e) => onJsonChange(e.target.value)}
-            rows={8}
-            className="font-mono text-sm"
-            placeholder='{ "==": [{ "var": "metadata.type" }, "order"] }'
+            onChange={onJsonChange}
+            height="14rem"
+            aria-label="Trigger condition JSON"
           />
           {jsonError && <p className="mt-1 text-xs text-destructive">{jsonError}</p>}
         </div>
@@ -225,18 +255,20 @@ function ConditionEditor({
   )
 }
 
-
 function WorkflowForm({ existing }: { existing?: Workflow }) {
   const isEdit = !!existing
   const navigate = useNavigate()
   const createWorkflow = useCreateWorkflow()
   const updateWorkflow = useUpdateWorkflow()
   const validateWorkflow = useValidateWorkflow()
+  // The catalogue, for completion: function names inside `function.name`,
+  // a function's declared fields inside its `input`.
+  const { data: functions } = useFunctions()
 
   const [name, setName] = useState(existing?.name ?? "")
   const [description, setDescription] = useState(existing?.description ?? "")
   const [priority, setPriority] = useState(String(existing?.priority ?? 0))
-  const [tags, setTags] = useState((existing?.tags ?? []).join(", "))
+  const [tags, setTags] = useState<string[]>(existing?.tags ?? [])
   const [continueOnError, setContinueOnError] = useState(existing?.continue_on_error ?? false)
   const [condition, setCondition] = useState<JsonLogicValue | undefined>(
     existing?.condition ?? undefined
@@ -245,41 +277,96 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
     existing ? JSON.stringify(existing.tasks ?? [], null, 2) : SAMPLE_TASKS
   )
   const [tasksError, setTasksError] = useState<string | null>(null)
-  const [taskIssues, setTaskIssues] = useState<StepIssue[]>([])
+  const [taskIssues, setTaskIssues] = useState<PositionedIssue[]>([])
   const [validation, setValidation] = useState<ValidationResponse | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<unknown>(null)
+  const [showPreview, setShowPreview] = useState(true)
+  // What the preview draws: the last document that parsed as an array of
+  // steps with no shape issues. Debounced, so typing does not re-lay out the
+  // diagram on every keystroke.
+  const [previewSteps, setPreviewSteps] = useState<Step[] | null>(() =>
+    existing && Array.isArray(existing.tasks) ? existing.tasks : null
+  )
+  const editorRef = useRef<JsonEditorHandle>(null)
+
+  const snapshot = JSON.stringify({ name, description, priority, tags, continueOnError, condition, tasksText })
+  const [initialSnapshot] = useState(snapshot)
+  const { blocker, markSaved } = useUnsavedChanges(snapshot !== initialSnapshot)
 
   const backTo = existing ? `/workflows/${existing.workflow_id}` : "/workflows"
   const editLocked = existing ? existing.status !== "draft" : false
 
+  const completions = useMemo(() => [stepCompletions(() => functions ?? [])], [functions])
+
   /**
-   * Parse the tasks editor and run the client-side shape lint.
+   * The editor's diagnostics: syntax errors from the parser's own error nodes,
+   * then the shape lint mapped from the coordinate it reports to the range in
+   * the document. Runs debounced after every edit, so a group without an `id`
+   * is underlined where it is typed rather than reported on Save.
    *
    * The lint is advisory — `POST /workflows/validate` is the authority and
    * checks the things only the server can (function names against the real
-   * registry, connector closure, JSONLogic compilation). Reporting the
-   * structural problems here means the ones Orion 1.2 turned into create-time
-   * 400s — a group with no `id`, an id colliding across the shared task/group
-   * namespace, an empty `tasks` — surface without a round trip. Issues do not
-   * block Save: the server has the final word, and a lint that refuses to
-   * submit would be a second, disagreeing validator.
+   * registry, connector closure, JSONLogic compilation). Issues do not block
+   * Save: the server has the final word, and a lint that refuses to submit
+   * would be a second, disagreeing validator.
    */
+  const lint = useCallback(({ doc, tree, syntaxErrors }: LintContext): Diagnostic[] => {
+    if (syntaxErrors.length > 0) {
+      setTaskIssues([])
+      return syntaxErrors
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(doc)
+    } catch (e) {
+      setTaskIssues([])
+      return [{ from: 0, to: 0, severity: "error", message: e instanceof Error ? e.message : "Invalid JSON" }]
+    }
+    if (!Array.isArray(parsed)) {
+      setTaskIssues([{ path: "tasks", message: "must be a JSON array", from: 0 }])
+      return [{ from: 0, to: doc.length, severity: "error", message: "Tasks must be a JSON array" }]
+    }
+    const issues = lintSteps(parsed)
+    const positioned: PositionedIssue[] = issues.map((issue) => {
+      const range = rangeAtPath(tree, doc, issue.path)
+      return { ...issue, from: range?.from, to: range?.to }
+    })
+    setTaskIssues(positioned)
+    return positioned.map((issue) => ({
+      from: issue.from ?? 0,
+      to: issue.to ?? issue.from ?? 0,
+      severity: "warning",
+      message: `${issue.path} — ${issue.message}`,
+    }))
+  }, [])
+
+  // The preview follows the document, a beat behind it.
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      try {
+        const parsed = JSON.parse(tasksText)
+        if (Array.isArray(parsed) && lintSteps(parsed).length === 0) setPreviewSteps(parsed as Step[])
+      } catch {
+        // Keep the last good preview while the document is mid-edit.
+      }
+    }, PREVIEW_DEBOUNCE_MS)
+    return () => window.clearTimeout(id)
+  }, [tasksText])
+
+  /** Parse the tasks editor and run the client-side shape lint (for Save and Validate). */
   const parseTasks = (): unknown[] | null => {
     let parsed: unknown
     try {
       parsed = JSON.parse(tasksText)
     } catch {
       setTasksError("Tasks are not valid JSON")
-      setTaskIssues([])
       return null
     }
     if (!Array.isArray(parsed)) {
       setTasksError("Tasks must be a JSON array")
-      setTaskIssues([])
       return null
     }
     setTasksError(null)
-    setTaskIssues(lintSteps(parsed))
     return parsed
   }
 
@@ -304,7 +391,6 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
     const next = [...parsed, uniquifyIds(JSON.parse(snippet), collectIds(parsed as Step[]))]
     setTasksText(JSON.stringify(next, null, 2))
     setTasksError(null)
-    setTaskIssues(lintSteps(next))
   }
 
   const buildPayload = () => {
@@ -315,18 +401,13 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
     const tasks = parseTasks()
     if (!tasks) return null
 
-    const tagList = tags
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean)
-
     return {
       name,
       description: description || undefined,
       priority: Number(priority) || 0,
       condition,
       tasks,
-      tags: tagList,
+      tags,
       continue_on_error: continueOnError,
     }
   }
@@ -338,7 +419,7 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
     if (!payload) return
     validateWorkflow.mutate(payload, {
       onSuccess: setValidation,
-      onError: (e) => setError(e instanceof Error ? e.message : "Validation failed"),
+      onError: setError,
     })
   }
 
@@ -351,14 +432,20 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
       updateWorkflow.mutate(
         { id: existing.workflow_id, req: payload },
         {
-          onSuccess: () => navigate(`/workflows/${existing.workflow_id}`),
-          onError: (e) => setError(e instanceof Error ? e.message : "Update failed"),
+          onSuccess: () => {
+            markSaved()
+            navigate(`/workflows/${existing.workflow_id}`)
+          },
+          onError: setError,
         }
       )
     } else {
       createWorkflow.mutate(payload, {
-        onSuccess: (w) => navigate(`/workflows/${w.workflow_id}`),
-        onError: (e) => setError(e instanceof Error ? e.message : "Create failed"),
+        onSuccess: (w) => {
+          markSaved()
+          navigate(`/workflows/${w.workflow_id}`)
+        },
+        onError: setError,
       })
     }
   }
@@ -385,13 +472,39 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
       : taskLabel
   })()
 
+  // The preview draws what the server would see, on the visualizer the detail
+  // page uses — so the diagram is not a surprise after Save.
+  const previewWorkflow = useMemo(
+    () =>
+      previewSteps
+        ? toVisualizerWorkflow({
+            workflow_id: existing?.workflow_id ?? "draft",
+            name: name || "Untitled workflow",
+            description: description || null,
+            priority: Number(priority) || 0,
+            tags,
+            condition,
+            continue_on_error: continueOnError,
+            status: existing?.status ?? "draft",
+            version: existing?.version ?? 1,
+            tasks: previewSteps,
+            content_hash: "",
+            created_at: "",
+            updated_at: "",
+          })
+        : null,
+    [previewSteps, existing?.workflow_id, existing?.status, existing?.version, name, description, priority, tags, condition, continueOnError],
+  )
+
   return (
     <div className="space-y-6">
-      <Button variant="ghost" asChild>
-        <Link to={backTo}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back
-        </Link>
-      </Button>
+      <Breadcrumbs
+        items={[
+          { label: "Workflows", to: "/workflows" },
+          ...(existing ? [{ label: existing.name, to: backTo }] : []),
+          { label: isEdit ? "Edit" : "New workflow" },
+        ]}
+      />
 
       <PageHeader
         title={isEdit ? "Edit Workflow" : "Create Workflow"}
@@ -414,7 +527,7 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <Label>Name</Label>
+            <Label required>Name</Label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -430,12 +543,12 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label>Priority</Label>
+              <Label hint="Higher wins when two workflows match the same message.">Priority</Label>
               <Input type="number" value={priority} onChange={(e) => setPriority(e.target.value)} />
             </div>
             <div>
-              <Label>Tags</Label>
-              <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="orders, billing" />
+              <Label hint="Filters the list and the export.">Tags</Label>
+              <TagsInput value={tags} onChange={setTags} placeholder="orders, billing" aria-label="Tags" />
             </div>
           </div>
 
@@ -452,91 +565,134 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
           </div>
 
           <ConditionEditor value={condition} onChange={setCondition} />
+        </CardContent>
+      </Card>
 
+      {/* The steps, in an editor that knows the shape and the catalogue, above
+          the diagram they will draw. Wider than the card above on purpose: the
+          document is where the time goes. */}
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="mb-1 flex items-center justify-between">
-              <Label className="mb-0">Steps</Label>
-              <Link
-                to="/functions"
-                target="_blank"
-                className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-              >
-                Function reference
-              </Link>
-            </div>
-            <p className="mb-2 text-xs text-muted-foreground">
-              Ordered JSON array. An element carrying <code className="font-mono">function</code> is
-              a task; one carrying its own <code className="font-mono">tasks</code> is a{" "}
-              <strong>group</strong> — a single condition gating that whole run, evaluated once on
-              entry. Any step may set <code className="font-mono">terminal: true</code> to end the
-              workflow after it, and a task may set{" "}
-              <code className="font-mono">halt_on: "failure"</code> to end it only when that task
-              failed. Use Validate to check function names and inputs against the server registry.
+            <CardTitle>Steps</CardTitle>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Ordered JSON array. An element carrying <code className="font-mono">function</code>{" "}
+              is a task; one carrying its own <code className="font-mono">tasks</code> is a{" "}
+              <strong>group</strong> — a single condition gating that whole run. Any step may set{" "}
+              <code className="font-mono">terminal: true</code>; a task may set{" "}
+              <code className="font-mono">halt_on: "failure"</code>. Type inside{" "}
+              <code className="font-mono">"function": {"{ \"name\": \"…\" }"}</code> for the
+              catalogue, inside its <code className="font-mono">input</code> for the fields it
+              declares, and press Ctrl-Space for the keys a step takes.
             </p>
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => appendStep(SAMPLE_TASK)}>
-                <Plus className="h-3.5 w-3.5" /> Add task
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => appendStep(SAMPLE_GROUP)}>
-                <Layers className="h-3.5 w-3.5" /> Add guard clause
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => appendStep(SAMPLE_HALT_TASK)}>
-                <OctagonX className="h-3.5 w-3.5" /> Add halt-on-failure
-              </Button>
-              {stepSummary && (
-                <span className="text-xs text-muted-foreground">{stepSummary}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => appendStep(SAMPLE_TASK)}>
+              <Plus className="h-3.5 w-3.5" /> Add task
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => appendStep(SAMPLE_GROUP)}>
+              <Layers className="h-3.5 w-3.5" /> Add guard clause
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => appendStep(SAMPLE_HALT_TASK)}>
+              <OctagonX className="h-3.5 w-3.5" /> Add halt-on-failure
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowPreview((v) => !v)}
+              aria-pressed={showPreview}
+            >
+              {showPreview ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              {showPreview ? "Hide preview" : "Show preview"}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="min-w-0 space-y-2">
+              <JsonEditor
+                ref={editorRef}
+                value={tasksText}
+                onChange={(text) => {
+                  setTasksText(text)
+                  setTasksError(null)
+                }}
+                lint={lint}
+                completions={completions}
+                height="24rem"
+                readOnly={editLocked}
+                aria-label="Steps JSON"
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>{stepSummary ?? "not a step array yet"}</span>
+                <span>
+                  {taskIssues.length === 0
+                    ? "shape lint: no findings · Validate checks the registry"
+                    : `${taskIssues.length} shape finding${taskIssues.length === 1 ? "" : "s"} · click one to go there`}
+                </span>
+              </div>
+              {tasksError && <p className="text-xs text-destructive">{tasksError}</p>}
+              {taskIssues.length > 0 && (
+                <ul className="space-y-1">
+                  {taskIssues.map((issue, i) => (
+                    <li key={i}>
+                      <button
+                        type="button"
+                        onClick={() => issue.from != null && editorRef.current?.goTo(issue.from, issue.to)}
+                        className="w-full rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-left text-xs text-warning transition-colors hover:bg-warning/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                      >
+                        <span className="font-mono">{issue.path}</span> — {issue.message}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
-            <Textarea
-              value={tasksText}
-              onChange={(e) => {
-                setTasksText(e.target.value)
-                setTasksError(null)
-                setTaskIssues([])
-              }}
-              rows={14}
-              className="font-mono text-sm"
-              aria-label="Steps JSON"
-            />
-            {tasksError && <p className="mt-1 text-xs text-destructive">{tasksError}</p>}
-            {taskIssues.length > 0 && (
-              <div className="mt-2 space-y-1">
-                {taskIssues.map((issue, i) => (
-                  <Callout key={i} variant="warning" icon={false} className="px-3.5 py-2">
-                    <span className="font-mono text-xs">{issue.path}</span> — {issue.message}
-                  </Callout>
-                ))}
+            {showPreview && (
+              <div className="min-w-0">
+                <div className="h-[30rem] overflow-hidden rounded-md border">
+                  {previewWorkflow ? (
+                    <WorkflowVisualizer workflows={[previewWorkflow]} />
+                  ) : (
+                    <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
+                      The preview draws the steps once they parse as an array with no shape
+                      findings.
+                    </div>
+                  )}
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  The same diagram the workflow page shows, redrawn as you type.
+                </p>
               </div>
             )}
           </div>
-
-          {validation && <ValidationResults result={validation} validLabel="Workflow is valid." />}
-
-          {error && (
-            <Callout variant="destructive">
-              {error}
-            </Callout>
-          )}
-
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" asChild>
-              <Link to={backTo}>Cancel</Link>
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleValidate}
-              disabled={validateWorkflow.isPending}
-            >
-              <ShieldCheck className="h-4 w-4" />
-              {validateWorkflow.isPending ? "Validating..." : "Validate"}
-            </Button>
-            <Button onClick={handleSubmit} disabled={isPending || editLocked}>
-              <Save className="h-4 w-4" />
-              {isPending ? "Saving..." : isEdit ? "Save Draft" : "Create Draft"}
-            </Button>
-          </div>
         </CardContent>
       </Card>
+
+      <div className="space-y-4">
+        {validation && <ValidationResults result={validation} validLabel="Workflow is valid." />}
+        <FormError error={error} />
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="outline" asChild>
+            <Link to={backTo}>Cancel</Link>
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleValidate}
+            disabled={validateWorkflow.isPending}
+          >
+            <ShieldCheck className="h-4 w-4" />
+            {validateWorkflow.isPending ? "Validating..." : "Validate"}
+          </Button>
+          <Button onClick={handleSubmit} disabled={isPending || editLocked}>
+            <Save className="h-4 w-4" />
+            {isPending ? "Saving..." : isEdit ? "Save Draft" : "Create Draft"}
+          </Button>
+        </div>
+      </div>
+
+      <UnsavedChangesDialog blocker={blocker} />
     </div>
   )
 }

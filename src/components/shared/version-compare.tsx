@@ -1,11 +1,16 @@
 import { useMemo, useState } from "react"
-import type { PaginatedResponse, Workflow } from "@/api/types"
+import type { PaginatedResponse } from "@/api/types"
 import { Select } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 
-interface VersionCompareProps {
-  versions?: PaginatedResponse<Workflow> | Workflow[]
+/** Any versioned entity — a workflow, a channel, a plugin. */
+interface Versioned {
+  version: number
+}
+
+interface VersionCompareProps<T extends Versioned> {
+  versions?: PaginatedResponse<T> | T[]
   isLoading?: boolean
 }
 
@@ -45,21 +50,24 @@ function diffLines(a: string, b: string): DiffLine[] {
   return out
 }
 
-/** Stable JSON view of a version, excluding volatile/status fields that aren't part of the definition. */
-function definitionJson(wf: Workflow): string {
-  const rest: Partial<Workflow> = { ...wf }
-  delete rest.status
-  delete rest.created_at
-  delete rest.updated_at
+/** Fields the database owns rather than the author: they differ between any two versions and say nothing. */
+const VOLATILE = ["status", "created_at", "updated_at", "content_hash"]
+
+/** Stable JSON view of a version, excluding the volatile fields that aren't part of the definition. */
+function definitionJson(entity: Versioned): string {
+  const rest: Record<string, unknown> = { ...(entity as unknown as Record<string, unknown>) }
+  for (const key of VOLATILE) delete rest[key]
   return JSON.stringify(rest, null, 2)
 }
 
 /**
- * Side-by-side(ish) compare of two workflow versions, rendered as a colored line
- * diff of their definitions. Reuses the version list already loaded for the
- * Versions tab — no extra fetch.
+ * Side-by-side(ish) compare of two versions of any versioned entity, rendered
+ * as a colored line diff of their definitions. Reuses the version list already
+ * loaded for the Versions tab — no extra fetch. A channel's auth secrets come
+ * back masked, so two versions with different keys diff as equal there; that
+ * is the server's masking, not a missing change.
  */
-export function VersionCompare({ versions, isLoading }: VersionCompareProps) {
+export function VersionCompare<T extends Versioned>({ versions, isLoading }: VersionCompareProps<T>) {
   const list = useMemo(
     () => (Array.isArray(versions) ? versions : (versions?.data ?? [])),
     [versions]
@@ -121,13 +129,13 @@ export function VersionCompare({ versions, isLoading }: VersionCompareProps) {
           <div
             key={i}
             className={cn(
-              "whitespace-pre-wrap px-1 font-mono",
-              d.type === "add" && "bg-success/15 text-success",
-              d.type === "del" && "bg-destructive/15 text-destructive"
+              "px-1",
+              d.type === "add" && "bg-success/10 text-success",
+              d.type === "del" && "bg-destructive/10 text-destructive",
             )}
           >
-            <span className="select-none opacity-60">
-              {d.type === "add" ? "+ " : d.type === "del" ? "- " : "  "}
+            <span className="mr-2 inline-block w-3 select-none text-muted-foreground">
+              {d.type === "add" ? "+" : d.type === "del" ? "-" : " "}
             </span>
             {d.text}
           </div>

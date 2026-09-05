@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
+import { JsonEditor } from "@/components/shared/json-editor"
 import { Braces, SlidersHorizontal } from "lucide-react"
 
 interface ConfigEditorShellProps<T> {
@@ -71,12 +71,7 @@ export function ConfigEditorShell<T>({ value, onChange, label, children }: Confi
 
       {mode === "json" ? (
         <div>
-          <Textarea
-            value={jsonText}
-            onChange={(e) => onJsonChange(e.target.value)}
-            rows={16}
-            className="font-mono text-sm"
-          />
+          <JsonEditor value={jsonText} onChange={onJsonChange} height="24rem" aria-label="Configuration JSON" />
           {jsonError && <p className="mt-1 text-xs text-destructive">{jsonError}</p>}
         </div>
       ) : (

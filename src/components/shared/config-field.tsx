@@ -3,7 +3,8 @@ import { DataLogicEditor } from "@goplasmatic/datalogic-ui"
 import { Plus, Trash2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import type { JsonLogicValue } from "@/api/types"
+import type { ConnectorType, JsonLogicValue } from "@/api/types"
+import { useConnectors } from "@/hooks/use-connectors"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
@@ -241,5 +242,40 @@ export function LogicField({
         <Trash2 className="h-3.5 w-3.5" /> Remove
       </Button>
     </div>
+  )
+}
+
+/**
+ * A connector, chosen from the registry rather than typed. A name typed into
+ * a text field was invisible until the server refused it (or, worse, until a
+ * guard silently found nothing). A stored value that is not in the registry
+ * — deleted since, or a typo already saved — stays selectable and says so.
+ */
+export function ConnectorField({
+  label,
+  value,
+  onChange,
+  types,
+  includeEmpty = "None",
+}: {
+  label: string
+  value: string | undefined
+  onChange: (value: string | undefined) => void
+  /** Restrict to these connector types; unset offers every connector. */
+  types?: ConnectorType[]
+  includeEmpty?: string
+}) {
+  const { data } = useConnectors({ limit: 1000 })
+  const list = (data?.data ?? []).filter((c) => !types || types.includes(c.connector_type))
+  const stray = value && !list.some((c) => c.name === value)
+  const options = [
+    ...(stray ? [{ value: value as string, label: `${value} · not in the registry` }] : []),
+    ...list.map((c) => ({
+      value: c.name,
+      label: `${c.name} · ${c.connector_type}${c.enabled ? "" : " · off"}`,
+    })),
+  ]
+  return (
+    <SelectField label={label} value={value} onChange={onChange} options={options} includeEmpty={includeEmpty} />
   )
 }

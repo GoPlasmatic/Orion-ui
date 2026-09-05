@@ -1,22 +1,34 @@
 import { Link } from "react-router"
+import { toast } from "sonner"
 import {
   ArrowRight,
   ArrowUpRight,
   GitBranch,
+  Link2,
+  Pencil,
+  Play,
   Plug,
   Radio,
   ScrollText,
+  Send,
+  ShieldAlert,
+  Unplug,
   Waypoints,
   X,
+  ZapOff,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Callout } from "@/components/ui/callout"
+import { Sparkline } from "@/components/ui/sparkline"
 import { StatusBadge } from "@/components/shared/status-badge"
-import { cn } from "@/lib/utils"
+import { useTraces } from "@/hooks/use-traces"
+import { useTriggerChannel } from "@/hooks/use-channels"
+import { cn, formatDate, formatRelative } from "@/lib/utils"
 import type { ConnectorUse, SystemGraph, SystemNode } from "@/lib/system-graph"
-import type { ChannelTraffic } from "@/hooks/use-metrics"
+import type { ChannelTraffic, TrafficSeries } from "@/hooks/use-metrics"
+import type { MapFaults, NodeFault } from "@/lib/faults"
 import {
   compactNumber,
   formatMs,
@@ -72,28 +84,51 @@ function ChannelLink({
   )
 }
 
+const FAULT_ICON = { quarantined: ShieldAlert, connector: Unplug, breaker: ZapOff } as const
+
 export function MapInspector({
   node,
   traffic,
+  series,
   load,
   graph,
   connectorsByName,
+  faults,
+  mapFaults,
   spanLabel,
+  hops,
+  onHopsChange,
   onSelect,
   onClose,
 }: {
   node: SystemNode
   traffic: ChannelTraffic | undefined
+  /** This channel's per-poll trend inside the window. */
+  series: TrafficSeries
   load: EffectiveLoad | undefined
   graph: SystemGraph
   connectorsByName: Map<string, ConnectorUse>
+  /** What is broken about this channel that its counters cannot show. */
+  faults: NodeFault[]
+  mapFaults: MapFaults
   spanLabel: string
+  /** Blast-radius reach, in call hops; Infinity for everything reachable. */
+  hops: number
+  onHopsChange: (hops: number) => void
   onSelect: (node: SystemNode) => void
   onClose: () => void
 }) {
   const level = healthOf(traffic)
   const windowed = traffic?.windowed ?? 0
   const derived = !!load && !load.metered && load.effective != null
+  const trigger = useTriggerChannel()
+  // The three most recent failures, so "what is wrong with it" is one click
+  // from "it is red" rather than a filtered list away.
+  const { data: failures } = useTraces(
+    { channel: node.name, status: "failed", limit: 3, sort_by: "created_at", sort_order: "desc" },
+    { enabled: !node.unresolved, refetchInterval: 15_000 },
+  )
+  const breakerHere = mapFaults.breakers.get(node.id) ?? []
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -103,21 +138,41 @@ export function MapInspector({
             <Radio className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <p className="truncate font-display text-sm font-semibold">{node.name}</p>
           </div>
-          <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+          <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
             {node.schedule
               ? `cron ${node.schedule}`
-              : `${node.methods.join(" ") || node.channelType} ${node.route ?? ""}`}
+              : node.topic
+                ? `kafka ${node.topic}`
+                : `${node.methods.join(" ") || node.channelType} ${node.route ?? ""}`}
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onClose}
-          aria-label="Close inspector"
-          className="-mr-1 shrink-0 text-muted-foreground"
-        >
-          <X />
-        </Button>
+        <div className="-mr-1 flex shrink-0 items-center">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => {
+              const url = `${window.location.origin}/system-map?select=${encodeURIComponent(node.id)}`
+              navigator.clipboard
+                .writeText(url)
+                .then(() => toast.success("Link copied", { description: url }))
+                .catch(() => toast.error("Could not copy the link"))
+            }}
+            aria-label="Copy a link to this channel on the map"
+            title="Copy link to this view"
+            className="text-muted-foreground"
+          >
+            <Link2 />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onClose}
+            aria-label="Close inspector"
+            className="text-muted-foreground"
+          >
+            <X />
+          </Button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4">
@@ -140,6 +195,41 @@ export function MapInspector({
           </div>
         )}
 
+        {/* ---- faults: what the counters cannot show ---- */}
+        {faults.map((fault, i) => {
+          const Icon = FAULT_ICON[fault.kind]
+          return (
+            <Callout
+              key={`${fault.kind}-${i}`}
+              variant={fault.tone === "destructive" ? "destructive" : "warning"}
+              icon={false}
+              className="px-3 py-2 text-xs"
+            >
+              <div className="flex items-start gap-2">
+                <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">
+                    {fault.kind === "quarantined"
+                      ? "Quarantined"
+                      : fault.kind === "connector"
+                        ? "Connector failed to load"
+                        : "Circuit breaker"}
+                  </p>
+                  <p className="mt-0.5">{fault.detail}</p>
+                  {fault.kind === "breaker" && breakerHere[0] && (
+                    <Link
+                      to={`/circuit-breakers?key=${encodeURIComponent(breakerHere[0].key)}`}
+                      className="mt-1 inline-block underline underline-offset-2"
+                    >
+                      Reset from the breakers page
+                    </Link>
+                  )}
+                </div>
+              </div>
+            </Callout>
+          )
+        })}
+
         {/* ---- live traffic ---- */}
         <div>
           <div className="mb-2 flex items-baseline justify-between">
@@ -154,9 +244,9 @@ export function MapInspector({
               <div className="grid grid-cols-3 gap-3">
                 <Stat label="rate" value={`${compactNumber(traffic.ratePerMin)}/m`} />
                 <Stat
-                  label={level === "rejected" ? "rejected" : "errors"}
+                  label={level === "notice" ? "rejected" : "errors"}
                   value={
-                    level === "rejected"
+                    level === "notice"
                       ? formatPct(traffic.rejectedPct)
                       : formatPct(traffic.errorPct)
                   }
@@ -164,6 +254,19 @@ export function MapInspector({
                 />
                 <Stat label="p95" value={formatMs(traffic.p95Ms)} />
               </div>
+
+              {series.rate.length >= 2 && (
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">rate</p>
+                    <Sparkline values={series.rate} height={28} className="text-chart-1" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">errors %</p>
+                    <Sparkline values={series.errorPct} height={28} className="text-destructive" />
+                  </div>
+                </div>
+              )}
 
               <div className="mt-3 flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
                 {traffic.ok > 0 && (
@@ -209,7 +312,7 @@ export function MapInspector({
               </div>
 
               <p className="mt-2 text-[10px] text-muted-foreground">
-                {traffic.total.toLocaleString()} total since the server started · p95 is cumulative
+                {traffic.total.toLocaleString()} total since the server started
               </p>
             </>
           ) : derived ? (
@@ -239,6 +342,33 @@ export function MapInspector({
           )}
         </div>
 
+        {/* ---- recent failures ---- */}
+        {failures?.data && failures.data.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Recent failures
+            </p>
+            <div className="space-y-1">
+              {failures.data.map((t) => (
+                <Link
+                  key={t.id}
+                  to={`/traces/${t.id}`}
+                  className="block rounded-md border border-destructive/30 px-2 py-1.5 text-xs transition-colors hover:bg-destructive/10"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-destructive" title={t.error_message ?? undefined}>
+                      {t.error_message ?? "failed"}
+                    </span>
+                    <span className="shrink-0 text-muted-foreground" title={formatDate(t.created_at)}>
+                      {formatRelative(t.created_at) ?? formatDate(t.created_at)}
+                    </span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
         <Separator />
 
         {/* ---- what it runs ---- */}
@@ -266,6 +396,28 @@ export function MapInspector({
         )}
 
         {/* ---- blast radius ---- */}
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Blast radius
+          </p>
+          <div className="flex gap-0.5 rounded-md border p-0.5" role="group" aria-label="Blast radius">
+            {([1, 2, Infinity] as const).map((h) => (
+              <button
+                key={String(h)}
+                type="button"
+                onClick={() => onHopsChange(h)}
+                aria-pressed={hops === h}
+                className={cn(
+                  "rounded px-2 py-0.5 text-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                  hops === h ? "bg-secondary text-secondary-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+                title={h === Infinity ? "Everything reachable in either direction" : `${h} call hop${h === 1 ? "" : "s"}`}
+              >
+                {h === Infinity ? "all" : `${h} hop${h === 1 ? "" : "s"}`}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <p className="mb-1 flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -301,7 +453,7 @@ export function MapInspector({
           </div>
         </div>
 
-        {/* ---- connectors ---- */}
+        {/* ---- connectors, with their state ---- */}
         {node.connectors.length > 0 && (
           <div>
             <p className="mb-1.5 flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -311,17 +463,30 @@ export function MapInspector({
             <div className="flex flex-wrap gap-1.5">
               {node.connectors.map((name) => {
                 const use = connectorsByName.get(name)
+                const failed = mapFaults.failedConnectors.has(name)
+                const breaker = breakerHere.find((b) => b.connector === name)
+                const state = failed
+                  ? " · failed to load"
+                  : breaker
+                    ? ` · breaker ${breaker.state}`
+                    : use && !use.enabled
+                      ? " · off"
+                      : ""
+                const tone = failed
+                  ? "border-destructive/50 text-destructive"
+                  : breaker
+                    ? "border-warning/50 text-warning"
+                    : use && !use.enabled
+                      ? "opacity-60"
+                      : ""
                 return use?.known ? (
                   <Link key={name} to={`/connectors/${use.refId}`}>
                     <Badge
                       variant="outline"
-                      className={cn(
-                        "text-[10px] transition-colors hover:bg-accent",
-                        !use.enabled && "opacity-60",
-                      )}
+                      className={cn("text-[10px] transition-colors hover:bg-accent", tone)}
                     >
                       {name}
-                      {!use.enabled && " · off"}
+                      {state}
                     </Badge>
                   </Link>
                 ) : (
@@ -336,7 +501,7 @@ export function MapInspector({
       </div>
 
       {!node.unresolved && (
-        <div className="grid grid-cols-2 gap-2 border-t p-3">
+        <div className="flex flex-wrap gap-2 border-t p-3">
           <Button variant="outline" size="sm" asChild>
             <Link to={`/channels/${node.channelId}`}>
               Channel <ArrowRight className="h-3.5 w-3.5" />
@@ -353,6 +518,34 @@ export function MapInspector({
               </Link>
             )}
           </Button>
+          {/* A schedule is not reachable by name, so the console refuses it;
+              its manual run goes through the same claim path a tick does. */}
+          {node.schedule ? (
+            node.status === "active" && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={trigger.isPending}
+                onClick={() => trigger.mutate(node.channelId)}
+                title="Run now, through the same claim and singleton path a scheduled occurrence takes"
+              >
+                <Play className="h-3.5 w-3.5" /> {trigger.isPending ? "Triggering…" : "Trigger now"}
+              </Button>
+            )
+          ) : (
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/console?channel=${encodeURIComponent(node.name)}`} title="Send a test request to this channel">
+                <Send className="h-3.5 w-3.5" /> Test
+              </Link>
+            </Button>
+          )}
+          {node.status === "draft" && (
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/channels/${node.channelId}/edit`}>
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </Link>
+            </Button>
+          )}
         </div>
       )}
     </div>

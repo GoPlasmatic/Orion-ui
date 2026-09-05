@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router"
 import { useCronStatus, useCronOccurrences, useRetryOccurrence } from "@/hooks/use-cron"
 import { useTriggerChannel } from "@/hooks/use-channels"
@@ -10,6 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
+import { SortableHead } from "@/components/shared/sortable-head"
+import { nextSort } from "@/lib/use-url-filters"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -22,11 +24,10 @@ import { OccurrencesTable } from "@/components/shared/occurrences-table"
 import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
 import { occurrenceStatusBadgeClass, statusChartColor } from "@/lib/status"
 import { occurrenceStatusLabel } from "@/lib/cron"
-import { formatDate, serverTime, cn } from "@/lib/utils"
+import { formatDate, serverTime, toRfc3339, cn } from "@/lib/utils"
+import { useTimeZone } from "@/lib/use-time-zone"
 import { CalendarClock, Play, Plus, History } from "lucide-react"
 
-/** `datetime-local` gives "YYYY-MM-DDTHH:mm"; the server wants RFC 3339. */
-const toRfc3339 = (local: string) => (local ? new Date(local).toISOString() : undefined)
 
 function relative(iso: string | null | undefined): string {
   const at = serverTime(iso)
@@ -78,6 +79,7 @@ export function SchedulesPage() {
   const metrics = useCronMetrics()
   const trigger = useTriggerChannel()
   const retry = useRetryOccurrence()
+  const { label: zoneLabel } = useTimeZone()
 
   const { data: occurrences, isLoading: occurrencesLoading } = useCronOccurrences(
     {
@@ -100,7 +102,39 @@ export function SchedulesPage() {
     resetPage()
   }
 
-  const schedules = status ?? []
+  const schedules = useMemo(() => status ?? [], [status])
+  // The status table sorts in the browser — one row per active cron channel
+  // is a small list — by next fire by default, so what is due soonest leads.
+  const [tableSort, setTableSort] = useState({ sort: "next", order: "asc" })
+  const sortedSchedules = useMemo(() => {
+    const dir = tableSort.order === "desc" ? -1 : 1
+    // Rows without an instant sort last whichever way the column runs.
+    const instant = (value: string | null | undefined) => {
+      const t = serverTime(value)
+      return t == null ? (dir === 1 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY) : t
+    }
+    return [...schedules].sort((a, b) => {
+      switch (tableSort.sort) {
+        case "channel":
+          return dir * a.channel_name.localeCompare(b.channel_name)
+        case "pending":
+          return dir * (a.pending - b.pending)
+        case "last":
+          return (
+            dir *
+            (instant(a.last_completed_at ?? a.last_scheduled_for) -
+              instant(b.last_completed_at ?? b.last_scheduled_for))
+          )
+        default:
+          return dir * (instant(a.next_fire_at) - instant(b.next_fire_at))
+      }
+    })
+  }, [schedules, tableSort])
+  const sortOn = (field: string, newestFirst = false) =>
+    setTableSort((current) => {
+      const next = nextSort(current, field, newestFirst)
+      return next.sort ? next : { sort: "next", order: "asc" }
+    })
   const cronComponent = health?.components?.cron
   const cronDetail = health?.cron
 
@@ -123,7 +157,7 @@ export function SchedulesPage() {
             {cronDetail?.reconcile_age_secs != null
               ? `The reconciler last completed a pass ${Math.round(cronDetail.reconcile_age_secs)}s ago — long enough that occurrences are being missed.`
               : "Either the reconciler is not completing passes, or the scheduler is off (cron.enabled = false) while active cron channels are stored — every liveness signal is green and the declared schedules are simply not running."}{" "}
-            <Link to="/settings" className="underline underline-offset-2">
+            <Link to="/engine" className="underline underline-offset-2">
               Health report
             </Link>
           </p>
@@ -202,16 +236,24 @@ export function SchedulesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Channel</TableHead>
+                  <SortableHead field="channel" sort={tableSort.sort} order={tableSort.order} onSort={() => sortOn("channel")}>
+                    Channel
+                  </SortableHead>
                   <TableHead>Schedule</TableHead>
-                  <TableHead>Next fire</TableHead>
-                  <TableHead>Last run</TableHead>
-                  <TableHead className="text-right">Pending</TableHead>
+                  <SortableHead field="next" sort={tableSort.sort} order={tableSort.order} onSort={() => sortOn("next")}>
+                    Next fire
+                  </SortableHead>
+                  <SortableHead field="last" sort={tableSort.sort} order={tableSort.order} onSort={() => sortOn("last", true)}>
+                    Last run
+                  </SortableHead>
+                  <SortableHead field="pending" sort={tableSort.sort} order={tableSort.order} onSort={() => sortOn("pending", true)} className="text-right">
+                    Pending
+                  </SortableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {schedules.map((s) => (
+                {sortedSchedules.map((s) => (
                   <TableRow key={s.channel_id}>
                     <TableCell>
                       <Link to={`/channels/${s.channel_id}`} className="font-medium hover:underline">
@@ -343,6 +385,9 @@ export function SchedulesPage() {
             className="w-52"
             aria-label="Scheduled until"
           />
+          <span className="self-center text-xs text-muted-foreground" title="Change on the Engine page, under Display">
+            times in {zoneLabel}
+          </span>
         </FilterBar>
 
         <OccurrencesTable

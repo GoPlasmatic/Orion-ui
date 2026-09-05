@@ -1,12 +1,17 @@
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { tracesApi } from "@/api/traces"
 import type { ListTracesParams } from "@/api/types"
 
-export function useTraces(params: ListTracesParams = {}, options?: { refetchInterval?: number }) {
+export function useTraces(
+  params: ListTracesParams = {},
+  options?: { refetchInterval?: number; enabled?: boolean },
+) {
   return useQuery({
     queryKey: ["traces", params],
     queryFn: () => tracesApi.list(params),
+    placeholderData: keepPreviousData,
     refetchInterval: options?.refetchInterval,
+    enabled: options?.enabled ?? true,
   })
 }
 

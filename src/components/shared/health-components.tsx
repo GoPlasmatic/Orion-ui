@@ -1,10 +1,11 @@
-import { Link } from "react-router"
+import { useEffect } from "react"
+import { Link, useLocation } from "react-router"
 import type { HealthResponse } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Callout } from "@/components/ui/callout"
 import { componentStateBadgeClass, isComponentFault } from "@/lib/status"
 import { componentRoute, hasComponentRoute } from "@/lib/health"
-import { formatDate } from "@/lib/utils"
+import { cn, formatDate } from "@/lib/utils"
 
 /** `cron.last_reconcile_at` is unix seconds; tolerate an ISO string too. */
 function formatInstant(value: number | string | null | undefined): string {
@@ -41,6 +42,15 @@ const COMPONENT_HINTS: Record<string, string> = {
  * health — where an operator can read what a coarse `degraded` is about.
  */
 export function HealthComponents({ health }: { health: HealthResponse | undefined }) {
+  // `/engine#component-<name>` is where the dashboard sends a degraded
+  // component that has no page of its own. Client-side navigation does not
+  // scroll to a hash by itself, and the rows only exist once health arrives.
+  const { hash } = useLocation()
+  useEffect(() => {
+    if (!hash || !health) return
+    document.getElementById(hash.slice(1))?.scrollIntoView({ block: "center" })
+  }, [hash, health])
+
   if (!health) return <p className="text-sm text-muted-foreground">Loading…</p>
 
   const components = Object.entries(health.components ?? {})
@@ -54,7 +64,14 @@ export function HealthComponents({ health }: { health: HealthResponse | undefine
     <div className="space-y-4">
       <ul className="divide-y rounded-md border">
         {components.map(([name, state]) => (
-          <li key={name} className="flex items-start justify-between gap-4 px-3 py-2">
+          <li
+            key={name}
+            id={`component-${name}`}
+            className={cn(
+              "flex items-start justify-between gap-4 px-3 py-2",
+              hash === `#component-${name}` && "bg-accent"
+            )}
+          >
             <div className="min-w-0">
               <p className="font-mono text-sm">{name}</p>
               {COMPONENT_HINTS[name] && (

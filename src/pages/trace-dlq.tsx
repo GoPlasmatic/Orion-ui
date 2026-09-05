@@ -1,11 +1,14 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Link } from "react-router"
 import {
   useTraceDlq,
   useTraceDlqEntry,
   useRequeueTraceDlq,
+  useRequeueManyTraceDlq,
   usePurgeTraceDlq,
 } from "@/hooks/use-trace-dlq"
+import { useChannels } from "@/hooks/use-channels"
+import type { Channel, TraceDlqSummary } from "@/api/types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -34,26 +37,46 @@ import { PaginationFooter } from "@/components/shared/pagination"
 import { EmptyState } from "@/components/shared/empty-state"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { FilterBar } from "@/components/shared/filter-bar"
+import { RetrySafetyWarning } from "@/components/shared/retry-safety-warning"
 import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
+import { useUrlFilters } from "@/lib/use-url-filters"
+import { activatableRow, ROW_ACTIVATABLE } from "@/lib/table"
 import { formatDate, parseJson } from "@/lib/utils"
 import { Inbox, RotateCcw, Trash2 } from "lucide-react"
 
 /** An entry that has used up its retries: nothing will move it but a requeue. */
 const isExhausted = (retryCount: number, maxRetries: number) => retryCount >= maxRetries
 
+const FILTER_KEYS = ["channel", "exhausted"] as const
+
+/** Distinct channels named in a bulk requeue whose retry guard is shown; the rest are counted. */
+const GUARDS_SHOWN = 3
+
 export function TraceDlqPage() {
   const { offset, reset: resetPage, prev, next } = usePagination()
-  const [channelFilter, setChannelFilter] = useState("")
-  const [exhaustedFilter, setExhaustedFilter] = useState("")
+  const { values: filters, set } = useUrlFilters(FILTER_KEYS)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showPurge, setShowPurge] = useState(false)
+  const [showBulk, setShowBulk] = useState(false)
+
+  const update = (patch: Partial<Record<(typeof FILTER_KEYS)[number], string>>) => {
+    set(patch)
+    resetPage()
+  }
 
   const { data, isLoading } = useTraceDlq({
     limit: PAGE_SIZE,
     offset,
-    channel: channelFilter || undefined,
-    exhausted: exhaustedFilter === "" ? undefined : exhaustedFilter === "true",
+    channel: filters.channel || undefined,
+    exhausted: filters.exhausted === "" ? undefined : filters.exhausted === "true",
   })
+  // The channel each entry belongs to: its page, and the workflow a requeue
+  // would re-run. An entry names its channel by name.
+  const { data: channelList } = useChannels({ limit: 1000 })
+  const channelsByName = useMemo(
+    () => new Map((channelList?.data ?? []).map((c) => [c.name, c])),
+    [channelList?.data],
+  )
 
   const requeue = useRequeueTraceDlq()
   const rows = data?.data ?? []
@@ -64,6 +87,10 @@ export function TraceDlqPage() {
         title="Trace DLQ"
         description="Async submissions that failed and are waiting on a retry"
       >
+        <Button variant="outline" onClick={() => setShowBulk(true)} disabled={rows.length === 0}>
+          <RotateCcw className="h-4 w-4" />
+          Requeue all shown
+        </Button>
         <Button variant="outline" onClick={() => setShowPurge(true)}>
           <Trash2 className="h-4 w-4" />
           Purge exhausted
@@ -72,21 +99,15 @@ export function TraceDlqPage() {
 
       <FilterBar>
         <Input
-          value={channelFilter}
-          onChange={(e) => {
-            setChannelFilter(e.target.value)
-            resetPage()
-          }}
+          value={filters.channel}
+          onChange={(e) => update({ channel: e.target.value })}
           placeholder="Filter by channel"
           className="w-56"
           aria-label="Filter by channel"
         />
         <Select
-          value={exhaustedFilter}
-          onChange={(e) => {
-            setExhaustedFilter(e.target.value)
-            resetPage()
-          }}
+          value={filters.exhausted}
+          onChange={(e) => update({ exhausted: e.target.value })}
           aria-label="Filter by retry state"
           className="w-48"
         >
@@ -110,7 +131,7 @@ export function TraceDlqPage() {
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              Array.from({ length: 5 }).map((_, i) => (
+              Array.from({ length: PAGE_SIZE }).map((_, i) => (
                 <TableRow key={i}>
                   {Array.from({ length: 6 }).map((_, j) => (
                     <TableCell key={j}>
@@ -132,13 +153,26 @@ export function TraceDlqPage() {
             ) : (
               rows.map((row) => {
                 const exhausted = isExhausted(row.retry_count, row.max_retries)
+                const channel = channelsByName.get(row.channel)
                 return (
                   <TableRow
                     key={row.id}
-                    className="cursor-pointer hover:bg-muted/50"
-                    onClick={() => setSelectedId(row.id)}
+                    className={ROW_ACTIVATABLE}
+                    {...activatableRow(() => setSelectedId(row.id))}
                   >
-                    <TableCell className="font-medium">{row.channel}</TableCell>
+                    <TableCell className="font-medium">
+                      {channel ? (
+                        <Link
+                          to={`/channels/${channel.channel_id}`}
+                          className="hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {row.channel}
+                        </Link>
+                      ) : (
+                        row.channel
+                      )}
+                    </TableCell>
                     <TableCell className="max-w-md truncate text-sm text-destructive" title={row.error_message}>
                       {row.error_message}
                     </TableCell>
@@ -181,16 +215,38 @@ export function TraceDlqPage() {
         onNext={next}
       />
 
-      {selectedId && <DlqEntryDialog id={selectedId} onClose={() => setSelectedId(null)} />}
+      {selectedId && (
+        <DlqEntryDialog
+          id={selectedId}
+          channelsByName={channelsByName}
+          onClose={() => setSelectedId(null)}
+        />
+      )}
+      {showBulk && (
+        <BulkRequeueDialog
+          rows={rows}
+          channelsByName={channelsByName}
+          onClose={() => setShowBulk(false)}
+        />
+      )}
       {showPurge && <PurgeDialog onClose={() => setShowPurge(false)} />}
     </div>
   )
 }
 
 /** The payload lives only on the single-entry read — the list is payload-free. */
-function DlqEntryDialog({ id, onClose }: { id: string; onClose: () => void }) {
+function DlqEntryDialog({
+  id,
+  channelsByName,
+  onClose,
+}: {
+  id: string
+  channelsByName: ReadonlyMap<string, Channel>
+  onClose: () => void
+}) {
   const { data, isLoading } = useTraceDlqEntry(id)
   const requeue = useRequeueTraceDlq()
+  const channel = data ? channelsByName.get(data.channel) : undefined
 
   return (
     <Dialog open onClose={onClose} aria-label="DLQ entry">
@@ -204,7 +260,18 @@ function DlqEntryDialog({ id, onClose }: { id: string; onClose: () => void }) {
           <div className="space-y-4">
             <Card>
               <CardContent className="grid gap-2 py-4 text-sm sm:grid-cols-2">
-                <Field label="Channel" value={data.channel} />
+                <Field
+                  label="Channel"
+                  value={
+                    channel ? (
+                      <Link to={`/channels/${channel.channel_id}`} className="underline underline-offset-2">
+                        {data.channel}
+                      </Link>
+                    ) : (
+                      data.channel
+                    )
+                  }
+                />
                 <Field
                   label="Trace"
                   value={
@@ -225,6 +292,10 @@ function DlqEntryDialog({ id, onClose }: { id: string; onClose: () => void }) {
               </pre>
             </Callout>
 
+            {/* What a requeue would run twice. The catalogue's retry_safety is
+                the witness; the decision stays with the operator. */}
+            <RetrySafetyWarning workflowId={channel?.workflow_id} action="A requeue" />
+
             <JsonViewer data={parseJson(data.payload_json)} label="Failed payload" maxHeight="16rem" />
             <JsonViewer data={parseJson(data.metadata_json)} label="Metadata" maxHeight="12rem" />
           </div>
@@ -239,6 +310,67 @@ function DlqEntryDialog({ id, onClose }: { id: string; onClose: () => void }) {
           onClick={() => data && requeue.mutate(data.id, { onSuccess: onClose })}
         >
           <RotateCcw className="h-4 w-4" /> Requeue
+        </Button>
+      </DialogFooter>
+    </Dialog>
+  )
+}
+
+/**
+ * Requeue every entry on the page — the move after a backend comes back. One
+ * request per entry (there is no bulk route), and the retry guard for each
+ * channel involved, since a requeue re-runs the workflow from the start.
+ */
+function BulkRequeueDialog({
+  rows,
+  channelsByName,
+  onClose,
+}: {
+  rows: TraceDlqSummary[]
+  channelsByName: ReadonlyMap<string, Channel>
+  onClose: () => void
+}) {
+  const requeueMany = useRequeueManyTraceDlq()
+  const channels = useMemo(() => [...new Set(rows.map((r) => r.channel))], [rows])
+  const exhausted = rows.filter((r) => isExhausted(r.retry_count, r.max_retries)).length
+
+  return (
+    <Dialog open onClose={onClose} aria-label="Requeue every entry shown">
+      <DialogHeader>
+        <DialogTitle>Requeue {rows.length} {rows.length === 1 ? "entry" : "entries"}</DialogTitle>
+      </DialogHeader>
+      <DialogBody className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Every entry on this page is scheduled for an immediate retry with its retry count reset
+          {exhausted > 0 ? `, including ${exhausted} that had exhausted ${exhausted === 1 ? "its" : "their"} retries` : ""}
+          . Across {channels.length} channel{channels.length === 1 ? "" : "s"}:{" "}
+          <span className="font-mono">{channels.slice(0, 6).join(", ")}</span>
+          {channels.length > 6 ? ` and ${channels.length - 6} more` : ""}.
+        </p>
+        {channels.slice(0, GUARDS_SHOWN).map((name) => (
+          <RetrySafetyWarning
+            key={name}
+            workflowId={channelsByName.get(name)?.workflow_id}
+            action={`Requeuing ${name}`}
+          />
+        ))}
+        {channels.length > GUARDS_SHOWN && (
+          <p className="text-xs text-muted-foreground">
+            The retry guard is shown for the first {GUARDS_SHOWN} channels; open an entry to see
+            another channel's.
+          </p>
+        )}
+      </DialogBody>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose} disabled={requeueMany.isPending}>
+          Cancel
+        </Button>
+        <Button
+          disabled={requeueMany.isPending || rows.length === 0}
+          onClick={() => requeueMany.mutate(rows.map((r) => r.id), { onSuccess: onClose })}
+        >
+          <RotateCcw className="h-4 w-4" />
+          {requeueMany.isPending ? "Requeuing..." : `Requeue ${rows.length}`}
         </Button>
       </DialogFooter>
     </Dialog>

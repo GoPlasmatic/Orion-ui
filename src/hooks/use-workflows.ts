@@ -1,5 +1,6 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { toastError } from "@/lib/toast-error"
 import { workflowsApi } from "@/api/workflows"
 import type {
   CreateWorkflowRequest,
@@ -11,8 +12,6 @@ import type {
   WorkflowTestRequest,
 } from "@/api/types"
 
-const errorDescription = (e: unknown) => (e instanceof Error ? e.message : undefined)
-
 export function useCreateWorkflow() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -21,7 +20,7 @@ export function useCreateWorkflow() {
       queryClient.invalidateQueries({ queryKey: ["workflows"] })
       toast.success("Workflow created as draft")
     },
-    onError: (e) => toast.error("Failed to create workflow", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to create workflow", e),
   })
 }
 
@@ -34,7 +33,7 @@ export function useUpdateWorkflow() {
       queryClient.invalidateQueries({ queryKey: ["workflows"] })
       toast.success("Workflow updated")
     },
-    onError: (e) => toast.error("Failed to update workflow", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to update workflow", e),
   })
 }
 
@@ -47,7 +46,7 @@ export function useSetWorkflowRollout() {
       queryClient.invalidateQueries({ queryKey: ["workflows"] })
       toast.success(`Rollout set to ${req.rollout_percentage}%`)
     },
-    onError: (e) => toast.error("Failed to update rollout", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to update rollout", e),
   })
 }
 
@@ -55,6 +54,7 @@ export function useWorkflows(params: ListWorkflowsParams = {}, enabled = true) {
   return useQuery({
     queryKey: ["workflows", params],
     queryFn: () => workflowsApi.list(params),
+    placeholderData: keepPreviousData,
     enabled,
   })
 }
@@ -85,7 +85,7 @@ export function useChangeWorkflowStatus() {
       queryClient.invalidateQueries({ queryKey: ["engine"] })
       toast.success(`Workflow ${req.status === "active" ? "activated" : req.status}`)
     },
-    onError: (e) => toast.error("Failed to change workflow status", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to change workflow status", e),
   })
 }
 
@@ -136,7 +136,7 @@ export function useImportWorkflows() {
       queryClient.invalidateQueries({ queryKey: ["workflows"] })
       toast.success(`Imported ${result.imported} workflow${result.imported !== 1 ? "s" : ""}`)
     },
-    onError: (e) => toast.error("Failed to import workflows", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to import workflows", e),
   })
 }
 
@@ -149,7 +149,7 @@ export function useCreateWorkflowVersion() {
       queryClient.invalidateQueries({ queryKey: ["workflows", id, "versions"] })
       toast.success("New workflow version created")
     },
-    onError: (e) => toast.error("Failed to create workflow version", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to create workflow version", e),
   })
 }
 
@@ -161,6 +161,6 @@ export function useDeleteWorkflow() {
       queryClient.invalidateQueries({ queryKey: ["workflows"] })
       toast.success("Workflow deleted")
     },
-    onError: (e) => toast.error("Failed to delete workflow", { description: errorDescription(e) }),
+    onError: (e) => toastError("Failed to delete workflow", e),
   })
 }

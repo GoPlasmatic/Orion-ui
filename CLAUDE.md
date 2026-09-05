@@ -92,17 +92,21 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 - **Connectors** — External system connections: `http`, `kafka`, `db`, `cache`, `es`, `storage`,
   **`smtp`**. Full CRUD + Validate + **Test** (reachability probe) + export. Keyed by `id` (a UUID,
   distinct from `name`).
-- **Functions** — Read-only reference page (`/functions`) rendering the server's function
-  catalogue (`GET admin/functions`). Since 1.2 this is *every* valid function name, not just the
-  schema registry: entries carry `source` (`orion` | `engine` | `plugin`), optional `aliases`,
-  `input_fields` is **absent** for an engine built-in, every entry carries `retry_safety` (1.6)
-  and a `plugin` entry names the plugin version and digest serving it. Accepts `?q=` to land on
-  one function.
+- **Functions** — The server's function catalogue (`GET admin/functions`, `api/functions.ts`,
+  `use-functions.ts`) is fetched but has **no page**: the `/functions` reference was removed on
+  2026-09-05 because a standalone list answered no question anyone had while doing something
+  else. The catalogue belongs inside the workflow editor, the trace view and the DLQ / occurrence
+  retry dialogs (see `ui-improvements.md`). Its shape still matters: since 1.2 it is *every*
+  valid function name, not just the schema registry — entries carry `source` (`orion` | `engine`
+  | `plugin`), optional `aliases`, `input_fields` is **absent** for an engine built-in, every
+  entry carries `retry_safety` (1.6) and a `plugin` entry names the plugin version and digest
+  serving it.
 - **Trace DLQ** — Operator view of the async dead-letter queue (`/trace-dlq`): inspect, requeue,
   purge.
 - **Packages** — Read-only promotion receipts (`/packages`). `PUT admin/packages/{name}` is
   deliberately **not** exposed; recording receipts is CI's job.
-- **Health** — `/settings` renders the whole `/health` report (`health-components.tsx`): every
+- **Health** — `/engine` (named Settings until 2026-09-05; `/settings` redirects) renders the
+  whole `/health` report (`health-components.tsx`): every
   component with what its state means, plus the admin-only detail — background tasks, plugin
   loads and failures, the scheduler's own numbers. The Operations dashboard shows only the faults.
 
@@ -280,7 +284,7 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 ### Layers
 
 - **`src/api/`** — Typed API client. `client.ts` wraps fetch with the `/api/v1` base path, parses the structured error envelope onto `ApiError` (incl. `details[]` and `requestId`), and exports `buildQuery()`, `unwrap()`, and `api.send()` for arbitrary-method data-plane calls. `RequestOptions.changeContext` sends `X-Orion-Change-Context` so a multi-request promotion's audit rows can be grouped. Domain modules: `channels.ts`, `workflows.ts`, `connectors.ts`, `traces.ts`, `trace-dlq.ts`, `packages.ts`, `engine.ts`, `audit.ts`, `backup.ts`, `functions.ts`, `data.ts`. All types hand-written in `types.ts`.
-- **`src/hooks/`** — TanStack Query wrappers. One hook file per domain (`use-channels.ts`, `use-workflows.ts`, etc.). Query keys are `["entity", params]` arrays. Mutations invalidate via `queryClient.invalidateQueries`.
+- **`src/hooks/`** — TanStack Query wrappers. One hook file per domain (`use-channels.ts`, `use-workflows.ts`, etc.). Query keys are `["entity", params]` arrays. Mutations invalidate via `queryClient.invalidateQueries`. The client default is `staleTime: 30_000` (a page visited twice in a row does not refetch its lists; polled queries keep their own `refetchInterval`, and invalidation ignores staleness), and every paginated list hook sets `placeholderData: keepPreviousData` so a page turn holds the last page instead of dropping to a skeleton.
 - **`src/pages/`** — Route-level components. Named exports like `ChannelsPage`, `WorkflowDetailPage`. Data fetching via hooks, not inline.
 - **`src/components/ui/`** — Shadcn-style primitives using `React.forwardRef`, CVA variants, and
   `cn()` for class merging: `Button`, `Card`, `Badge`, `Table`, `Tabs`, `Dialog`, `Input`,
@@ -289,24 +293,117 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   Input/Textarea/Select — change it there, not per field. `Select` renders a wrapper div so it can
   overlay a themed chevron: `className` sizes the *control* (as callers already expected),
   `selectClassName` reaches the `<select>` itself.
-- **`src/components/shared/`** — Shared composed components: `StatusBadge`, `LifecycleActions` (incl. the activation pre-flight), `VersionHistory`, `JsonViewer`, `PageHeader`, `ConfirmDialog`, `PaginationFooter`, `ValidationResults`, `ImportDialog`/`ImportSummary`, `ChannelAuthEditor`, `ConnectorTestDialog`, `WorkflowDependencies`, `FilterBar`, `EmptyState`.
-- **`src/components/layout/`** — `AppLayout`, `Sidebar`, `Header`.
-- **`src/lib/utils.ts`** — `cn()` (clsx + tailwind-merge), `formatDate()`, `formatDuration()`, `parseJson()` (safe parse; returns the *raw string* on failure, not null), `downloadJson()` (the shared export blob helper), and `parseServerDate()` / `serverTime()`: **the admin plane serialises `chrono::NaiveDateTime` — `2026-09-05T12:13:55`, no zone — and every such value is UTC.** `new Date()` reads a zoneless string as local time, so go through these for anything time-based; `formatDate` already does.
+- **`src/components/shared/`** — Shared composed components: `StatusBadge`, `LifecycleActions` (incl. the activation pre-flight), `VersionHistory`, `JsonViewer`, `PageHeader`, `ConfirmDialog`, `PaginationFooter`, `ValidationResults`, `ImportDialog`/`ImportSummary`, `ChannelAuthEditor`, `ConnectorTestDialog`, `WorkflowDependencies`, `FilterBar`, `EmptyState`, `ErrorState` (the one
+  way a page reports a failed load — reads status, code, field details and request id off
+  `ApiError`, with Retry) and `ErrorBoundary`.
+- **`src/components/layout/`** — `AppLayout`, `Sidebar`, `Header`. `AppLayout` owns the two
+  sidebar states: folded to an icon rail (the control at the sidebar's foot, remembered in
+  `localStorage["orion-sidebar"]`) and, below `md`, a drawer behind the header's menu button
+  that closes on navigation, Escape or the backdrop.
+- **`src/lib/utils.ts`** — `cn()` (clsx + tailwind-merge), `formatDate()` (absolute, in the
+  chosen zone, with a zone marker), `formatWhen()` (relative under a day, absolute beyond — the
+  list-cell rendering), `formatInstant()` (the ISO instant), `formatDuration()`, `formatRelative()` ("12s ago" / "in 40m"; pair it with the
+  absolute `formatDate()` in a `title`), `toRfc3339()` (a `datetime-local` value to the server's
+  form, through the zone preference), `parseJson()` (safe parse; returns the *raw string* on failure, not null), `downloadJson()` (the shared export blob helper), and `parseServerDate()` / `serverTime()`: **the admin plane serialises `chrono::NaiveDateTime` — `2026-09-05T12:13:55`, no zone — and every such value is UTC.** `new Date()` reads a zoneless string as local time, so go through these for anything time-based; `formatDate` already does.
 - **`src/lib/use-pagination.ts`** — `usePagination()` + `PAGE_SIZE`, paired with `PaginationFooter`. Lives in `lib/` because the fast-refresh lint rule forbids non-component exports from component files.
-- **`src/lib/topology.ts`** — client-side channel/workflow/connector graph inference for the
-  *per-entity* neighbourhoods embedded on the detail pages (`RelationshipGraph`). For a single
-  workflow prefer `workflowsApi.dependencies()`, which is the server's own answer and also reports
-  dynamic `channel_call` targets. Call targets resolve through `channelsByName` — see the
-  identifier note above.
+- **`src/lib/time-zone.ts`** + `time-zone-provider.tsx` / `use-time-zone.ts` — the display
+  zone (`local` | `utc`, `localStorage["orion-timezone"]`), chosen on Engine → Display (the card
+  also holds theme, incl. "Follow the system", and density). A module variable is what
+  `formatDate` reads, so non-React code sees the same value; the provider is what re-renders on
+  a change. Every absolute time in the app goes through `formatDate`, which is how one
+  preference reaches every page.
+- **`src/lib/editor-types.ts`** + `shared/json-editor.tsx` / `json-editor-view.tsx` — the JSON
+  editor (CodeMirror 6). `json-editor.tsx` is a `lazy` wrapper and the only import a page should
+  use; the CodeMirror runtime lives in `json-editor-view.tsx` and its own `codemirror` chunk,
+  fetched the first time an editor mounts. A lint or completion source is *handed* the parse
+  tree (`LintContext`, `CompletionRequest`) rather than importing CodeMirror — an import from
+  `@codemirror/*` outside the view module undoes the split. `lib/json-path.ts` maps a
+  `lintSteps` path (`tasks[1].function.name`) to a range in the document; `lib/workflow-completions.ts`
+  is the catalogue-backed source (function names inside `function.name`, that function's
+  `input_fields` inside `input`, the keys a step takes, the `halt_on` spellings) and handles a
+  string still being typed (an error node to the parser, not a `String`). `onRun` binds
+  Mod-Enter above the default keymap (which would insert a blank line): the console sends on it
+  and the workflow dry run runs on it.
+- **`src/lib/onboarding.ts`** + `shared/getting-started.tsx` — the first-run checklist the
+  dashboard leads with while the engine serves no channel (`isFirstRun`, `firstRunSteps`, five
+  steps ticking from the live counts); dismissed per browser
+  (`localStorage["orion-getting-started-dismissed"]`).
+- **`src/lib/use-now.ts`** — `useNow(intervalMs)`: the current time as ticking state, for "ago"
+  labels and age windows. `Date.now()` in render trips the `react-hooks/purity` lint.
+- **`src/lib/nav.ts`** — the page registry (sections, icons, keywords, `g`+key shortcuts, which
+  live count sits beside an item) and `navItemFor(pathname)`.
+- **`src/lib/page-title.ts`** — `setPageTitle` / `setFallbackTitle`: the tab title, with the page
+  winning over the shell (a child's effect runs before its parent's, so the shell yields).
+- **`src/lib/faults.ts`** + **`src/hooks/use-faults.ts`** — the map's fault overlay: quarantined
+  channels and failed connectors from `/health`, open breakers from this node's map, keyed by
+  channel and connector name; `faultsFor(node)` is what a node draws.
+- **`src/hooks/use-attention.ts`** — `useAttentionItems(windowSec)`: "Needs attention" as data
+  (severity-ordered, each with the page to act on), shared by the dashboard and the sidebar's
+  Operations count so the two cannot disagree; `useNavCounts()` adds DLQ, breaker and cron
+  backlog counts. Failing channels are judged over the traffic window once a second sample
+  exists, cumulative before that.
+- **`src/lib/use-unsaved-changes.ts`** + `shared/unsaved-changes-dialog.tsx` — the form guard.
+  `useBlocker` reads refs at navigation time so a save that navigates away is not blocked; the
+  save handler calls `markSaved()` first.
+- **`src/lib/use-url-filters.ts`** — `useUrlFilters(keys)`: list filters and sort as URL search
+  params. `values` read as strings (empty when absent); `set(patch)` replaces the history entry
+  and changes several keys in one navigation — two calls in a row each start from the last
+  render's params and the second undoes the first. `nextSort` cycles unsorted → asc → desc →
+  unsorted, and `shared/sortable-head.tsx` is the header cell that drives it with `aria-sort`.
+  Channels, Workflows, Connectors, Plugins, Audit and the DLQ keep their filters this way; the
+  sort fields are the server's own `sort_by` values (channels: `priority`, `name`, `status`,
+  `channel_type`, `protocol`, `created_at`, `updated_at`; workflows drop the type columns;
+  plugins take `plugin_id`; connectors `name`, `connector_type`, `created_at`, `updated_at`).
+- **`src/lib/table.ts`** — `listTableFeatures`, plus `activatableRow(onOpen)` / `ROW_ACTIVATABLE`:
+  a row that opens something takes focus and Enter or Space opens it (a `<tr onClick>` alone is
+  invisible to the keyboard); the handler ignores keys that started on a link or button inside.
+- **`src/lib/toast-error.tsx`** — `toastError(title, e)`: the one way a mutation reports failure.
+  Shows `ApiError.details[]` and the request id, with a "Copy request id" action. Every hook's
+  `onError` goes through it.
+- **`src/lib/retry-safety.ts`** + `hooks/use-retry-safety.ts` + `shared/retry-safety-warning.tsx` —
+  the guard in front of a DLQ requeue and a cron occurrence retry: `retryRisks(steps, catalogue)`
+  names the tasks whose function is `unsafe_write` or `depends_on` its input. It reads the
+  workflow's *current* definition, because that is what a retry runs. Rendered in the DLQ entry
+  and bulk dialogs, on an occurrence page and on a cron channel's occurrences tab.
+- **`src/lib/trace-payload.ts`** — `extractSteps` and `firstTaskPayload`: the request as the first
+  task saw it, the closest thing to the original input a trace keeps (the read carries no raw
+  request). "Re-send in console", the console's "Last trace's input" and the dry run's "Use last
+  trace's input" all read it.
+- **`src/lib/motion.ts`** — `useReducedMotion()`: for motion started from script (the map's
+  animated edges, its viewport travel). CSS animation is stopped by the global
+  `prefers-reduced-motion` rule at the end of `index.css`.
+- **`src/components/shared/`** also holds `Breadcrumbs`, `TagsInput` (chips; Enter, comma, paste
+  and Backspace), `FormError` (a failed Save with `ApiError.details[]`), `ChannelTrafficCard` /
+  `ChannelRecentTraces` (a channel's own window on its page) and `ConnectorField` in
+  `config-field.tsx` (a connector chosen from the registry, a stray stored value still shown).
+- **`src/lib/topology.ts`** — the entity index (`buildIndex`) and reference extraction
+  (`channelCallTargets`, connector refs) that `system-graph.ts` builds on. The per-entity graph
+  on a detail page is `components/graph/neighbourhood-map.tsx`: a one-hop projection of the
+  System Map — same canvas, same encodings, live traffic and faults — which replaced the old
+  `RelationshipGraph` and its second visual language on 2026-09-05. For a single workflow prefer
+  `workflowsApi.dependencies()`, which is the server's own answer and also reports dynamic
+  `channel_call` targets. Call targets resolve through `channelsByName` — see the identifier
+  note above.
 - **`src/lib/system-graph.ts`** — the *whole* system as one graph, for the System Map:
   `buildSystemGraph` (one node per channel with its workflow folded in, edges from `channel_call`,
   plus fan-in/fan-out, tier and connector fan-in) and `neighbourhood` (bidirectional blast
   radius). Channels are keyed by **name**, because that is what calls and metrics both use.
   Connectors are deliberately not nodes: one used by 51 of 62 workflows adds an edge everywhere
   and distinguishes nothing, so they ride the referencing node and render as a rail.
+- **`src/hooks/use-metrics.ts`** — `useChannelTraffic(windowSec)` is the windowed view every
+  page shares (`TRAFFIC_WINDOWS`, default 5 min, bounded by the 60-sample ring buffer): per
+  channel ok / failed / rejected / duplicate, `byStatus`, a windowed p95 from **bucket deltas**
+  (`deltaSnapshot(base, cur)` is a valid histogram because counters are monotonic), plus totals
+  (`errorPct`, `p95Ms`, `meanMs`) and per-poll `series` / `seriesFor(channel)` for sparklines.
+  `useMetrics()` keeps the cumulative figures (workflow cost, the fallback before a second
+  sample).
 - **`src/lib/traffic-encoding.ts`** — how telemetry becomes shape and colour: health thresholds,
   the sqrt dot scale (a dot reads as an *area*), and `deriveLoad`, which propagates load in tier
-  order to the channels the exporter cannot see.
+  order to the channels the exporter cannot see. A `HealthLevel` is a colour *slot* — `idle` /
+  `healthy` / `notice` / `warning` / `critical` — and what it means depends on the colour metric:
+  `legendFor(colorMetric)` names the slots (`notice` is "rejected" in health mode, "100–500 ms"
+  in latency mode, "draft" in lifecycle mode). `errorLevel` is the error-share banding the
+  dashboard KPI shares with the map.
 - **`src/lib/map-layout.ts`** — the map's layout: one lane per call tier, with **every** channel
   nothing calls in the entry lane whether or not it calls anything itself (an entry channel that
   makes no calls is reached over its route — it is not an orphan, and the old ELK-plus-leftover-grid
@@ -314,7 +411,17 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   sharing one dependency set (3+) are drawn as a **cluster** box with a single edge per callee, so
   eighteen routes that all call `internal-session-check` are one line, not eighteen; the call-less
   entries are just another cluster ("no calls out"). Barycenter ordering keeps a hub among its
-  callers. Pure, synchronous, no dependency.
+  callers. A cluster can be `collapsed` (`LayoutOptions.isCollapsed`): it lays out as one
+  summary box and its members take the box's position, so React Flow animates them in and out.
+  Pure, synchronous, no dependency.
+- **`src/components/graph/traffic-map.tsx`** — the canvas. Level of detail follows
+  `useViewport().zoom` (`LOD_ZOOM`): a dot and a large name below it, the full card above.
+  Clusters are nodes (`ClusterNode`): a click toggles collapse, a map of `COLLAPSE_MAP_AT`+
+  channels starts with clusters of `COLLAPSE_CLUSTER_AT`+ collapsed, and the cluster holding the
+  selected channel is always open. `hops` bounds the blast radius
+  (`neighbourhood(graph, id, hops)`; the page reads `?hops=`, the detail pages' neighbourhood
+  map is fixed at one); the MiniMap appears past 15 nodes. The compact/expanded hysteresis is a
+  module-level set (`expandedEver`) because the compiler lint refuses `setState` in an effect.
 - **`src/lib/workflow-steps.ts`** — Reading a workflow's step tree: `isTaskGroup`, `groupMembers`,
   `flattenSteps`, `countLeafSteps`, `countGroups`, `countTerminal`, `groupDepth`, plus `lintSteps`
   (client-side shape check reporting at the coordinate the author typed). Mirrors the server's
@@ -343,7 +450,8 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
 
 ```
 /                   -> OperationsPage
-/system-map         -> SystemMapPage
+/system-map         -> SystemMapPage (view state in the URL: ?select=<channel name>&q=&tag=
+                                      &lifecycle=all&window=&size=&colour=&hops=1|2|all)
 /channels           -> ChannelsPage
 /channels/new       -> ChannelFormPage (create; ?protocol=cron preselects a schedule)
 /channels/:id       -> ChannelDetailPage
@@ -352,30 +460,42 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
 /workflows/new      -> WorkflowFormPage (create)
 /workflows/:id      -> WorkflowDetailPage
 /workflows/:id/edit -> WorkflowFormPage (edit; draft only)
-/functions          -> FunctionsPage (accepts ?q= to land on one function)
 /plugins            -> PluginsPage
 /plugins/new        -> PluginFormPage (upload)
 /plugins/:id        -> PluginDetailPage
 /plugins/:id/edit   -> PluginFormPage (edit; draft only)
 /connectors         -> ConnectorsPage
 /connectors/new     -> ConnectorFormPage (create)
-/connectors/:id     -> ConnectorDetailPage
+/connectors/:id     -> ConnectorDetailPage (?test=1 opens the probe dialog)
 /connectors/:id/edit-> ConnectorFormPage (edit)
-/traces             -> TracesPage
+/traces             -> TracesPage (?channel= and ?status= pre-filter)
 /traces/:id         -> TraceDetailPage (accepts ?token= for async trace polling)
 /trace-dlq          -> TraceDlqPage
 /schedules          -> SchedulesPage (accepts ?channel_id= to pre-filter the ledger)
 /schedules/occurrences/:id -> OccurrenceDetailPage
-/circuit-breakers   -> CircuitBreakersPage
+/circuit-breakers   -> CircuitBreakersPage (?key=channel:connector highlights that row)
 /audit              -> AuditPage
-/console            -> ConsolePage
+/console            -> ConsolePage (?channel=<name> preselects it and seeds its REST route)
 /packages           -> PackagesPage (read-only)
-/settings           -> SettingsPage
+/engine             -> EnginePage (#component-<name> scrolls the health report to that row;
+                                   the Display card: theme, time zone, density)
+/settings           -> redirect to /engine, keeping search and hash (the page's name until 2026-09-05)
+*                   -> NotFoundPage
 ```
 
-A new page needs three registrations: a route in `src/app.tsx`, a nav item in `components/layout/sidebar.tsx`, and a `nav-*` entry in `components/shared/command-palette.tsx`.
+The router is a **data router** (`createBrowserRouter` + `RouterProvider`), because the
+unsaved-changes guard on every form is `useBlocker`, which only exists there. `AppLayout` wraps
+the `<Outlet />` in an `ErrorBoundary` keyed on the path, so a page that throws renders
+`ErrorState` instead of blanking the console; it also sets the fallback tab title from the nav
+registry and runs the `g` + key shortcuts.
 
-Forms (`channel-form.tsx`, `connector-form.tsx`, `workflow-form.tsx`) use a wrapper page that waits for the edit query, then mounts an inner form seeded via `useState` initializers (keyed to remount on data load) — avoid `setState`-in-`useEffect` for form hydration. Each has a `buildPayload()` shared by Save and Validate, so Validate checks exactly what Save would send.
+A new page needs two registrations: a route in `src/app.tsx` and an entry in `src/lib/nav.ts`,
+which feeds the sidebar (grouped Build / Observe / Govern, with live counts from
+`useNavCounts`), the palette's "Go to" group, the `g` + key shortcuts and the fallback tab
+title. A list page names the tab through `PageHeader`; a detail page through `Breadcrumbs`
+(`lib/page-title.ts` lets the page win over the shell).
+
+Forms (`channel-form.tsx`, `connector-form.tsx`, `workflow-form.tsx`, `plugin-form.tsx`) use a wrapper page that waits for the edit query, then mounts an inner form seeded via `useState` initializers (keyed to remount on data load) — avoid `setState`-in-`useEffect` for form hydration. Each has a `buildPayload()` shared by Save and Validate, so Validate checks exactly what Save would send. Every form: ids are picked, not typed (the workflow `Select` grouped by status; `ConnectorField` for cache and dedup connectors; HTTP methods as a checkbox group), tags are a `TagsInput`, a failed Save renders `FormError` with the server's `details[]`, and a JSON snapshot of the fields drives `useUnsavedChanges` — `markSaved()` before the post-save `navigate`. JSON is authored in the `JsonEditor`, never a `Textarea`: the workflow's steps (with the form's `lint` mapping `lintSteps` findings to ranges, catalogue completion, and the detail page's diagram redrawn below from the last document that passed the lint), the condition's JSON mode, and every config editor's Advanced view, the console's payload and the workflow dry run's payload (both run on ⌘ Enter through `onRun`).
 
 ### API Proxy
 
@@ -385,6 +505,9 @@ Dev server proxies `/api`, `/health`, `/healthz`, `/readyz`, `/metrics` to `proc
 
 - **`@goplasmatic/dataflow-ui`** — `WorkflowVisualizer` renders workflow task pipelines with tree/flow/graph views and optional debug tracing. CSS imported in `main.tsx`.
 - **`@goplasmatic/datalogic-ui`** — `DataLogicEditor` renders JSONLogic expressions as interactive flow diagrams. Read-only (`editable={false}`) in viewers; editable with `onChange` in the workflow form's condition editor and the channel config's validation / key-logic / JWT authorization-logic fields (via the shared `LogicField` in `config-field.tsx`). CSS imported in `main.tsx`.
+- **CodeMirror 6** (`codemirror`, `@codemirror/*`, `@lezer/*`) — the JSON editor behind
+  `shared/json-editor.tsx`; see `lib/editor-types.ts`. Themed through the CSS variables in
+  `json-editor-view.tsx` (never a bundled theme), split into its own chunk by `vite.config.ts`.
 
 ### Pagination
 
@@ -418,9 +541,43 @@ Server-side offset/limit pagination via `usePagination()` + `PaginationFooter`. 
 - **Focus rings:** `focus-visible:ring-2 focus-visible:ring-ring/60` plus an offset in the
   surrounding surface colour. A 1px ring is invisible against a filled control.
 - **Icons:** `lucide-react` exclusively.
-- **Tables:** `@tanstack/react-table` with `createColumnHelper<T>()`, server-side sorting via query params.
+- **Tables:** `@tanstack/react-table` with `createColumnHelper<T>()`, server-side sorting via query
+  params. Filters and sort live in the URL through `useUrlFilters`; sortable headers are
+  `SortableHead`; a clickable row spreads `activatableRow(...)` so the keyboard can open it; a
+  loading table draws `PAGE_SIZE` skeleton rows so the layout does not jump when data lands.
+  Columns that need live data (a quarantine set, a breaker map, this node's plugin loads) are
+  built by a `buildColumns(...)` factory inside a `useMemo`, not a module constant.
 - **No index files:** Import directly from the file (`@/components/ui/button`, not `@/components/ui`).
 - **Entity status:** Use `StatusBadge` from `@/components/shared/status-badge` for draft/active/archived display.
 - **Lifecycle operations:** Use `LifecycleActions` from `@/components/shared/lifecycle-actions` for activate/archive/delete/new-version buttons, passing `onPreflight`/`preflight` to surface the `?dry_run=true` activation check.
 - **Status colours:** add new status/state strings to `src/lib/status.ts` rather than inlining — every map there falls back to neutral, so an unmapped value degrades silently to grey.
 - **Untoasted mutations:** validate/test/dry-run hooks are bare `useMutation({ mutationFn })` with no toast or invalidation — their results render inline, and a "failure" (invalid config, unreachable backend) is information rather than an error.
+- **Failed mutations:** `toastError(title, e)` from `lib/toast-error.tsx`, never `toast.error`
+  with `e.message` — the field findings and the request id are the part a person acts on. A
+  batch (requeue every entry shown, reset every open breaker) is one request per item under
+  `Promise.allSettled`, reported as "n done, m refused".
+- **Load failures:** a page that cannot load its entity renders `ErrorState` (with `refetch` as
+  `onRetry` and a `backTo`), never a bare "Failed to load" line.
+- **Times:** `formatWhen()` for list cells (relative under a day, absolute beyond) and
+  `formatRelative()` for anything a person watches live (trace and audit lists, the dashboard),
+  both with the absolute `formatDate()` in the element's `title`. Every absolute time goes
+  through `formatDate` — `toLocaleString` by hand bypasses the zone preference.
+- **Per-browser preferences** live in `localStorage`, never the server: `orion-timezone`,
+  `orion-sidebar`, `orion-getting-started-dismissed`, the theme and density keys, the
+  console's history and headers, the palette's recents (`orion-palette-recent`), a workflow's
+  last dry-run payload (`orion-dryrun-<id>`) and whether its diagram is folded
+  (`orion-workflow-diagram`). A page must render correctly when the key is absent or the
+  accessor throws (private mode).
+- **Links between pages carry state in the URL:** every list page's filters and sort
+  (`?status=&tag=&sort=&order=` and their kin on Channels, Workflows, Connectors, Plugins;
+  `?action=&resource_type=&resource_id=&principal=&start=&end=` on Audit; `?channel=&exhausted=`
+  on the DLQ), the console's `?channel=&method=&path=`,
+  the map reads `?select=` (and every filter),
+  the dashboard and the map `?window=`, the console `?channel=`, the breakers page `?key=`,
+  traces `?channel=&status=`, the connector page `?test=1`. A link that lands on an unfiltered
+  list and asks the operator to find the thing again is a bug. Router *state* carries what must
+  not be in a URL: an async trace token, a payload handed to the console, the trace list's page
+  of ids (for newer / older on the detail).
+- **The console remembers in this browser only:** request history and per-channel headers live in
+  `localStorage` (`orion-console-history`, `orion-console-headers`); a guarded channel's credential
+  goes in the headers table, and the form warns when the channel's `auth` header is missing.
