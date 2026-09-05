@@ -56,19 +56,51 @@ const TableFooter = React.forwardRef<
 ))
 TableFooter.displayName = "TableFooter"
 
-const TableRow = React.forwardRef<
-  HTMLTableRowElement,
-  React.HTMLAttributes<HTMLTableRowElement>
->(({ className, ...props }, ref) => (
-  <tr
-    ref={ref}
-    className={cn(
-      "border-b border-border/60 transition-colors last:border-0 hover:bg-muted/40 data-[state=selected]:bg-accent",
-      className
-    )}
-    {...props}
-  />
-))
+interface TableRowProps extends React.HTMLAttributes<HTMLTableRowElement> {
+  /**
+   * Makes the row open something: it takes focus in the tab order and Enter or
+   * Space open it, with the pointer and a focus ring inside the row. A
+   * `<tr onClick>` alone is invisible to anyone not using a mouse. A link or
+   * button inside the row keeps its own keys — only a key that started on the
+   * row itself counts.
+   */
+  onActivate?: () => void
+}
+
+const TableRow = React.forwardRef<HTMLTableRowElement, TableRowProps>(
+  ({ className, onActivate, onClick, onKeyDown, tabIndex, ...props }, ref) => (
+    <tr
+      ref={ref}
+      className={cn(
+        "border-b border-border/60 transition-colors last:border-0 hover:bg-muted/40 data-[state=selected]:bg-accent",
+        onActivate &&
+          "cursor-pointer outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60",
+        className
+      )}
+      tabIndex={onActivate ? (tabIndex ?? 0) : tabIndex}
+      onClick={
+        onActivate
+          ? (e) => {
+              onClick?.(e)
+              if (!e.defaultPrevented) onActivate()
+            }
+          : onClick
+      }
+      onKeyDown={
+        onActivate
+          ? (e) => {
+              onKeyDown?.(e)
+              if (e.defaultPrevented || e.target !== e.currentTarget) return
+              if (e.key !== "Enter" && e.key !== " ") return
+              e.preventDefault()
+              onActivate()
+            }
+          : onKeyDown
+      }
+      {...props}
+    />
+  )
+)
 TableRow.displayName = "TableRow"
 
 const TableHead = React.forwardRef<

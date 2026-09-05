@@ -6,6 +6,7 @@ import { CommandPalette } from "@/components/shared/command-palette"
 import { ErrorBoundary } from "@/components/shared/error-boundary"
 import { NAV_SHORTCUTS, navItemFor } from "@/lib/nav"
 import { setFallbackTitle } from "@/lib/page-title"
+import { readStorage, writeStorage } from "@/lib/storage"
 
 /** A `g` followed by a key within this long jumps to the page the key names. */
 const CHORD_MS = 1500
@@ -22,13 +23,7 @@ export function AppLayout() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   // The sidebar is a rail of icons when collapsed (remembered per browser),
   // and a drawer over the page below the `md` breakpoint.
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(SIDEBAR_KEY) === "collapsed"
-    } catch {
-      return false
-    }
-  })
+  const [collapsed, setCollapsed] = useState(() => readStorage(SIDEBAR_KEY) === "collapsed")
   const [drawerOpen, setDrawerOpen] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
@@ -37,11 +32,7 @@ export function AppLayout() {
   const toggleCollapsed = () => {
     const next = !collapsed
     setCollapsed(next)
-    try {
-      localStorage.setItem(SIDEBAR_KEY, next ? "collapsed" : "expanded")
-    } catch {
-      // Private mode: the choice lasts for the session.
-    }
+    writeStorage(SIDEBAR_KEY, next ? "collapsed" : "expanded")
   }
 
   // Fallback tab title from the registry; a page that names itself wins.

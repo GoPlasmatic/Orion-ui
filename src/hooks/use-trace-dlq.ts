@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { toastError } from "@/lib/toast-error"
+import { reportBatch, settleAll } from "@/lib/batch"
 import { traceDlqApi } from "@/api/trace-dlq"
 import type { ListTraceDlqParams, PurgeTraceDlqRequest } from "@/api/types"
 
@@ -54,21 +55,10 @@ export function usePurgeTraceDlq() {
 export function useRequeueManyTraceDlq() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (ids: string[]) => {
-      const results = await Promise.allSettled(ids.map((id) => traceDlqApi.requeue(id)))
-      const failed = results.filter((r) => r.status === "rejected")
-      return { requeued: results.length - failed.length, failed: failed.length, first: failed[0] }
-    },
-    onSuccess: ({ requeued, failed, first }) => {
+    mutationFn: (ids: string[]) => settleAll(ids, (id) => traceDlqApi.requeue(id)),
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["trace-dlq"] })
-      if (failed === 0) {
-        toast.success(`Requeued ${requeued} ${requeued === 1 ? "entry" : "entries"} for immediate retry`)
-      } else {
-        toastError(
-          `Requeued ${requeued}, ${failed} refused`,
-          first && first.status === "rejected" ? first.reason : undefined,
-        )
-      }
+      reportBatch(result, "Requeued", ["entry", "entries"], " for immediate retry")
     },
     onError: (e) => toastError("Failed to requeue entries", e),
   })

@@ -1,34 +1,32 @@
 import { useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router"
-import { toast } from "sonner"
 import { useWorkflows } from "@/hooks/use-workflows"
 import { useChannels } from "@/hooks/use-channels"
+import { useExport } from "@/hooks/use-export"
 import { workflowsApi } from "@/api/workflows"
-import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
-import { activatableRow, listTableFeatures, ROW_ACTIVATABLE } from "@/lib/table"
-import { useUrlFilters, nextSort } from "@/lib/use-url-filters"
+import { useTable, createColumnHelper } from "@tanstack/react-table"
+import { listTableFeatures } from "@/lib/table"
+import { useListState } from "@/lib/use-list-state"
 import { countLeafSteps } from "@/lib/workflow-steps"
-import type { Channel, Workflow, EntityStatus, SortOrder } from "@/api/types"
-import { Table, TableHeader, TableBody, TableRow, TableCell } from "@/components/ui/table"
+import type { Channel, Workflow, EntityStatus } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
-import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
+import { PAGE_SIZE, REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { WorkflowImportWizard } from "@/components/shared/workflow-import-wizard"
 import { EmptyState } from "@/components/shared/empty-state"
+import { EntityTable } from "@/components/shared/entity-table"
 import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
-import { SortableHead } from "@/components/shared/sortable-head"
 import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
 import { Download, GitBranch, Plus, Upload } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, Workflow>()
 
-const FILTER_KEYS = ["status", "tag", "sort", "order"] as const
+const FILTER_KEYS = ["status", "tag"] as const
 
 /** Column id → the server's `sort_by` field. */
 const SORT_FIELDS: Record<string, string> = {
@@ -120,28 +118,13 @@ function buildColumns(runsOn: ReadonlyMap<string, Channel[]>) {
 
 export function WorkflowsPage() {
   const navigate = useNavigate()
-  const { offset, reset: resetPage, prev, next } = usePagination()
-  const { values: filters, set } = useUrlFilters(FILTER_KEYS)
+  const { filters, update, sortQuery, sort, offset, prev, next } = useListState(FILTER_KEYS, SORT_FIELDS)
   const statusFilter = filters.status as EntityStatus | ""
-  const sortBy = SORT_FIELDS[filters.sort] ? filters.sort : ""
-  const sortOrder = (filters.order === "asc" || filters.order === "desc" ? filters.order : "") as SortOrder | ""
   const [showImport, setShowImport] = useState(false)
-  const [exporting, setExporting] = useState(false)
 
-  const update = (patch: Partial<Record<(typeof FILTER_KEYS)[number], string>>) => {
-    set(patch)
-    resetPage()
-  }
-
-  const { data, isLoading } = useWorkflows({
-    limit: PAGE_SIZE,
-    offset,
-    status: statusFilter || undefined,
-    tag: filters.tag || undefined,
-    sort_by: sortBy || undefined,
-    sort_order: sortBy ? sortOrder || undefined : undefined,
-  })
-  const { data: channelList } = useChannels({ limit: 1000 })
+  const query = { status: statusFilter || undefined, tag: filters.tag || undefined }
+  const { data, isLoading } = useWorkflows({ limit: PAGE_SIZE, offset, ...query, ...sortQuery })
+  const { data: channelList } = useChannels({ limit: REGISTRY_LIMIT })
   const runsOn = useMemo(() => {
     const m = new Map<string, Channel[]>()
     for (const c of channelList?.data ?? []) {
@@ -154,21 +137,11 @@ export function WorkflowsPage() {
 
   // Server-side export honouring the active filters, downloaded as a JSON file
   // in the same array format the import wizard accepts.
-  const handleExport = async () => {
-    setExporting(true)
-    try {
-      const workflows = await workflowsApi.export({
-        status: statusFilter || undefined,
-        tag: filters.tag || undefined,
-      })
-      downloadJson(workflows, "orion-workflows")
-      toast.success(`Exported ${workflows.length} workflow${workflows.length !== 1 ? "s" : ""}`)
-    } catch (e) {
-      toast.error("Export failed", { description: e instanceof Error ? e.message : undefined })
-    } finally {
-      setExporting(false)
-    }
-  }
+  const exportAll = useExport(async () => {
+    const workflows = await workflowsApi.export(query)
+    downloadJson(workflows, "orion-workflows")
+    return `Exported ${workflows.length} workflow${workflows.length !== 1 ? "s" : ""}`
+  })
 
   const table = useTable({
     features: listTableFeatures,
@@ -179,8 +152,8 @@ export function WorkflowsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Workflows" description="Author, import, and manage workflow pipelines">
-        <Button variant="outline" onClick={handleExport} disabled={exporting}>
-          <Download className="h-4 w-4" /> {exporting ? "Exporting..." : "Export"}
+        <Button variant="outline" onClick={exportAll.run} disabled={exportAll.pending}>
+          <Download className="h-4 w-4" /> {exportAll.pending ? "Exporting..." : "Export"}
         </Button>
         <Button variant="outline" onClick={() => setShowImport(true)}>
           <Upload className="h-4 w-4" /> Import
@@ -215,77 +188,31 @@ export function WorkflowsPage() {
         />
       </FilterBar>
 
-      <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => {
-                  const field = SORT_FIELDS[header.column.id]
-                  return (
-                    <SortableHead
-                      key={header.id}
-                      field={field}
-                      sort={sortBy}
-                      order={sortOrder}
-                      onSort={field ? () => update(nextSort({ sort: sortBy, order: sortOrder }, field, field === "updated_at")) : undefined}
-                    >
-                      {flexRender(header.column.columnDef.header, header.getContext())}
-                    </SortableHead>
-                  )
-                })}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                <TableRow key={i}>
-                  {columns.map((_, j) => (
-                    <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : table.getRowModel().rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={columns.length} className="p-0">
-                  <EmptyState
-                    icon={GitBranch}
-                    title="No workflows yet"
-                    description="Workflows are task pipelines, often AI-generated and imported here for review, validation, dry-run, and safe rollout."
-                    action={
-                      <div className="flex items-center gap-2">
-                        <Button variant="outline" onClick={() => setShowImport(true)}>
-                          <Upload className="h-4 w-4" /> Import workflow
-                        </Button>
-                        <Button asChild>
-                          <Link to="/workflows/new">
-                            <Plus className="h-4 w-4" /> Create workflow
-                          </Link>
-                        </Button>
-                      </div>
-                    }
-                  />
-                </TableCell>
-              </TableRow>
-            ) : (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  className={ROW_ACTIVATABLE}
-                  {...activatableRow(() => navigate(`/workflows/${row.original.workflow_id}`))}
-                >
-                  {row.getAllCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      <EntityTable
+        table={table}
+        isLoading={isLoading}
+        sort={sort}
+        onOpen={(workflow) => navigate(`/workflows/${workflow.workflow_id}`)}
+        empty={
+          <EmptyState
+            icon={GitBranch}
+            title="No workflows yet"
+            description="Workflows are task pipelines, often AI-generated and imported here for review, validation, dry-run, and safe rollout."
+            action={
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={() => setShowImport(true)}>
+                  <Upload className="h-4 w-4" /> Import workflow
+                </Button>
+                <Button asChild>
+                  <Link to="/workflows/new">
+                    <Plus className="h-4 w-4" /> Create workflow
+                  </Link>
+                </Button>
+              </div>
+            }
+          />
+        }
+      />
 
       <PaginationFooter
         offset={offset}

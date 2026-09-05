@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react"
-import { Link, useNavigate, useSearchParams } from "react-router"
+import { useState } from "react"
+import { Link, useNavigate } from "react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   BarChart,
@@ -14,13 +14,12 @@ import { useEngineStatus } from "@/hooks/use-engine"
 import { useTraces } from "@/hooks/use-traces"
 import { useTraceDlq } from "@/hooks/use-trace-dlq"
 import { useAuditLogs } from "@/hooks/use-audit"
-import { useChannels } from "@/hooks/use-channels"
-import { useConnectors } from "@/hooks/use-connectors"
-import { useWorkflows } from "@/hooks/use-workflows"
+import { useEntityIndex } from "@/hooks/use-entity-index"
 import { useCronStatus } from "@/hooks/use-cron"
 import {
   DEFAULT_TRAFFIC_WINDOW,
   TRAFFIC_WINDOWS,
+  trafficWindowFromParam,
   useCronMetrics,
 } from "@/hooks/use-metrics"
 import { useAttentionItems, type AttentionItem, type AttentionKind } from "@/hooks/use-attention"
@@ -39,10 +38,11 @@ import {
   TableCell,
 } from "@/components/ui/table"
 import { PageHeader } from "@/components/shared/page-header"
+import { KpiCard } from "@/components/shared/kpi-card"
+import { useUrlFilters } from "@/lib/use-url-filters"
 import { GettingStarted } from "@/components/shared/getting-started"
 import { isFirstRun } from "@/lib/onboarding"
-import { Sparkline } from "@/components/ui/sparkline"
-import { formatDate, formatDuration, formatRelative, serverTime, cn } from "@/lib/utils"
+import { formatDate, formatDuration, formatRelative, formatSpan, formatUptime, serverTime, cn } from "@/lib/utils"
 import {
   traceStatusBadgeClass,
   statusChartColor,
@@ -50,8 +50,6 @@ import {
 } from "@/lib/status"
 import { errorLevel, healthText } from "@/lib/traffic-encoding"
 import { auditResourceRoute } from "@/lib/audit-routes"
-import { buildIndex } from "@/lib/topology"
-import { buildSystemGraph } from "@/lib/system-graph"
 import {
   Activity,
   RefreshCw,
@@ -88,75 +86,8 @@ const KIND_ICON: Record<AttentionKind, LucideIcon> = {
   trace: AlertTriangle,
 }
 
-/** A short span for a label: "48 s", "4 m 20 s", "1 h 5 m". */
-function formatSpan(seconds: number): string {
-  const s = Math.round(seconds)
-  if (s < 60) return `${s} s`
-  const m = Math.floor(s / 60)
-  const rem = s % 60
-  if (m < 60) return rem ? `${m} m ${rem} s` : `${m} m`
-  const h = Math.floor(m / 60)
-  return `${h} h ${m % 60} m`
-}
-
-function formatUptime(seconds: number): string {
-  const d = Math.floor(seconds / 86400)
-  const h = Math.floor((seconds % 86400) / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  if (d > 0) return `${d}d ${h}h ${m}m`
-  if (h > 0) return `${h}h ${m}m`
-  return `${m}m`
-}
-
-function KpiCard({
-  title,
-  value,
-  unit,
-  hint,
-  series,
-  colorClass,
-  valueClass,
-  to,
-}: {
-  title: string
-  value: string
-  unit?: string
-  /** What the number covers — a window, or since start. */
-  hint?: string
-  series?: number[]
-  colorClass?: string
-  /** Colours the figure itself when it crosses a band; unset leaves it plain. */
-  valueClass?: string
-  /** Where the card leads; a KPI with nowhere to go is a dead end. */
-  to?: string
-}) {
-  const card = (
-    <Card interactive={!!to} className="h-full">
-      <CardHeader className="pb-1">
-        <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-end justify-between gap-2">
-          <p className={cn("text-2xl font-bold tabular-nums", valueClass)}>
-            {value}
-            {unit && <span className="ml-1 text-sm font-normal text-muted-foreground">{unit}</span>}
-          </p>
-          {series && series.length >= 2 && (
-            <Sparkline values={series} className={cn("w-24", colorClass)} />
-          )}
-        </div>
-        {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
-      </CardContent>
-    </Card>
-  )
-  return to ? (
-    <Link to={to} className="block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
-      {card}
-    </Link>
-  ) : (
-    card
-  )
-}
+/** The one view setting the dashboard keeps in the URL. */
+const WINDOW_KEY = ["window"] as const
 
 export function OperationsPage() {
   const navigate = useNavigate()
@@ -164,11 +95,8 @@ export function OperationsPage() {
 
   // The window every windowed figure on this page shares, in the URL like the
   // map's so a link carries it.
-  const [params, setParams] = useSearchParams()
-  const requestedWindow = Number(params.get("window"))
-  const windowSec = TRAFFIC_WINDOWS.some((w) => w.value === requestedWindow)
-    ? requestedWindow
-    : DEFAULT_TRAFFIC_WINDOW
+  const { values: view, set: setView } = useUrlFilters(WINDOW_KEY)
+  const windowSec = trafficWindowFromParam(view.window)
 
   const { items: alerts, traffic, metrics, breakers, hasCron, channelIdByName, windowLabel, now } =
     useAttentionItems(windowSec)
@@ -176,9 +104,7 @@ export function OperationsPage() {
   // `orion_workflow_duration_seconds{workflow}` labels by workflow *id* (the
   // authored id, never a caller-supplied value — that is what bounds the label
   // cardinality). Join against the list so the table reads as names.
-  const { data: workflowList } = useWorkflows({ limit: 1000 })
-  const { data: channelList } = useChannels({ limit: 1000 })
-  const { data: connectorList } = useConnectors({ limit: 1000 })
+  const { graph: systemGraph, channels: channelList, workflows: workflowList } = useEntityIndex()
   const { data: recentTraces } = useTraces(
     { limit: 6, sort_by: "created_at", sort_order: "desc" },
     { refetchInterval: 15_000 },
@@ -195,11 +121,7 @@ export function OperationsPage() {
   // The call graph, for the coverage line: a channel reached only by
   // `channel_call` has no ingress series and can never "serve a request" as
   // the exporter counts it, so it is reported as internal rather than idle.
-  const graph = useMemo(() => {
-    const channels = channelList?.data ?? []
-    if (channels.length === 0) return null
-    return buildSystemGraph(buildIndex(channels, workflowList?.data ?? [], connectorList?.data ?? []))
-  }, [channelList?.data, workflowList?.data, connectorList?.data])
+  const graph = (channelList?.data.length ?? 0) > 0 ? systemGraph : null
 
   // Nothing live yet: the checklist leads, everything else waits below it.
   const firstRun =
@@ -466,10 +388,7 @@ export function OperationsPage() {
           <Select
             value={String(windowSec)}
             onChange={(e) =>
-              setParams(
-                e.target.value === String(DEFAULT_TRAFFIC_WINDOW) ? {} : { window: e.target.value },
-                { replace: true },
-              )
+              setView({ window: e.target.value === String(DEFAULT_TRAFFIC_WINDOW) ? "" : e.target.value })
             }
             className="w-28"
             aria-label="Traffic window"
@@ -766,8 +685,7 @@ export function OperationsPage() {
                           radius={i === outcomeStatuses.length - 1 ? [0, 4, 4, 0] : 0}
                           className="cursor-pointer"
                           onClick={(entry) => {
-                            const rec = entry as unknown as { payload?: { channel?: unknown }; channel?: unknown }
-                            const channel = rec?.payload?.channel ?? rec?.channel
+                            const channel: unknown = entry.payload?.channel
                             if (typeof channel === "string") {
                               navigate(`/traces?channel=${encodeURIComponent(channel)}`)
                             }
@@ -830,15 +748,7 @@ export function OperationsPage() {
                       const id = channelIdByName.get(c.channel)
                       const mapTo = `/system-map?select=${encodeURIComponent(c.channel)}`
                       return (
-                        <TableRow
-                          key={c.channel}
-                          className="cursor-pointer"
-                          tabIndex={0}
-                          onClick={() => navigate(id ? `/channels/${id}` : mapTo)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && e.target === e.currentTarget) e.currentTarget.click()
-                          }}
-                        >
+                        <TableRow key={c.channel} onActivate={() => navigate(id ? `/channels/${id}` : mapTo)}>
                           <TableCell className="min-w-32 max-w-0 truncate font-medium" title={c.channel}>
                             {c.channel}
                           </TableCell>
@@ -976,16 +886,11 @@ export function OperationsPage() {
                     {metrics.workflows.slice(0, TABLE_ROWS).map((w) => (
                       <TableRow
                         key={w.workflow}
-                        className={workflowNames.has(w.workflow) ? "cursor-pointer" : undefined}
-                        tabIndex={workflowNames.has(w.workflow) ? 0 : undefined}
-                        onClick={
+                        onActivate={
                           workflowNames.has(w.workflow)
                             ? () => navigate(`/workflows/${w.workflow}`)
                             : undefined
                         }
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") e.currentTarget.click()
-                        }}
                       >
                         <TableCell className="font-medium" title={w.workflow}>
                           {workflowNames.get(w.workflow) ?? w.workflow}

@@ -82,7 +82,7 @@ export function Sidebar({
                   to={item.to}
                   end={item.to === "/"}
                   onClick={onNavigate}
-                  title={collapsed ? `${item.label}${shortcutHint}` : item.shortcut ? `${item.label}${shortcutHint}` : undefined}
+                  title={collapsed || item.shortcut ? `${item.label}${shortcutHint}` : undefined}
                   aria-label={collapsed ? item.label : undefined}
                   className={({ isActive }) =>
                     cn(

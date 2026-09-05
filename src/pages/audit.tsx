@@ -1,11 +1,11 @@
-import { useState, type ReactNode } from "react"
+import { Fragment, useState } from "react"
 import { Link } from "react-router"
-import { toast } from "sonner"
 import { useAuditLogs } from "@/hooks/use-audit"
+import { useExport } from "@/hooks/use-export"
 import { auditApi } from "@/api/audit"
 import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
 import { listTableFeatures } from "@/lib/table"
-import { useUrlFilters } from "@/lib/use-url-filters"
+import { useListState } from "@/lib/use-list-state"
 import type { AuditLog } from "@/api/types"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
@@ -17,7 +17,7 @@ import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
 import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
 import { JsonViewer } from "@/components/shared/json-viewer"
-import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
+import { PAGE_SIZE } from "@/lib/use-pagination"
 import { formatDate, formatRelative, parseJson, toRfc3339, downloadJson, downloadText } from "@/lib/utils"
 import { useTimeZone } from "@/lib/use-time-zone"
 import { auditResourceRoute } from "@/lib/audit-routes"
@@ -118,13 +118,11 @@ function csvCell(value: unknown): string {
 }
 
 export function AuditPage() {
-  const { offset, reset: resetPage, prev, next } = usePagination()
-  const { values: filters, set } = useUrlFilters(FILTER_KEYS)
+  const { filters, update, offset, prev, next } = useListState(FILTER_KEYS)
   // Rows whose `details` are open. The column is what the server recorded
   // about the change — the request that made it, the change context — and it
   // was never rendered.
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
-  const [exporting, setExporting] = useState(false)
   const { label: zoneLabel } = useTimeZone()
 
   const query = {
@@ -146,12 +144,6 @@ export function AuditPage() {
     columns,
   })
 
-  // Any control change re-anchors paging to the first page.
-  const update = (patch: Partial<Record<(typeof FILTER_KEYS)[number], string>>) => {
-    set(patch)
-    resetPage()
-  }
-
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const nextSet = new Set(prev)
@@ -161,44 +153,37 @@ export function AuditPage() {
     })
 
   /** The current filter, newest first, as a file — the thousand most recent rows. */
-  const handleExport = async (format: "json" | "csv") => {
-    setExporting(true)
-    try {
-      const page = await auditApi.list({ ...query, limit: EXPORT_LIMIT, offset: 0 })
-      const rows = page.data
-      if (format === "json") {
-        downloadJson(rows, "orion-audit")
-      } else {
-        const header = ["id", "created_at", "principal", "action", "resource_type", "resource_id", "change_context", "details"]
-        const lines = rows.map((r) =>
-          [r.id, r.created_at, r.principal, r.action, r.resource_type, r.resource_id, changeContextOf(r) ?? "", r.details ?? ""]
-            .map(csvCell)
-            .join(","),
-        )
-        downloadText([header.join(","), ...lines].join("\n"), "orion-audit", "csv", "text/csv")
-      }
-      toast.success(
-        `Exported ${rows.length} audit ${rows.length === 1 ? "row" : "rows"}${
-          rows.length === EXPORT_LIMIT ? " — the most recent thousand under this filter" : ""
-        }`,
+  const exportRows = async (format: "json" | "csv") => {
+    const rows = (await auditApi.list({ ...query, limit: EXPORT_LIMIT, offset: 0 })).data
+    if (format === "json") {
+      downloadJson(rows, "orion-audit")
+    } else {
+      const header = ["id", "created_at", "principal", "action", "resource_type", "resource_id", "change_context", "details"]
+      const lines = rows.map((r) =>
+        [r.id, r.created_at, r.principal, r.action, r.resource_type, r.resource_id, changeContextOf(r) ?? "", r.details ?? ""]
+          .map(csvCell)
+          .join(","),
       )
-    } catch (e) {
-      toast.error("Export failed", { description: e instanceof Error ? e.message : undefined })
-    } finally {
-      setExporting(false)
+      downloadText([header.join(","), ...lines].join("\n"), "orion-audit", "csv", "text/csv")
     }
+    return `Exported ${rows.length} audit ${rows.length === 1 ? "row" : "rows"}${
+      rows.length === EXPORT_LIMIT ? " — the most recent thousand under this filter" : ""
+    }`
   }
+  const exportCsv = useExport(() => exportRows("csv"))
+  const exportJson = useExport(() => exportRows("json"))
+  const exporting = exportCsv.pending || exportJson.pending
 
   return (
     <div className="space-y-6">
       <PageHeader title="Audit Log" description="Track administrative actions">
-        <Button variant="outline" onClick={() => handleExport("csv")} disabled={exporting}>
+        <Button variant="outline" onClick={exportCsv.run} disabled={exporting}>
           <Download className="h-4 w-4" />
-          {exporting ? "Exporting..." : "Export CSV"}
+          {exportCsv.pending ? "Exporting..." : "Export CSV"}
         </Button>
-        <Button variant="outline" onClick={() => handleExport("json")} disabled={exporting}>
+        <Button variant="outline" onClick={exportJson.run} disabled={exporting}>
           <Download className="h-4 w-4" />
-          Export JSON
+          {exportJson.pending ? "Exporting..." : "Export JSON"}
         </Button>
       </PageHeader>
 
@@ -317,19 +302,10 @@ export function AuditPage() {
                 const hasDetails = !!entry.details
                 const isOpen = hasDetails && expanded.has(entry.id)
                 return (
-                  <TableRowGroup key={row.id}>
+                  <Fragment key={row.id}>
                     <TableRow
-                      className={hasDetails ? "cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60" : undefined}
-                      tabIndex={hasDetails ? 0 : undefined}
+                      onActivate={hasDetails ? () => toggle(entry.id) : undefined}
                       aria-expanded={hasDetails ? isOpen : undefined}
-                      onClick={hasDetails ? () => toggle(entry.id) : undefined}
-                      onKeyDown={(e) => {
-                        if (e.target !== e.currentTarget) return
-                        if (hasDetails && (e.key === "Enter" || e.key === " ")) {
-                          e.preventDefault()
-                          toggle(entry.id)
-                        }
-                      }}
                     >
                       {row.getAllCells().map((cell) => (
                         <TableCell key={cell.id}>
@@ -356,7 +332,7 @@ export function AuditPage() {
                         </TableCell>
                       </TableRow>
                     )}
-                  </TableRowGroup>
+                  </Fragment>
                 )
               })
             )}
@@ -373,9 +349,4 @@ export function AuditPage() {
       />
     </div>
   )
-}
-
-/** A row and its expanded detail row share one key without an extra wrapper element. */
-function TableRowGroup({ children }: { children: ReactNode }) {
-  return <>{children}</>
 }

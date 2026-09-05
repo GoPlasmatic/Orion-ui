@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { firstRunSteps, type FirstRunState } from "@/lib/onboarding"
 import { cn } from "@/lib/utils"
+import { readStorage, writeStorage } from "@/lib/storage"
 
 const DISMISS_KEY = "orion-getting-started-dismissed"
 
@@ -15,13 +16,7 @@ const DISMISS_KEY = "orion-getting-started-dismissed"
  * ticks itself as the instance fills up.
  */
 export function GettingStarted({ state }: { state: FirstRunState }) {
-  const [dismissed, setDismissed] = useState(() => {
-    try {
-      return localStorage.getItem(DISMISS_KEY) === "1"
-    } catch {
-      return false
-    }
-  })
+  const [dismissed, setDismissed] = useState(() => readStorage(DISMISS_KEY) === "1")
   if (dismissed) return null
 
   const steps = firstRunSteps(state)
@@ -46,11 +41,7 @@ export function GettingStarted({ state }: { state: FirstRunState }) {
           className="text-muted-foreground"
           onClick={() => {
             setDismissed(true)
-            try {
-              localStorage.setItem(DISMISS_KEY, "1")
-            } catch {
-              // Private mode: it hides for this session.
-            }
+            writeStorage(DISMISS_KEY, "1")
           }}
         >
           <X />

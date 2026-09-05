@@ -1,15 +1,11 @@
 import { useParams, Link, useNavigate, useSearchParams } from "react-router"
 import {
   useConnector,
-  useConnectors,
   useDeleteConnector,
   useCircuitBreakers,
   useResetCircuitBreaker,
 } from "@/hooks/use-connectors"
-import { useChannels } from "@/hooks/use-channels"
-import { useWorkflows } from "@/hooks/use-workflows"
-import { buildIndex } from "@/lib/topology"
-import { buildSystemGraph } from "@/lib/system-graph"
+import { useEntityIndex } from "@/hooks/use-entity-index"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -36,16 +32,11 @@ export function ConnectorDetailPage() {
   const [params] = useSearchParams()
   // Who depends on it, for the delete dialog: the server refuses with 409,
   // but the question deserves an answer before the click.
-  const { data: channelList } = useChannels({ limit: 1000 })
-  const { data: workflowList } = useWorkflows({ limit: 1000 })
-  const { data: connectorList } = useConnectors({ limit: 1000 })
-  const users = useMemo(() => {
-    if (!connector) return []
-    const graph = buildSystemGraph(
-      buildIndex(channelList?.data ?? [], workflowList?.data ?? [], connectorList?.data ?? []),
-    )
-    return graph.connectors.find((c) => c.name === connector.name)?.users ?? []
-  }, [connector, channelList?.data, workflowList?.data, connectorList?.data])
+  const { graph } = useEntityIndex()
+  const users = useMemo(
+    () => (connector ? (graph.connectors.find((c) => c.name === connector.name)?.users ?? []) : []),
+    [connector, graph],
+  )
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   // `?test=1` opens the probe straight away — the dashboard's "connector
   // failed to load" alert lands here, and the probe is the first thing to run.

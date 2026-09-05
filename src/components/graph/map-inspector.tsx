@@ -1,5 +1,5 @@
 import { Link } from "react-router"
-import { toast } from "sonner"
+import { copyText } from "@/lib/clipboard"
 import {
   ArrowRight,
   ArrowUpRight,
@@ -21,7 +21,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Callout } from "@/components/ui/callout"
-import { Sparkline } from "@/components/ui/sparkline"
+import { OutcomeBar, OutcomeLegend, TrafficSparklines } from "@/components/shared/outcome-bar"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { useTraces } from "@/hooks/use-traces"
 import { useTriggerChannel } from "@/hooks/use-channels"
@@ -36,7 +36,6 @@ import {
   healthDot,
   healthText,
   healthOf,
-  segmentColor,
   type EffectiveLoad,
 } from "@/lib/traffic-encoding"
 
@@ -152,10 +151,7 @@ export function MapInspector({
             size="icon-sm"
             onClick={() => {
               const url = `${window.location.origin}/system-map?select=${encodeURIComponent(node.id)}`
-              navigator.clipboard
-                .writeText(url)
-                .then(() => toast.success("Link copied", { description: url }))
-                .catch(() => toast.error("Could not copy the link"))
+              void copyText(url, "Link", url)
             }}
             aria-label="Copy a link to this channel on the map"
             title="Copy link to this view"
@@ -255,61 +251,9 @@ export function MapInspector({
                 <Stat label="p95" value={formatMs(traffic.p95Ms)} />
               </div>
 
-              {series.rate.length >= 2 && (
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">rate</p>
-                    <Sparkline values={series.rate} height={28} className="text-chart-1" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">errors %</p>
-                    <Sparkline values={series.errorPct} height={28} className="text-destructive" />
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-3 flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                {traffic.ok > 0 && (
-                  <div className={segmentColor.ok} style={{ width: `${(traffic.ok / windowed) * 100}%` }} />
-                )}
-                {traffic.failed > 0 && (
-                  <div
-                    className={segmentColor.failed}
-                    style={{ width: `${(traffic.failed / windowed) * 100}%` }}
-                  />
-                )}
-                {traffic.rejected > 0 && (
-                  <div
-                    className={segmentColor.rejected}
-                    style={{ width: `${(traffic.rejected / windowed) * 100}%` }}
-                  />
-                )}
-                {traffic.duplicate > 0 && (
-                  <div
-                    className={segmentColor.duplicate}
-                    style={{ width: `${(traffic.duplicate / windowed) * 100}%` }}
-                  />
-                )}
-              </div>
-
-              <div className="mt-2 space-y-0.5 text-[11px]">
-                {(
-                  [
-                    ["ok", traffic.ok, segmentColor.ok],
-                    ["failed", traffic.failed, segmentColor.failed],
-                    [traffic.dominantIssue ?? "rejected", traffic.rejected, segmentColor.rejected],
-                    ["duplicate", traffic.duplicate, segmentColor.duplicate],
-                  ] as const
-                )
-                  .filter(([, value]) => value > 0)
-                  .map(([label, value, color]) => (
-                    <div key={label} className="flex items-center gap-1.5">
-                      <span className={cn("h-1.5 w-1.5 rounded-full", color)} />
-                      <span className="text-muted-foreground">{label}</span>
-                      <span className="ml-auto font-mono tabular-nums">{value}</span>
-                    </div>
-                  ))}
-              </div>
+              <TrafficSparklines series={series} height={28} compact className="mt-3" />
+              <OutcomeBar traffic={traffic} className="mt-3" />
+              <OutcomeLegend traffic={traffic} className="mt-2" />
 
               <p className="mt-2 text-[10px] text-muted-foreground">
                 {traffic.total.toLocaleString()} total since the server started

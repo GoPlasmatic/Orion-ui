@@ -15,6 +15,7 @@ import type {
   ValidationResponse,
 } from "@/api/types"
 import { useUnsavedChanges } from "@/lib/use-unsaved-changes"
+import { formatBytes, shortDigest } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -140,11 +141,6 @@ async function digestOf(buffer: ArrayBuffer): Promise<string> {
   return `sha256:${hex}`
 }
 
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(2)} MB`
-}
 
 interface ComponentFile {
   name: string
@@ -395,7 +391,7 @@ function PluginForm({ existing }: { existing?: Plugin }) {
             {isEdit && !component && (
               <p className="mt-1 text-xs text-muted-foreground">
                 Leave empty to keep the stored component{" "}
-                <span className="font-mono">{existing!.digest.slice(0, 19)}…</span>
+                <span className="font-mono">{shortDigest(existing!.digest)}</span>
               </p>
             )}
           </div>

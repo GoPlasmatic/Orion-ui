@@ -1,28 +1,27 @@
 import { useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router"
-import { toast } from "sonner"
 import { usePlugins, useImportPlugins } from "@/hooks/use-plugins"
 import { useHealth } from "@/hooks/use-health"
+import { useExport } from "@/hooks/use-export"
 import { pluginsApi } from "@/api/plugins"
-import type { CreatePluginRequest, EntityStatus, Plugin, SortOrder } from "@/api/types"
-import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
-import { activatableRow, listTableFeatures, ROW_ACTIVATABLE } from "@/lib/table"
-import { useUrlFilters, nextSort } from "@/lib/use-url-filters"
-import { Table, TableHeader, TableBody, TableRow, TableCell } from "@/components/ui/table"
+import type { CreatePluginRequest, EntityStatus, Plugin } from "@/api/types"
+import { useTable, createColumnHelper } from "@tanstack/react-table"
+import { listTableFeatures } from "@/lib/table"
+import { useListState } from "@/lib/use-list-state"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
-import { Skeleton } from "@/components/ui/skeleton"
 import { ImportDialog } from "@/components/shared/import-dialog"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { EmptyState } from "@/components/shared/empty-state"
+import { EntityTable } from "@/components/shared/entity-table"
+import { ErrorState } from "@/components/shared/error-state"
 import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
-import { SortableHead } from "@/components/shared/sortable-head"
-import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
+import { PAGE_SIZE } from "@/lib/use-pagination"
 import { pluginHealthBadgeClass } from "@/lib/status"
 import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
 import { Blocks, Download, Plus, Upload } from "lucide-react"
@@ -31,7 +30,7 @@ const columnHelper = createColumnHelper<typeof listTableFeatures, Plugin>()
 
 const FUNCTIONS_SHOWN = 3
 
-const FILTER_KEYS = ["status", "tag", "sort", "order"] as const
+const FILTER_KEYS = ["status", "tag"] as const
 
 /** Column id → the server's `sort_by` field. */
 const SORT_FIELDS: Record<string, string> = {
@@ -126,29 +125,14 @@ function buildColumns(loads: ReadonlyMap<string, NodeLoad>) {
  */
 export function PluginsPage() {
   const navigate = useNavigate()
-  const { offset, reset: resetPage, prev, next } = usePagination()
-  const { values: filters, set } = useUrlFilters(FILTER_KEYS)
+  const { filters, update, sortQuery, sort, offset, prev, next } = useListState(FILTER_KEYS, SORT_FIELDS)
   const statusFilter = filters.status as EntityStatus | ""
-  const sortBy = SORT_FIELDS[filters.sort] ? filters.sort : ""
-  const sortOrder = (filters.order === "asc" || filters.order === "desc" ? filters.order : "") as SortOrder | ""
   const [showImport, setShowImport] = useState(false)
-  const [exporting, setExporting] = useState(false)
   const { data: health } = useHealth()
   const importPlugins = useImportPlugins()
 
-  const update = (patch: Partial<Record<(typeof FILTER_KEYS)[number], string>>) => {
-    set(patch)
-    resetPage()
-  }
-
-  const { data, isLoading, error } = usePlugins({
-    limit: PAGE_SIZE,
-    offset,
-    status: statusFilter || undefined,
-    tag: filters.tag || undefined,
-    sort_by: sortBy || undefined,
-    sort_order: sortBy ? sortOrder || undefined : undefined,
-  })
+  const query = { status: statusFilter || undefined, tag: filters.tag || undefined }
+  const { data, isLoading, error, refetch } = usePlugins({ limit: PAGE_SIZE, offset, ...query, ...sortQuery })
 
   const loads = useMemo(() => {
     const m = new Map<string, NodeLoad>()
@@ -178,24 +162,14 @@ export function PluginsPage() {
   // With the artifacts inlined the bundle is self-contained — what a promotion
   // to another instance needs. Without them each item names a digest only the
   // exporting instance holds.
-  const handleExport = async () => {
-    setExporting(true)
-    try {
-      const plugins = await pluginsApi.export({
-        status: statusFilter || undefined,
-        tag: filters.tag || undefined,
-        include_artifacts: true,
-      })
-      downloadJson(plugins, "orion-plugins")
-      toast.success(`Exported ${plugins.length} plugin${plugins.length !== 1 ? "s" : ""}`, {
-        description: "Components inlined as base64",
-      })
-    } catch (e) {
-      toast.error("Export failed", { description: e instanceof Error ? e.message : undefined })
-    } finally {
-      setExporting(false)
+  const exportAll = useExport(async () => {
+    const plugins = await pluginsApi.export({ ...query, include_artifacts: true })
+    downloadJson(plugins, "orion-plugins")
+    return {
+      message: `Exported ${plugins.length} plugin${plugins.length !== 1 ? "s" : ""}`,
+      description: "Components inlined as base64",
     }
-  }
+  })
 
   const sandbox = health?.components?.plugins
   const failedLoads = health?.plugins?.failed_to_load ?? []
@@ -206,9 +180,9 @@ export function PluginsPage() {
         title="Plugins"
         description="Custom task functions as sandboxed WebAssembly components"
       >
-        <Button variant="outline" onClick={handleExport} disabled={exporting}>
+        <Button variant="outline" onClick={exportAll.run} disabled={exportAll.pending}>
           <Download className="h-4 w-4" />
-          {exporting ? "Exporting..." : "Export"}
+          {exportAll.pending ? "Exporting..." : "Export"}
         </Button>
         <Button variant="outline" onClick={() => setShowImport(true)}>
           <Upload className="h-4 w-4" />
@@ -269,85 +243,33 @@ export function PluginsPage() {
         />
       </FilterBar>
 
-      {error && (
-        <Callout variant="destructive">
-          {error instanceof Error ? error.message : "Failed to load plugins"}
-        </Callout>
+      {error ? (
+        <ErrorState title="Failed to load plugins" error={error} onRetry={() => refetch()} />
+      ) : (
+        <EntityTable
+          table={table}
+          isLoading={isLoading}
+          sort={sort}
+          onOpen={(plugin) => navigate(`/plugins/${encodeURIComponent(plugin.plugin_id)}`)}
+          empty={
+            <EmptyState
+              icon={Blocks}
+              title="No plugins yet"
+              description="A plugin adds task functions a workflow can name — pure JSON → JSON transformations that run in a WebAssembly sandbox with no clock, network, connectors or secrets. Upload a manifest and its component to start."
+              action={
+                <>
+                  <Button variant="outline" onClick={() => setShowImport(true)}>
+                    <Upload className="h-4 w-4" /> Import
+                  </Button>
+                  <Button onClick={() => navigate("/plugins/new")}>
+                    <Plus className="h-4 w-4" /> Upload Plugin
+                  </Button>
+                </>
+              }
+            />
+          }
+        />
       )}
-
-      <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => {
-                  const field = SORT_FIELDS[header.column.id]
-                  return (
-                    <SortableHead
-                      key={header.id}
-                      field={field}
-                      sort={sortBy}
-                      order={sortOrder}
-                      onSort={field ? () => update(nextSort({ sort: sortBy, order: sortOrder }, field, field === "updated_at")) : undefined}
-                    >
-                      {flexRender(header.column.columnDef.header, header.getContext())}
-                    </SortableHead>
-                  )
-                })}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                <TableRow key={i}>
-                  {columns.map((_, j) => (
-                    <TableCell key={j}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : table.getRowModel().rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={columns.length} className="p-0">
-                  <EmptyState
-                    icon={Blocks}
-                    title="No plugins yet"
-                    description="A plugin adds task functions a workflow can name — pure JSON → JSON transformations that run in a WebAssembly sandbox with no clock, network, connectors or secrets. Upload a manifest and its component to start."
-                    action={
-                      <>
-                        <Button variant="outline" onClick={() => setShowImport(true)}>
-                          <Upload className="h-4 w-4" /> Import
-                        </Button>
-                        <Button onClick={() => navigate("/plugins/new")}>
-                          <Plus className="h-4 w-4" /> Upload Plugin
-                        </Button>
-                      </>
-                    }
-                  />
-                </TableCell>
-              </TableRow>
-            ) : (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  className={ROW_ACTIVATABLE}
-                  {...activatableRow(() =>
-                    navigate(`/plugins/${encodeURIComponent(row.original.plugin_id)}`),
-                  )}
-                >
-                  {row.getAllCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
 
       <PaginationFooter
         offset={offset}

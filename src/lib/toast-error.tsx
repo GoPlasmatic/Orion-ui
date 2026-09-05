@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 import { ApiError } from "@/api/client"
+import { copyText } from "@/lib/clipboard"
 
 /** Field findings shown before the list is cut; the rest is a count. */
 const DETAIL_LINES = 4
@@ -43,9 +44,7 @@ export function toastError(title: string, e: unknown): void {
     action: requestId
       ? {
           label: "Copy request id",
-          onClick: () => {
-            void navigator.clipboard?.writeText(requestId).catch(() => {})
-          },
+          onClick: () => void copyText(requestId, "Request id"),
         }
       : undefined,
   })

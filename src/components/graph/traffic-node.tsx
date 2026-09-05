@@ -14,6 +14,7 @@ import { cn, formatRelative } from "@/lib/utils"
 import type { SystemNode } from "@/lib/system-graph"
 import type { ChannelTraffic } from "@/hooks/use-metrics"
 import { worstTone, type NodeFault } from "@/lib/faults"
+import { OutcomeBar } from "@/components/shared/outcome-bar"
 import {
   compactNumber,
   formatMs,
@@ -21,7 +22,6 @@ import {
   healthDot,
   healthRing,
   healthText,
-  segmentColor,
   type EffectiveLoad,
   type HealthLevel,
 } from "@/lib/traffic-encoding"
@@ -46,10 +46,10 @@ export interface TrafficNodeData extends Record<string, unknown> {
   traffic?: ChannelTraffic
   level: HealthLevel
   /** What the colour means under the current metric ("failing", "100–500 ms", "draft"). */
-  healthLabel?: string
+  healthLabel: string
   lod: LevelOfDetail
   /** A cron channel's next fire (an admin-plane instant), for the card's last line. */
-  nextFire?: string | null
+  nextFire: string | null
   /** Diameter in px for the traffic dot. */
   dot: number
   compact: boolean
@@ -81,32 +81,6 @@ function FaultGlyphs({ faults, size = "h-3 w-3" }: { faults: NodeFault[]; size?:
         )
       })}
     </span>
-  )
-}
-
-/**
- * Proportional strip of what the channel actually answered inside the window.
- *
- * Divs rather than SVG: theme colours here are Tailwind tokens, and a `fill`
- * attribute does not read a CSS custom property the way a `background` does.
- */
-function OutcomeBar({ traffic }: { traffic: ChannelTraffic }) {
-  const total = traffic.windowed
-  if (total <= 0) return null
-  const seg = (value: number) => `${(value / total) * 100}%`
-  return (
-    <div className="mt-1 flex h-1 w-full overflow-hidden rounded-full bg-muted">
-      {traffic.ok > 0 && <div className={segmentColor.ok} style={{ width: seg(traffic.ok) }} />}
-      {traffic.failed > 0 && (
-        <div className={segmentColor.failed} style={{ width: seg(traffic.failed) }} />
-      )}
-      {traffic.rejected > 0 && (
-        <div className={segmentColor.rejected} style={{ width: seg(traffic.rejected) }} />
-      )}
-      {traffic.duplicate > 0 && (
-        <div className={segmentColor.duplicate} style={{ width: seg(traffic.duplicate) }} />
-      )}
-    </div>
   )
 }
 
@@ -158,7 +132,7 @@ export function TrafficNode({ data, selected }: NodeProps) {
     data as TrafficNodeData
   // The name, and what its colour says — a dot at overview zoom otherwise
   // encodes health by colour alone.
-  const title = healthLabel ? `${node.name} · ${healthLabel}` : node.name
+  const title = `${node.name} · ${healthLabel}`
   const hub = node.callers.length >= HUB_THRESHOLD
   const faultTone = worstTone(faults ?? [])
   const faultBorder =
@@ -342,7 +316,7 @@ export function TrafficNode({ data, selected }: NodeProps) {
           </div>
         )}
 
-        {traffic && <OutcomeBar traffic={traffic} />}
+        {traffic && <OutcomeBar traffic={traffic} className="mt-1 h-1" />}
       </div>
     </div>
   )

@@ -37,6 +37,7 @@ import { ValidationResults } from "@/components/shared/validation-results"
 import { ChannelConfigEditor } from "@/components/shared/channel-config-editor"
 import { CronTransportEditor } from "@/components/shared/cron-transport-editor"
 import { Save, ShieldCheck } from "lucide-react"
+import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 
 const CHANNEL_TYPES: ChannelType[] = ["sync", "async"]
 // `cron` (1.6) is the fourth protocol: started by a clock, not a caller.
@@ -64,7 +65,7 @@ function ChannelForm({
   const validateChannel = useValidateChannel()
   // The picker's options. A workflow is bound by its slug id, which nobody
   // should have to remember or retype.
-  const { data: workflowList } = useWorkflows({ limit: 1000 })
+  const { data: workflowList } = useWorkflows({ limit: REGISTRY_LIMIT })
 
   const startProtocol = existing?.protocol ?? initialProtocol ?? "rest"
   const [name, setName] = useState(existing?.name ?? "")

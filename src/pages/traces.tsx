@@ -1,30 +1,29 @@
 import { useState } from "react"
-import { useNavigate, useSearchParams } from "react-router"
+import { useNavigate } from "react-router"
 import { useTraces } from "@/hooks/use-traces"
-import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
+import { useTable, createColumnHelper } from "@tanstack/react-table"
 import { listTableFeatures } from "@/lib/table"
+import { useListState } from "@/lib/use-list-state"
 import type { Trace, TraceMode, TraceSortBy, SortOrder } from "@/api/types"
 import { TRACE_MODES } from "@/api/types"
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
-import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
+import { PAGE_SIZE } from "@/lib/use-pagination"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { TraceAnalytics } from "@/components/traces/trace-analytics"
 import { EmptyState } from "@/components/shared/empty-state"
+import { EntityTable } from "@/components/shared/entity-table"
 import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
 import { formatDate, formatDuration, formatRelative } from "@/lib/utils"
 import { traceStatusBadgeClass } from "@/lib/status"
-import { ArrowUpDown, ArrowUp, ArrowDown, Activity, Pause, Play } from "lucide-react"
+import { Activity, Pause, Play } from "lucide-react"
 
 /** Poll cadence while the list is live — one trace row is cheap. */
 const LIVE_INTERVAL_MS = 5_000
-
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, Trace>()
 
@@ -79,38 +78,31 @@ const columns = columnHelper.columns([
   }),
 ])
 
-const sortableColumns: Record<string, TraceSortBy> = {
+/** `?channel=` and `?status=` are what the map and the dashboard hand over. */
+const FILTER_KEYS = ["status", "channel", "mode"] as const
+
+/** Column id → the server's `sort_by` field. */
+const SORT_FIELDS: Record<string, TraceSortBy> = {
   status: "status",
   channel: "channel",
   mode: "mode",
   created_at: "created_at",
 }
 
+/** The server's own order when none is asked for: newest first. */
+const DEFAULT_SORT: TraceSortBy = "created_at"
+const DEFAULT_ORDER: SortOrder = "desc"
+
 export function TracesPage() {
   const navigate = useNavigate()
-  const [params, setParams] = useSearchParams()
-  const { offset, reset: resetPage, prev, next } = usePagination()
-  const [sortBy, setSortBy] = useState<TraceSortBy>("created_at")
-  const [sortOrder, setSortOrder] = useState<SortOrder>("desc")
-  const [statusFilter, setStatusFilter] = useState(() => params.get("status") ?? "")
-  // Seeded from the URL so the System Map (and any other page) can hand off a
-  // channel and land here already filtered to it, rather than dropping the
-  // operator into an unfiltered list and asking them to retype the name.
-  const [channelFilter, setChannelFilter] = useState(() => params.get("channel") ?? "")
-  const [modeFilter, setModeFilter] = useState<TraceMode | "">("")
+  const { filters, update, sortBy, sortOrder, sort, offset, prev, next } = useListState(
+    FILTER_KEYS,
+    SORT_FIELDS,
+    [DEFAULT_SORT],
+  )
   // Off by default: a list that reorders itself under the pointer is the wrong
   // default for reading, and the right one for watching an incident unfold.
   const [live, setLive] = useState(false)
-
-  // Keep the URL in step so the filtered view is linkable and survives a reload.
-  function updateChannelFilter(value: string) {
-    setChannelFilter(value)
-    const next = new URLSearchParams(params)
-    if (value) next.set("channel", value)
-    else next.delete("channel")
-    setParams(next, { replace: true })
-    resetPage()
-  }
 
   // This page shows a count, so it opts into the total explicitly — every other
   // trace read (analytics, the operations dashboard) leaves it off and does not
@@ -120,11 +112,11 @@ export function TracesPage() {
       limit: PAGE_SIZE,
       offset,
       include_total: true,
-      sort_by: sortBy,
-      sort_order: sortOrder,
-      status: statusFilter || undefined,
-      channel: channelFilter || undefined,
-      mode: modeFilter || undefined,
+      sort_by: (sortBy || DEFAULT_SORT) as TraceSortBy,
+      sort_order: sortBy ? sortOrder || DEFAULT_ORDER : DEFAULT_ORDER,
+      status: filters.status || undefined,
+      channel: filters.channel || undefined,
+      mode: (filters.mode || undefined) as TraceMode | undefined,
     },
     { refetchInterval: live ? LIVE_INTERVAL_MS : undefined },
   )
@@ -134,27 +126,6 @@ export function TracesPage() {
     data: data?.data ?? [],
     columns,
   })
-
-  function handleSort(columnId: string) {
-    const field = sortableColumns[columnId]
-    if (!field) return
-    if (sortBy === field) {
-      setSortOrder(sortOrder === "asc" ? "desc" : "asc")
-    } else {
-      setSortBy(field)
-      setSortOrder("desc")
-    }
-    resetPage()
-  }
-
-  function SortIcon({ columnId }: { columnId: string }) {
-    const field = sortableColumns[columnId]
-    if (!field) return null
-    if (sortBy !== field) return <ArrowUpDown className="ml-1 h-3 w-3 inline opacity-40" />
-    return sortOrder === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 inline" />
-  }
 
   return (
     <div className="space-y-6">
@@ -185,128 +156,77 @@ export function TracesPage() {
         </TabsList>
 
         <TabsContent value="list" className="space-y-6">
-      <FilterBar>
-        <Select
-          value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value)
-            resetPage()
-          }}
-          className={FILTER_W}
-        >
-          <option value="">All statuses</option>
-          <option value="pending">Pending</option>
-          <option value="running">Running</option>
-          <option value="completed">Completed</option>
-          <option value="failed">Failed</option>
-        </Select>
-        <Input
-          placeholder="Filter by channel..."
-          value={channelFilter}
-          onChange={(e) => updateChannelFilter(e.target.value)}
-          className="w-48"
-        />
-        {/* `kafka` (1.4) and `cron` (1.6) are open-string additions: a consumed
-            record and a scheduled occurrence each write a trace row too. */}
-        <Select
-          value={modeFilter}
-          onChange={(e) => {
-            setModeFilter(e.target.value as TraceMode | "")
-            resetPage()
-          }}
-          className={FILTER_W}
-          aria-label="Filter by mode"
-        >
-          <option value="">All modes</option>
-          {TRACE_MODES.map((m) => (
-            <option key={m} value={m}>
-              {m.charAt(0).toUpperCase() + m.slice(1)}
-            </option>
-          ))}
-        </Select>
-      </FilterBar>
+          <FilterBar>
+            <Select
+              value={filters.status}
+              onChange={(e) => update({ status: e.target.value })}
+              className={FILTER_W}
+              aria-label="Filter by status"
+            >
+              <option value="">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="running">Running</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
+            </Select>
+            <Input
+              placeholder="Filter by channel..."
+              value={filters.channel}
+              onChange={(e) => update({ channel: e.target.value })}
+              className="w-48"
+              aria-label="Filter by channel"
+            />
+            {/* `kafka` (1.4) and `cron` (1.6) are open-string additions: a consumed
+                record and a scheduled occurrence each write a trace row too. */}
+            <Select
+              value={filters.mode}
+              onChange={(e) => update({ mode: e.target.value })}
+              className={FILTER_W}
+              aria-label="Filter by mode"
+            >
+              <option value="">All modes</option>
+              {TRACE_MODES.map((m) => (
+                <option key={m} value={m}>
+                  {m.charAt(0).toUpperCase() + m.slice(1)}
+                </option>
+              ))}
+            </Select>
+          </FilterBar>
 
-      <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => {
-                  const isSortable = !!sortableColumns[header.column.id]
-                  return (
-                    <TableHead
-                      key={header.id}
-                      className={isSortable ? "cursor-pointer select-none" : ""}
-                      onClick={isSortable ? () => handleSort(header.column.id) : undefined}
-                    >
-                      {flexRender(header.column.columnDef.header, header.getContext())}
-                      <SortIcon columnId={header.column.id} />
-                    </TableHead>
-                  )
-                })}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              Array.from({ length: 5 }).map((_, i) => (
-                <TableRow key={i}>
-                  {columns.map((_, j) => (
-                    <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : table.getRowModel().rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={columns.length} className="p-0">
-                  <EmptyState
-                    icon={Activity}
-                    title="No traces found"
-                    description="Traces are captured as requests flow through channels. Adjust the filters above, or send a request from the Data Console to generate one."
-                    action={
-                      <Button variant="outline" onClick={() => navigate("/console")}>
-                        Open Data Console
-                      </Button>
-                    }
-                  />
-                </TableCell>
-              </TableRow>
-            ) : (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  className="cursor-pointer hover:bg-muted/50"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") e.currentTarget.click()
-                  }}
-                  // The visible page travels along, so the detail can step to
-                  // the previous and next trace without a time-range API.
-                  onClick={() =>
-                    navigate(`/traces/${row.original.id}`, {
-                      state: { siblings: (data?.data ?? []).map((t) => t.id) },
-                    })
-                  }
-                >
-                  {row.getAllCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+          <EntityTable
+            table={table}
+            isLoading={isLoading}
+            // The header shows the server's default order as the sort in force
+            // when none is asked for, so the newest-first list reads as sorted.
+            sort={{ ...sort, sortBy: sortBy || DEFAULT_SORT, sortOrder: sortBy ? sortOrder : DEFAULT_ORDER }}
+            // The visible page travels along, so the detail can step to the
+            // previous and next trace without a time-range API.
+            onOpen={(trace) =>
+              navigate(`/traces/${trace.id}`, {
+                state: { siblings: (data?.data ?? []).map((t) => t.id) },
+              })
+            }
+            empty={
+              <EmptyState
+                icon={Activity}
+                title="No traces found"
+                description="Traces are captured as requests flow through channels. Adjust the filters above, or send a request from the Data Console to generate one."
+                action={
+                  <Button variant="outline" onClick={() => navigate("/console")}>
+                    Open Data Console
+                  </Button>
+                }
+              />
+            }
+          />
 
-      <PaginationFooter
-        offset={offset}
-        count={data?.data.length ?? 0}
-        total={data?.total}
-        onPrev={prev}
-        onNext={next}
-      />
+          <PaginationFooter
+            offset={offset}
+            count={data?.data.length ?? 0}
+            total={data?.total}
+            onPrev={prev}
+            onNext={next}
+          />
         </TabsContent>
 
         <TabsContent value="analytics">

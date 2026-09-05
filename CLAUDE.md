@@ -95,8 +95,9 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 - **Functions** — The server's function catalogue (`GET admin/functions`, `api/functions.ts`,
   `use-functions.ts`) is fetched but has **no page**: the `/functions` reference was removed on
   2026-09-05 because a standalone list answered no question anyone had while doing something
-  else. The catalogue belongs inside the workflow editor, the trace view and the DLQ / occurrence
-  retry dialogs (see `ui-improvements.md`). Its shape still matters: since 1.2 it is *every*
+  else. The catalogue surfaces where the question is asked: completion inside the workflow
+  editor, and the retry-safety guard on the DLQ requeue and occurrence retry dialogs. Its shape
+  still matters: since 1.2 it is *every*
   valid function name, not just the schema registry — entries carry `source` (`orion` | `engine`
   | `plugin`), optional `aliases`, `input_fields` is **absent** for an engine built-in, every
   entry carries `retry_safety` (1.6) and a `plugin` entry names the plugin version and digest
@@ -336,7 +337,10 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   winning over the shell (a child's effect runs before its parent's, so the shell yields).
 - **`src/lib/faults.ts`** + **`src/hooks/use-faults.ts`** — the map's fault overlay: quarantined
   channels and failed connectors from `/health`, open breakers from this node's map, keyed by
-  channel and connector name; `faultsFor(node)` is what a node draws.
+  channel and connector name; `faultsFor(node)` is what a node draws. `useMapTelemetry(graph)`
+  is what both canvas hosts (the map, a detail page's neighbourhood) call: the faults plus a cron
+  channel's next fire, so a cron card reads the same on either. `lib/breakers.ts` owns the
+  `channel:connector` key (`parseBreakerKey`, `breakerRows`, `openBreakers`, `isBreakerOpen`).
 - **`src/hooks/use-attention.ts`** — `useAttentionItems(windowSec)`: "Needs attention" as data
   (severity-ordered, each with the page to act on), shared by the dashboard and the sidebar's
   Operations count so the two cannot disagree; `useNavCounts()` adds DLQ, breaker and cron
@@ -345,33 +349,66 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 - **`src/lib/use-unsaved-changes.ts`** + `shared/unsaved-changes-dialog.tsx` — the form guard.
   `useBlocker` reads refs at navigation time so a save that navigates away is not blocked; the
   save handler calls `markSaved()` first.
-- **`src/lib/use-url-filters.ts`** — `useUrlFilters(keys)`: list filters and sort as URL search
-  params. `values` read as strings (empty when absent); `set(patch)` replaces the history entry
-  and changes several keys in one navigation — two calls in a row each start from the last
-  render's params and the second undoes the first. `nextSort` cycles unsorted → asc → desc →
-  unsorted, and `shared/sortable-head.tsx` is the header cell that drives it with `aria-sort`.
-  Channels, Workflows, Connectors, Plugins, Audit and the DLQ keep their filters this way; the
-  sort fields are the server's own `sort_by` values (channels: `priority`, `name`, `status`,
-  `channel_type`, `protocol`, `created_at`, `updated_at`; workflows drop the type columns;
-  plugins take `plugin_id`; connectors `name`, `connector_type`, `created_at`, `updated_at`).
-- **`src/lib/table.ts`** — `listTableFeatures`, plus `activatableRow(onOpen)` / `ROW_ACTIVATABLE`:
-  a row that opens something takes focus and Enter or Space opens it (a `<tr onClick>` alone is
-  invisible to the keyboard); the handler ignores keys that started on a link or button inside.
+- **`src/lib/use-url-filters.ts`** + **`src/lib/use-list-state.ts`** — view state in the URL.
+  `useUrlFilters(keys)`: `values` read as strings (empty when absent); `set(patch)` replaces the
+  history entry and changes several keys in one navigation — two calls in a row each start from
+  the last render's params and the second undoes the first (react-router's functional updater
+  reads the render's params). The map, the dashboard and the console use it directly.
+  `useListState(keys, sortFields?)` is a list page's whole view — its filters, `sort`/`order`
+  and `offset` — as URL keys: `update(patch)` re-anchors to the first page, `prev`/`next` page,
+  `sortQuery` is the request's `sort_by`/`sort_order`, and `sort` feeds `EntityTable`. Every
+  list page (Channels, Workflows, Connectors, Plugins, Traces, Audit, DLQ, the Schedules ledger)
+  keeps its state this way, so a filtered, sorted, paged list is a link. `nextSort` cycles
+  unsorted → asc → desc → unsorted; the sort fields are the server's own `sort_by` values
+  (channels: `priority`, `name`, `status`, `channel_type`, `protocol`, `created_at`,
+  `updated_at`; workflows drop the type columns; plugins take `plugin_id`; connectors `name`,
+  `connector_type`, `created_at`, `updated_at`; traces `status`, `channel`, `mode`,
+  `created_at`).
+- **`src/components/shared/entity-table.tsx`** — `EntityTable`: the list table every entity page
+  draws — a `SortableHead` header row, `PAGE_SIZE` skeleton rows while loading, the empty state
+  across the full width, and one activatable row per entity — from a TanStack `table`, the
+  `sort` from `useListState`, an `empty` node and `onOpen(row)`. `lib/table.ts` holds only
+  `listTableFeatures`.
+- **`ui/table.tsx`** — `TableRow` takes `onActivate`: the row takes focus and Enter or Space
+  open it, with the pointer and a focus ring inside the row (a `<tr onClick>` alone is invisible
+  to the keyboard); a key that started on a link or button inside the row is left to it.
 - **`src/lib/toast-error.tsx`** — `toastError(title, e)`: the one way a mutation reports failure.
   Shows `ApiError.details[]` and the request id, with a "Copy request id" action. Every hook's
-  `onError` goes through it.
+  `onError` goes through it. `lib/batch.ts` (`settleAll`, `reportBatch`) is the shape of a bulk
+  mutation — one request per item, "n done, m refused"; `lib/clipboard.ts::copyText` the one way
+  to copy with a toast either way.
 - **`src/lib/retry-safety.ts`** + `hooks/use-retry-safety.ts` + `shared/retry-safety-warning.tsx` —
   the guard in front of a DLQ requeue and a cron occurrence retry: `retryRisks(steps, catalogue)`
   names the tasks whose function is `unsafe_write` or `depends_on` its input. It reads the
-  workflow's *current* definition, because that is what a retry runs. Rendered in the DLQ entry
-  and bulk dialogs, on an occurrence page and on a cron channel's occurrences tab.
+  workflow's *active* version (`useActiveWorkflow` in `use-workflows.ts`), because that is what a
+  retry runs — the latest version is the draft while one is open. Rendered in the DLQ entry and
+  bulk dialogs, on an occurrence page and on a cron channel's occurrences tab.
 - **`src/lib/trace-payload.ts`** — `extractSteps` and `firstTaskPayload`: the request as the first
   task saw it, the closest thing to the original input a trace keeps (the read carries no raw
   request). "Re-send in console", the console's "Last trace's input" and the dry run's "Use last
   trace's input" all read it.
-- **`src/lib/motion.ts`** — `useReducedMotion()`: for motion started from script (the map's
-  animated edges, its viewport travel). CSS animation is stopped by the global
-  `prefers-reduced-motion` rule at the end of `index.css`.
+- **`src/lib/media-query.ts`** — `useMediaQuery(query)`, one cached `MediaQueryList` per query:
+  how a component picks one container over another (the map inspector's column above `lg`, a
+  sheet below it) instead of mounting both and hiding one. `lib/motion.ts::useReducedMotion` is
+  built on it, for motion started from script (the map's viewport travel); CSS animation is
+  stopped by the global `prefers-reduced-motion` rule at the end of `index.css`.
+- **`src/lib/storage.ts`** — `readStorage` / `writeStorage` / `readStorageJson` /
+  `writeStorageJson`: `localStorage` behind the one contract every per-browser preference needs
+  (a read that answers `null` and a write that does nothing when the accessor throws). No other
+  file touches `localStorage`.
+- **`src/hooks/use-entity-index.ts`** — `useEntityIndex()`: the whole registry (`REGISTRY_LIMIT`
+  rows of channels, workflows and connectors, the cap exported from `lib/use-pagination.ts`)
+  indexed and built into the system graph once, for the map, the dashboard, a neighbourhood and
+  a connector's dependants. A name → id join elsewhere reads `useChannels({ limit:
+  REGISTRY_LIMIT })` under the same key, so nothing is fetched twice.
+- **`src/hooks/use-export.ts`** — `useExport(run)`: an export button's pending flag and its
+  outcome toasts; the callback fetches, downloads (`downloadJson` / `downloadText`) and returns
+  the success line.
+- **`src/hooks/use-last-trace-input.ts`** — `useLastTraceInput(channel)`: the newest trace through
+  a channel and its first task's payload on demand, for the console and the dry run.
+- **`src/components/shared/kpi-card.tsx`** and **`outcome-bar.tsx`** — the KPI tile (dashboard,
+  Schedules) and the outcome bar / legend / rate-and-errors sparklines (map card, inspector,
+  channel page), each defined once.
 - **`src/components/shared/`** also holds `Breadcrumbs`, `TagsInput` (chips; Enter, comma, paste
   and Backspace), `FormError` (a failed Save with `ApiError.details[]`), `ChannelTrafficCard` /
   `ChannelRecentTraces` (a channel's own window on its page) and `ConnectorField` in
@@ -394,9 +431,14 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   page shares (`TRAFFIC_WINDOWS`, default 5 min, bounded by the 60-sample ring buffer): per
   channel ok / failed / rejected / duplicate, `byStatus`, a windowed p95 from **bucket deltas**
   (`deltaSnapshot(base, cur)` is a valid histogram because counters are monotonic), plus totals
-  (`errorPct`, `p95Ms`, `meanMs`) and per-poll `series` / `seriesFor(channel)` for sparklines.
-  `useMetrics()` keeps the cumulative figures (workflow cost, the fallback before a second
-  sample).
+  (`errorPct`, `p95Ms`, `meanMs`), per-poll `series` / `seriesFor(channel)` for sparklines,
+  `spanLabel` ("last 48 s" / "waiting for a second sample" / "metrics off") and
+  `activeInBuffer` (channels that moved across the whole buffer — the canvas's hysteresis). The
+  windowed reduction is computed once per poll per window at module scope and shared by every
+  instance on the page; per-channel splits are cached by snapshot. `useMetrics()` keeps the
+  cumulative figures (workflow cost, the fallback before a second sample), memoised per
+  snapshot. Every reader of `/metrics` polls at `METRICS_POLL_MS`; `trafficWindowFromParam`
+  reads `?window=`.
 - **`src/lib/traffic-encoding.ts`** — how telemetry becomes shape and colour: health thresholds,
   the sqrt dot scale (a dot reads as an *area*), and `deriveLoad`, which propagates load in tier
   order to the channels the exporter cannot see. A `HealthLevel` is a colour *slot* — `idle` /
@@ -420,8 +462,11 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   channels starts with clusters of `COLLAPSE_CLUSTER_AT`+ collapsed, and the cluster holding the
   selected channel is always open. `hops` bounds the blast radius
   (`neighbourhood(graph, id, hops)`; the page reads `?hops=`, the detail pages' neighbourhood
-  map is fixed at one); the MiniMap appears past 15 nodes. The compact/expanded hysteresis is a
-  module-level set (`expandedEver`) because the compiler lint refuses `setState` in an effect.
+  map is fixed at one); the MiniMap appears past 15 nodes. A card stays expanded while its channel
+  is in `TrafficWindow.activeInBuffer`, so a channel quiet for one window does not shrink and
+  shuffle the lanes; level of detail is a boolean `useStore` selector, so a pan or zoom does not
+  re-render the canvas per frame. `faults`, `hops` and `nextFire` are required props — the host
+  supplies them through `useMapTelemetry`.
 - **`src/lib/workflow-steps.ts`** — Reading a workflow's step tree: `isTaskGroup`, `groupMembers`,
   `flattenSteps`, `countLeafSteps`, `countGroups`, `countTerminal`, `groupDepth`, plus `lintSteps`
   (client-side shape check reporting at the coordinate the author typed). Mirrors the server's
@@ -436,7 +481,8 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   `stripCronRefusedConfig` (what a protocol switch must drop), `lintCronExpression` (six fields,
   while typing — Validate is the authority), `isRetryable`, the policy option lists and status
   labels.
-- **`src/lib/health.ts`** — `componentRoute`: which page acts on a degraded `/health` component.
+- **`src/lib/health.ts`** — `componentRoute`: which page acts on a degraded `/health` component,
+  or null when only the health report explains it (callers fall back to `/engine#component-…`).
 - **`src/api/plugins.ts`, `src/api/cron.ts`** — the 1.6 entity and the ledger;
   `channelsApi.trigger` is the manual cron run. Hooks in `use-plugins.ts` / `use-cron.ts`; a
   plugin status change invalidates `["functions"]` and `["workflows"]` because the vocabulary
@@ -542,11 +588,12 @@ Server-side offset/limit pagination via `usePagination()` + `PaginationFooter`. 
   surrounding surface colour. A 1px ring is invisible against a filled control.
 - **Icons:** `lucide-react` exclusively.
 - **Tables:** `@tanstack/react-table` with `createColumnHelper<T>()`, server-side sorting via query
-  params. Filters and sort live in the URL through `useUrlFilters`; sortable headers are
-  `SortableHead`; a clickable row spreads `activatableRow(...)` so the keyboard can open it; a
-  loading table draws `PAGE_SIZE` skeleton rows so the layout does not jump when data lands.
-  Columns that need live data (a quarantine set, a breaker map, this node's plugin loads) are
-  built by a `buildColumns(...)` factory inside a `useMemo`, not a module constant.
+  params. A list page keeps its filters, sort and page in the URL through `useListState` and
+  renders `EntityTable`, which owns the sortable header row, the `PAGE_SIZE` skeleton, the empty
+  state and the activatable rows; a hand-drawn table gives a row `onActivate` so the keyboard
+  can open it. Columns that need live data (a quarantine set, a breaker map, this node's plugin
+  loads) are built by a `buildColumns(...)` factory inside a `useMemo`, not a module constant.
+  An export button is `useExport`.
 - **No index files:** Import directly from the file (`@/components/ui/button`, not `@/components/ui`).
 - **Entity status:** Use `StatusBadge` from `@/components/shared/status-badge` for draft/active/archived display.
 - **Lifecycle operations:** Use `LifecycleActions` from `@/components/shared/lifecycle-actions` for activate/archive/delete/new-version buttons, passing `onPreflight`/`preflight` to surface the `?dry_run=true` activation check.
@@ -554,8 +601,8 @@ Server-side offset/limit pagination via `usePagination()` + `PaginationFooter`. 
 - **Untoasted mutations:** validate/test/dry-run hooks are bare `useMutation({ mutationFn })` with no toast or invalidation — their results render inline, and a "failure" (invalid config, unreachable backend) is information rather than an error.
 - **Failed mutations:** `toastError(title, e)` from `lib/toast-error.tsx`, never `toast.error`
   with `e.message` — the field findings and the request id are the part a person acts on. A
-  batch (requeue every entry shown, reset every open breaker) is one request per item under
-  `Promise.allSettled`, reported as "n done, m refused".
+  batch (requeue every entry shown, reset every open breaker) is `settleAll` + `reportBatch`
+  from `lib/batch.ts`: one request per item, reported as "n done, m refused".
 - **Load failures:** a page that cannot load its entity renders `ErrorState` (with `refetch` as
   `onRetry` and a `backTo`), never a bare "Failed to load" line.
 - **Times:** `formatWhen()` for list cells (relative under a day, absolute beyond) and
@@ -566,12 +613,13 @@ Server-side offset/limit pagination via `usePagination()` + `PaginationFooter`. 
   `orion-sidebar`, `orion-getting-started-dismissed`, the theme and density keys, the
   console's history and headers, the palette's recents (`orion-palette-recent`), a workflow's
   last dry-run payload (`orion-dryrun-<id>`) and whether its diagram is folded
-  (`orion-workflow-diagram`). A page must render correctly when the key is absent or the
-  accessor throws (private mode).
-- **Links between pages carry state in the URL:** every list page's filters and sort
-  (`?status=&tag=&sort=&order=` and their kin on Channels, Workflows, Connectors, Plugins;
-  `?action=&resource_type=&resource_id=&principal=&start=&end=` on Audit; `?channel=&exhausted=`
-  on the DLQ), the console's `?channel=&method=&path=`,
+  (`orion-workflow-diagram`), all through `lib/storage.ts`, so a page renders correctly when
+  the key is absent or the accessor throws (private mode).
+- **Links between pages carry state in the URL:** every list page's filters, sort and page
+  (`?status=&tag=&sort=&order=&offset=` and their kin on Channels, Workflows, Connectors,
+  Plugins, Traces; `?action=&resource_type=&resource_id=&principal=&start=&end=` on Audit;
+  `?channel=&exhausted=` on the DLQ; `?channel_id=&status=&since=&until=` on the Schedules
+  ledger), the console's `?channel=&method=&path=`,
   the map reads `?select=` (and every filter),
   the dashboard and the map `?window=`, the console `?channel=`, the breakers page `?key=`,
   traces `?channel=&status=`, the connector page `?test=1`. A link that lands on an unfiltered

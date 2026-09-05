@@ -1,22 +1,58 @@
+import { useMemo } from "react"
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { toastError } from "@/lib/toast-error"
 import { connectorsApi } from "@/api/connectors"
 import { engineApi } from "@/api/engine"
+import { REGISTRY_LIMIT } from "@/lib/use-pagination"
+import { reportBatch, settleAll } from "@/lib/batch"
 import type {
+  ConnectorType,
   CreateConnectorRequest,
   ImportOptions,
   ListConnectorsParams,
   UpdateConnectorRequest,
 } from "@/api/types"
 
-export function useConnectors(params: ListConnectorsParams = {}, enabled = true) {
-  return useQuery({
-    queryKey: ["connectors", params],
-    queryFn: () => connectorsApi.list(params),
+/** The list filter, plus a type — which the endpoint does not take. */
+export interface ConnectorListFilter extends ListConnectorsParams {
+  connector_type?: ConnectorType
+}
+
+/**
+ * `GET admin/connectors` has no type filter. With one asked for, the whole
+ * registry is fetched and paged in the browser, so a filtered page is a real
+ * page of matching rows — not the matching slice of an unfiltered one that
+ * still offers a full next page. The response keeps the server's shape, so a
+ * caller cannot tell which model served it; the day the server grows the
+ * parameter this is the one place that changes.
+ */
+export function useConnectors(params: ConnectorListFilter = {}, enabled = true) {
+  const { connector_type, ...rest } = params
+  const request: ListConnectorsParams = connector_type
+    ? { ...rest, limit: REGISTRY_LIMIT, offset: 0 }
+    : rest
+  const query = useQuery({
+    queryKey: ["connectors", request],
+    queryFn: () => connectorsApi.list(request),
     placeholderData: keepPreviousData,
     enabled,
   })
+  const pageOffset = rest.offset ?? 0
+  const pageLimit = rest.limit
+  const data = useMemo(() => {
+    if (!connector_type || !query.data) return query.data
+    const matching = query.data.data.filter((c) => c.connector_type === connector_type)
+    const limit = pageLimit ?? matching.length
+    return {
+      ...query.data,
+      data: matching.slice(pageOffset, pageOffset + limit),
+      total: matching.length,
+      limit,
+      offset: pageOffset,
+    }
+  }, [query.data, connector_type, pageOffset, pageLimit])
+  return { ...query, data }
 }
 
 export function useConnector(id: string) {
@@ -134,21 +170,10 @@ export function useResetCircuitBreaker() {
 export function useResetCircuitBreakers() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (keys: string[]) => {
-      const results = await Promise.allSettled(keys.map((key) => connectorsApi.resetCircuitBreaker(key)))
-      const failed = results.filter((r) => r.status === "rejected")
-      return { reset: results.length - failed.length, failed: failed.length, first: failed[0] }
-    },
-    onSuccess: ({ reset, failed, first }) => {
+    mutationFn: (keys: string[]) => settleAll(keys, (key) => connectorsApi.resetCircuitBreaker(key)),
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["connectors", "circuit-breakers"] })
-      if (failed === 0) {
-        toast.success(`Reset ${reset} circuit ${reset === 1 ? "breaker" : "breakers"}`)
-      } else {
-        toastError(
-          `Reset ${reset}, ${failed} refused`,
-          first && first.status === "rejected" ? first.reason : undefined,
-        )
-      }
+      reportBatch(result, "Reset", ["circuit breaker", "circuit breakers"])
     },
     onError: (e) => toastError("Failed to reset circuit breakers", e),
   })

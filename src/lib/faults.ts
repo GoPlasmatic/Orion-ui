@@ -1,5 +1,6 @@
 import type { CircuitBreakerStatus, HealthResponse } from "@/api/types"
 import type { SystemNode } from "@/lib/system-graph"
+import { openBreakers } from "@/lib/breakers"
 
 /**
  * What is broken, keyed the way the map is keyed — by channel name and by
@@ -24,8 +25,6 @@ export interface MapFaults {
   quarantined: Map<string, string>
   /** Channel name → the breakers open or half-open on its connectors. */
   breakers: Map<string, BreakerFault[]>
-  /** How many distinct things are wrong, for a badge. */
-  count: number
 }
 
 export type NodeFaultKind = "quarantined" | "connector" | "breaker"
@@ -36,13 +35,6 @@ export interface NodeFault {
   detail: string
 }
 
-export const EMPTY_FAULTS: MapFaults = {
-  failedConnectors: new Set(),
-  quarantined: new Map(),
-  breakers: new Map(),
-  count: 0,
-}
-
 export function buildFaults(
   health: HealthResponse | undefined,
   breakers: CircuitBreakerStatus | undefined,
@@ -51,23 +43,10 @@ export function buildFaults(
   const quarantined = new Map<string, string>()
   for (const q of health?.channels?.quarantined ?? []) quarantined.set(q.channel, q.reason ?? "")
   const byChannel = new Map<string, BreakerFault[]>()
-  let open = 0
-  if (breakers?.enabled) {
-    for (const [key, state] of Object.entries(breakers.breakers ?? {})) {
-      if (state === "closed") continue
-      const sep = key.indexOf(":")
-      const channel = sep === -1 ? key : key.slice(0, sep)
-      const connector = sep === -1 ? "" : key.slice(sep + 1)
-      byChannel.set(channel, [...(byChannel.get(channel) ?? []), { key, connector, state }])
-      open++
-    }
+  for (const { key, channel, connector, state } of openBreakers(breakers)) {
+    byChannel.set(channel, [...(byChannel.get(channel) ?? []), { key, connector, state }])
   }
-  return {
-    failedConnectors,
-    quarantined,
-    breakers: byChannel,
-    count: failedConnectors.size + quarantined.size + open,
-  }
+  return { failedConnectors, quarantined, breakers: byChannel }
 }
 
 /** The faults that touch one node: its own quarantine, its connectors, its breakers. */

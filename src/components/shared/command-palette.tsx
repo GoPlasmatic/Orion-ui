@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react"
-import { useLocation, useNavigate } from "react-router"
-import { useChannels } from "@/hooks/use-channels"
-import { useWorkflows } from "@/hooks/use-workflows"
+import { matchPath, useLocation, useNavigate } from "react-router"
+import { useChannel, useChannels } from "@/hooks/use-channels"
+import { useWorkflow, useWorkflows } from "@/hooks/use-workflows"
+import { readStorageJson, writeStorageJson } from "@/lib/storage"
+import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { useConnectors } from "@/hooks/use-connectors"
 import { usePlugins } from "@/hooks/use-plugins"
 import { useTheme } from "@/lib/use-theme"
@@ -35,22 +37,18 @@ const RECENT_KEY = "orion-palette-recent"
 const RECENT_MAX = 5
 
 function loadRecent(): string[] {
-  try {
-    const raw = localStorage.getItem(RECENT_KEY)
-    const parsed: unknown = raw ? JSON.parse(raw) : []
-    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : []
-  } catch {
-    return []
-  }
+  const parsed = readStorageJson<unknown>(RECENT_KEY, [])
+  return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : []
 }
 
 function recordRecent(id: string) {
-  try {
-    const next = [id, ...loadRecent().filter((x) => x !== id)].slice(0, RECENT_MAX)
-    localStorage.setItem(RECENT_KEY, JSON.stringify(next))
-  } catch {
-    // Private mode: nothing remembered, nothing broken.
-  }
+  writeStorageJson(RECENT_KEY, [id, ...loadRecent().filter((x) => x !== id)].slice(0, RECENT_MAX))
+}
+
+/** The entity the page under the palette is about, by the router's own matching. */
+function entityIdAt(pathname: string, pattern: string): string {
+  const id = matchPath(pattern, pathname)?.params.id
+  return id && id !== "new" ? decodeURIComponent(id) : ""
 }
 
 interface Command {
@@ -89,11 +87,15 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
   // Read once per opening; the palette remounts each time it opens.
   const [recent] = useState(loadRecent)
 
-  // The entity lists are fetched only while the palette is mounted.
-  const { data: channels } = useChannels({ limit: 200 })
-  const { data: workflows } = useWorkflows({ limit: 200 })
-  const { data: connectors } = useConnectors({ limit: 200 })
-  const { data: plugins } = usePlugins({ limit: 200 })
+  // The entity lists are fetched only while the palette is mounted, under the
+  // same key every other registry read uses, so nothing is fetched twice.
+  const { data: channels } = useChannels({ limit: REGISTRY_LIMIT })
+  const { data: workflows } = useWorkflows({ limit: REGISTRY_LIMIT })
+  const { data: connectors } = useConnectors({ limit: REGISTRY_LIMIT })
+  const { data: plugins } = usePlugins({ limit: REGISTRY_LIMIT })
+  // The page's own entity, from the cache the detail page already filled.
+  const { data: channel } = useChannel(entityIdAt(pathname, "/channels/:id/*"))
+  const { data: workflow } = useWorkflow(entityIdAt(pathname, "/workflows/:id/*"))
 
   const go = (to: string) => {
     navigate(to)
@@ -136,10 +138,6 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
     // request, its traces, and its editor while it is a draft. On a workflow
     // draft: its editor. Nothing that mutates without the page's own pre-flight.
     const contextual: Command[] = []
-    const channelMatch = /^\/channels\/([^/]+)/.exec(pathname)
-    const channel = channelMatch
-      ? (channels?.data ?? []).find((c) => c.channel_id === decodeURIComponent(channelMatch[1]))
-      : undefined
     if (channel) {
       contextual.push({
         id: `ctx-map-${channel.channel_id}`,
@@ -178,10 +176,6 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
         })
       }
     }
-    const workflowMatch = /^\/workflows\/([^/]+)/.exec(pathname)
-    const workflow = workflowMatch
-      ? (workflows?.data ?? []).find((w) => w.workflow_id === decodeURIComponent(workflowMatch[1]))
-      : undefined
     if (workflow?.status === "draft") {
       contextual.push({
         id: `ctx-edit-wf-${workflow.workflow_id}`,
@@ -232,7 +226,7 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
     ]
 
     return [...contextual, ...nav, ...actions, ...entities]
-  }, [channels, workflows, connectors, plugins, resolvedTheme, pathname]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [channels, workflows, connectors, plugins, resolvedTheme, channel, workflow]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Run a command and remember it. */
   const runCommand = (c: Command) => {

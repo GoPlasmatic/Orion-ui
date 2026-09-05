@@ -6,32 +6,31 @@ import {
   useReloadConnectors,
   useImportConnectors,
 } from "@/hooks/use-connectors"
+import { useExport } from "@/hooks/use-export"
 import { ImportDialog } from "@/components/shared/import-dialog"
-import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
-import { activatableRow, listTableFeatures, ROW_ACTIVATABLE } from "@/lib/table"
-import { useUrlFilters, nextSort } from "@/lib/use-url-filters"
-import type { ConnectorListItem, ConnectorType, CreateConnectorRequest, SortOrder } from "@/api/types"
-import { Table, TableHeader, TableBody, TableRow, TableCell } from "@/components/ui/table"
+import { useTable, createColumnHelper } from "@tanstack/react-table"
+import { listTableFeatures } from "@/lib/table"
+import { useListState } from "@/lib/use-list-state"
+import { breakerRows } from "@/lib/breakers"
+import type { ConnectorListItem, ConnectorType, CreateConnectorRequest } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { toast } from "sonner"
 import { connectorsApi } from "@/api/connectors"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
-import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
+import { PAGE_SIZE } from "@/lib/use-pagination"
 import { EmptyState } from "@/components/shared/empty-state"
+import { EntityTable } from "@/components/shared/entity-table"
 import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
-import { SortableHead } from "@/components/shared/sortable-head"
 import { enabledBadgeClass, disabledBadgeClass, breakerStateBadgeClass } from "@/lib/status"
 import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
 import { Download, Plug, Plus, RefreshCw, Upload } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, ConnectorListItem>()
 
-const FILTER_KEYS = ["type", "tag", "sort", "order"] as const
+const FILTER_KEYS = ["type", "tag"] as const
 
 /** Column id → the server's `sort_by` field. */
 const SORT_FIELDS: Record<string, string> = {
@@ -122,23 +121,11 @@ function buildColumns(breakerByConnector: ReadonlyMap<string, string>) {
   ])
 }
 
-/** Every connector, for a type filter the endpoint does not take. */
-const ALL_CONNECTORS = 1000
-
 export function ConnectorsPage() {
   const navigate = useNavigate()
-  const { offset, reset: resetPage, prev, next } = usePagination()
-  const { values: filters, set } = useUrlFilters(FILTER_KEYS)
+  const { filters, update, sortQuery, sort, offset, prev, next } = useListState(FILTER_KEYS, SORT_FIELDS)
   const typeFilter = filters.type as ConnectorType | ""
-  const sortBy = SORT_FIELDS[filters.sort] ? filters.sort : ""
-  const sortOrder = (filters.order === "asc" || filters.order === "desc" ? filters.order : "") as SortOrder | ""
   const [showImport, setShowImport] = useState(false)
-  const [exporting, setExporting] = useState(false)
-
-  const update = (patch: Partial<Record<(typeof FILTER_KEYS)[number], string>>) => {
-    set(patch)
-    resetPage()
-  }
 
   /**
    * Exports in the shape /import accepts, with secrets masked. Only connectors
@@ -146,47 +133,26 @@ export function ConnectorsPage() {
    * credential exports as "******" and is refused on import, so the bundle is
    * safe to commit but is not a backup of the secrets themselves.
    */
-  const handleExport = async () => {
-    setExporting(true)
-    try {
-      const connectors = await connectorsApi.export({ tag: filters.tag || undefined })
-      downloadJson(connectors, "orion-connectors")
-      toast.success(
-        `Exported ${connectors.length} connector${connectors.length !== 1 ? "s" : ""} — secrets masked`
-      )
-    } catch (e) {
-      toast.error("Export failed", { description: e instanceof Error ? e.message : undefined })
-    } finally {
-      setExporting(false)
-    }
-  }
+  const exportAll = useExport(async () => {
+    const connectors = await connectorsApi.export({ tag: filters.tag || undefined })
+    downloadJson(connectors, "orion-connectors")
+    return `Exported ${connectors.length} connector${connectors.length !== 1 ? "s" : ""} — secrets masked`
+  })
   const reloadConnectors = useReloadConnectors()
   const importConnectors = useImportConnectors()
   const { data: breakers } = useCircuitBreakers()
 
-  // The list endpoint has no type filter. With one set, fetch everything and
-  // page in the browser, so "DB" does not show three rows of a page of twenty
-  // and still offer a full next page.
   const { data, isLoading } = useConnectors({
-    limit: typeFilter ? ALL_CONNECTORS : PAGE_SIZE,
-    offset: typeFilter ? 0 : offset,
+    limit: PAGE_SIZE,
+    offset,
     tag: filters.tag || undefined,
-    sort_by: sortBy || undefined,
-    sort_order: sortBy ? sortOrder || undefined : undefined,
+    connector_type: typeFilter || undefined,
+    ...sortQuery,
   })
-  const filtered = useMemo(
-    () => (data?.data ?? []).filter((c) => !typeFilter || c.connector_type === typeFilter),
-    [data?.data, typeFilter],
-  )
-  const rows = typeFilter ? filtered.slice(offset, offset + PAGE_SIZE) : filtered
-  const total = typeFilter ? filtered.length : data?.total
 
   const breakerByConnector = useMemo(() => {
     const m = new Map<string, string>()
-    if (!breakers?.enabled) return m
-    for (const [key, state] of Object.entries(breakers.breakers ?? {})) {
-      const sep = key.indexOf(":")
-      const connector = sep === -1 ? key : key.slice(sep + 1)
+    for (const { connector, state } of breakerRows(breakers)) {
       const current = m.get(connector)
       if (current === undefined || (BREAKER_RANK[state] ?? 0) > (BREAKER_RANK[current] ?? 0)) {
         m.set(connector, state)
@@ -198,7 +164,7 @@ export function ConnectorsPage() {
 
   const table = useTable({
     features: listTableFeatures,
-    data: rows,
+    data: data?.data ?? [],
     columns,
   })
 
@@ -213,9 +179,9 @@ export function ConnectorsPage() {
           <RefreshCw className={`h-4 w-4 ${reloadConnectors.isPending ? "animate-spin" : ""}`} />
           Reload All
         </Button>
-        <Button variant="outline" onClick={handleExport} disabled={exporting}>
+        <Button variant="outline" onClick={exportAll.run} disabled={exportAll.pending}>
           <Download className="h-4 w-4" />
-          {exporting ? "Exporting..." : "Export"}
+          {exportAll.pending ? "Exporting..." : "Export"}
         </Button>
         <Button variant="outline" onClick={() => setShowImport(true)}>
           <Upload className="h-4 w-4" />
@@ -262,80 +228,34 @@ export function ConnectorsPage() {
         />
       </FilterBar>
 
-      <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => {
-                  const field = SORT_FIELDS[header.column.id]
-                  return (
-                    <SortableHead
-                      key={header.id}
-                      field={field}
-                      sort={sortBy}
-                      order={sortOrder}
-                      onSort={field ? () => update(nextSort({ sort: sortBy, order: sortOrder }, field, field === "updated_at")) : undefined}
-                    >
-                      {flexRender(header.column.columnDef.header, header.getContext())}
-                    </SortableHead>
-                  )
-                })}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                <TableRow key={i}>
-                  {columns.map((_, j) => (
-                    <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : table.getRowModel().rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={columns.length} className="p-0">
-                  <EmptyState
-                    icon={Plug}
-                    title={typeFilter ? "No connectors of this type" : "No connectors yet"}
-                    description="Connectors link workflows to external systems — HTTP services, databases, Kafka, caches, storage and mail. Create one or import existing definitions."
-                    action={
-                      <>
-                        <Button variant="outline" onClick={() => setShowImport(true)}>
-                          <Upload className="h-4 w-4" /> Import
-                        </Button>
-                        <Button onClick={() => navigate("/connectors/new")}>
-                          <Plus className="h-4 w-4" /> Create Connector
-                        </Button>
-                      </>
-                    }
-                  />
-                </TableCell>
-              </TableRow>
-            ) : (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  className={ROW_ACTIVATABLE}
-                  {...activatableRow(() => navigate(`/connectors/${row.original.id}`))}
-                >
-                  {row.getAllCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      <EntityTable
+        table={table}
+        isLoading={isLoading}
+        sort={sort}
+        onOpen={(connector) => navigate(`/connectors/${connector.id}`)}
+        empty={
+          <EmptyState
+            icon={Plug}
+            title={typeFilter ? "No connectors of this type" : "No connectors yet"}
+            description="Connectors link workflows to external systems — HTTP services, databases, Kafka, caches, storage and mail. Create one or import existing definitions."
+            action={
+              <>
+                <Button variant="outline" onClick={() => setShowImport(true)}>
+                  <Upload className="h-4 w-4" /> Import
+                </Button>
+                <Button onClick={() => navigate("/connectors/new")}>
+                  <Plus className="h-4 w-4" /> Create Connector
+                </Button>
+              </>
+            }
+          />
+        }
+      />
 
       <PaginationFooter
         offset={offset}
-        count={rows.length}
-        total={total}
+        count={data?.data.length ?? 0}
+        total={data?.total}
         onPrev={prev}
         onNext={next}
       />

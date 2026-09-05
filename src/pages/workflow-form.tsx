@@ -109,6 +109,20 @@ const SAMPLE_GROUP = `{
 /** How long the preview waits after the last keystroke before re-laying out. */
 const PREVIEW_DEBOUNCE_MS = 350
 
+/** The steps editor's document as steps, or the one reason it is not. */
+type ParsedSteps = { steps: Step[]; error: null } | { steps: null; error: string }
+
+function parseStepArray(text: string): ParsedSteps {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return { steps: null, error: "Tasks are not valid JSON" }
+  }
+  if (!Array.isArray(parsed)) return { steps: null, error: "Tasks must be a JSON array" }
+  return { steps: parsed as Step[], error: null }
+}
+
 /** Every id already in use, across tasks and groups alike. */
 function collectIds(steps: Step[]): Set<string> {
   const ids = new Set<string>()
@@ -315,18 +329,12 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
       setTaskIssues([])
       return syntaxErrors
     }
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(doc)
-    } catch (e) {
-      setTaskIssues([])
-      return [{ from: 0, to: 0, severity: "error", message: e instanceof Error ? e.message : "Invalid JSON" }]
+    const { steps, error } = parseStepArray(doc)
+    if (!steps) {
+      setTaskIssues([{ path: "tasks", message: error, from: 0 }])
+      return [{ from: 0, to: doc.length, severity: "error", message: error }]
     }
-    if (!Array.isArray(parsed)) {
-      setTaskIssues([{ path: "tasks", message: "must be a JSON array", from: 0 }])
-      return [{ from: 0, to: doc.length, severity: "error", message: "Tasks must be a JSON array" }]
-    }
-    const issues = lintSteps(parsed)
+    const issues = lintSteps(steps)
     const positioned: PositionedIssue[] = issues.map((issue) => {
       const range = rangeAtPath(tree, doc, issue.path)
       return { ...issue, from: range?.from, to: range?.to }
@@ -340,34 +348,23 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
     }))
   }, [])
 
-  // The preview follows the document, a beat behind it.
+  // The preview follows the document, a beat behind it, and keeps the last
+  // document that passed the shape lint while the current one is mid-edit.
+  // The update runs from the timer, not the effect body: a synchronous
+  // setState in an effect is what the compiler lint refuses.
   useEffect(() => {
     const id = window.setTimeout(() => {
-      try {
-        const parsed = JSON.parse(tasksText)
-        if (Array.isArray(parsed) && lintSteps(parsed).length === 0) setPreviewSteps(parsed as Step[])
-      } catch {
-        // Keep the last good preview while the document is mid-edit.
-      }
+      const { steps } = parseStepArray(tasksText)
+      if (steps && lintSteps(steps).length === 0) setPreviewSteps(steps)
     }, PREVIEW_DEBOUNCE_MS)
     return () => window.clearTimeout(id)
   }, [tasksText])
 
   /** Parse the tasks editor and run the client-side shape lint (for Save and Validate). */
-  const parseTasks = (): unknown[] | null => {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(tasksText)
-    } catch {
-      setTasksError("Tasks are not valid JSON")
-      return null
-    }
-    if (!Array.isArray(parsed)) {
-      setTasksError("Tasks must be a JSON array")
-      return null
-    }
-    setTasksError(null)
-    return parsed
+  const parseTasks = (): Step[] | null => {
+    const { steps, error } = parseStepArray(tasksText)
+    setTasksError(error)
+    return steps
   }
 
   /**
@@ -377,18 +374,12 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
    * manufacture one every time the button is pressed.
    */
   const appendStep = (snippet: string) => {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(tasksText)
-    } catch {
-      setTasksError("Fix the JSON before inserting a step")
+    const { steps, error } = parseStepArray(tasksText)
+    if (!steps) {
+      setTasksError(error === "Tasks are not valid JSON" ? "Fix the JSON before inserting a step" : error)
       return
     }
-    if (!Array.isArray(parsed)) {
-      setTasksError("Tasks must be a JSON array")
-      return
-    }
-    const next = [...parsed, uniquifyIds(JSON.parse(snippet), collectIds(parsed as Step[]))]
+    const next = [...steps, uniquifyIds(JSON.parse(snippet), collectIds(steps))]
     setTasksText(JSON.stringify(next, null, 2))
     setTasksError(null)
   }
@@ -456,14 +447,8 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
   // document is a hand-authored task list — small enough that memoizing would
   // cost more than it saves.
   const stepSummary = (() => {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(tasksText)
-    } catch {
-      return null
-    }
-    if (!Array.isArray(parsed)) return null
-    const steps = parsed as Step[]
+    const { steps } = parseStepArray(tasksText)
+    if (!steps) return null
     const tasks = countLeafSteps(steps)
     const groups = countGroups(steps)
     const taskLabel = `${tasks} ${tasks === 1 ? "task" : "tasks"}`

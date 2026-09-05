@@ -1,17 +1,17 @@
 import { useCallback, useMemo, useState } from "react"
-import { Link, useSearchParams } from "react-router"
-import { useChannels } from "@/hooks/use-channels"
-import { useWorkflows } from "@/hooks/use-workflows"
-import { useConnectors } from "@/hooks/use-connectors"
+import { Link } from "react-router"
+import { useEntityIndex } from "@/hooks/use-entity-index"
 import {
   DEFAULT_TRAFFIC_WINDOW,
   TRAFFIC_WINDOWS,
+  trafficWindowFromParam,
   trafficWindowLabel,
   useChannelTraffic,
 } from "@/hooks/use-metrics"
-import { useMapFaults } from "@/hooks/use-faults"
-import { useCronStatus } from "@/hooks/use-cron"
+import { useMapTelemetry } from "@/hooks/use-faults"
 import { faultsFor } from "@/lib/faults"
+import { useUrlFilters } from "@/lib/use-url-filters"
+import { useMediaQuery } from "@/lib/media-query"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -26,8 +26,6 @@ import { EmptyState } from "@/components/shared/empty-state"
 import { TrafficMap } from "@/components/graph/traffic-map"
 import { InspectorPlaceholder, MapInspector } from "@/components/graph/map-inspector"
 import { HUB_THRESHOLD } from "@/components/graph/traffic-node"
-import { buildIndex } from "@/lib/topology"
-import { buildSystemGraph } from "@/lib/system-graph"
 import {
   COLOR_METRICS,
   SIZE_METRICS,
@@ -73,11 +71,8 @@ import {
 
 type LifecycleFilter = "active" | "all"
 
-function formatSpan(seconds: number): string {
-  if (seconds <= 0) return "waiting for a second sample"
-  if (seconds < 90) return `last ${Math.round(seconds)}s`
-  return `last ${Math.round(seconds / 60)}m`
-}
+/** Every view setting, in the URL. */
+const VIEW_KEYS = ["select", "q", "tag", "lifecycle", "window", "size", "colour", "hops"] as const
 
 function LegendSwatch({ level, label }: { level: HealthLevel; label: string }) {
   return (
@@ -182,66 +177,42 @@ const isSizeMetric = (v: string): v is SizeMetric => SIZE_METRICS.some((m) => m.
 const isColorMetric = (v: string): v is ColorMetric => COLOR_METRICS.some((m) => m.value === v)
 
 export function SystemMapPage() {
-  const { data: channels, isLoading } = useChannels({ limit: 1000 })
-  const { data: workflows } = useWorkflows({ limit: 1000 })
-  const { data: connectors } = useConnectors({ limit: 1000 })
+  const { graph, isLoading } = useEntityIndex()
 
-  // View state is the URL. `replace` on every change so typing a search does
-  // not fill the history with one entry per keystroke.
-  const [params, setParams] = useSearchParams()
-  const setParam = useCallback(
-    (key: string, value: string | null) => {
-      setParams(
-        (prev) => {
-          const next = new URLSearchParams(prev)
-          if (value) next.set(key, value)
-          else next.delete(key)
-          return next
-        },
-        { replace: true },
-      )
-    },
-    [setParams],
-  )
-  const requestedWindow = Number(params.get("window"))
-  const windowSec = TRAFFIC_WINDOWS.some((w) => w.value === requestedWindow)
-    ? requestedWindow
-    : DEFAULT_TRAFFIC_WINDOW
-  const lifecycle: LifecycleFilter = params.get("lifecycle") === "all" ? "all" : "active"
-  const sizeParam = params.get("size") ?? ""
-  const sizeMetric: SizeMetric = isSizeMetric(sizeParam) ? sizeParam : "rate"
-  const colorParam = params.get("colour") ?? ""
-  const colorMetric: ColorMetric = isColorMetric(colorParam) ? colorParam : "health"
-  const search = params.get("q") ?? ""
-  const tag = params.get("tag") ?? ""
-  const selectedId = params.get("select") || null
+  // View state is the URL, replaced rather than pushed on every change so
+  // typing a search does not fill the history with one entry per keystroke.
+  const { values: view, set: setView } = useUrlFilters(VIEW_KEYS)
+  const windowSec = trafficWindowFromParam(view.window)
+  const lifecycle: LifecycleFilter = view.lifecycle === "all" ? "all" : "active"
+  const sizeMetric: SizeMetric = isSizeMetric(view.size) ? view.size : "rate"
+  const colorMetric: ColorMetric = isColorMetric(view.colour) ? view.colour : "health"
+  const search = view.q
+  const tag = view.tag
+  const selectedId = view.select || null
   // Blast radius: how far the focus reaches from the selection. One hop by
   // default — in a connected system "everything reachable" dims nothing.
-  const hopsParam = params.get("hops")
-  const hops = hopsParam === "all" ? Infinity : hopsParam === "2" ? 2 : 1
+  const hops = view.hops === "all" ? Infinity : view.hops === "2" ? 2 : 1
 
   const [paused, setPaused] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   // Selections made from a list rather than the canvas ask the canvas to
   // travel. A selection that arrived in the URL counts: the page opened on it.
-  const [revealToken, setRevealToken] = useState(() => (params.get("select") ? 1 : 0))
+  const [revealToken, setRevealToken] = useState(() => (view.select ? 1 : 0))
+  // One inspector, in the column above `lg` and as a sheet below it — not
+  // two mounted with one hidden.
+  const wide = useMediaQuery("(min-width: 1024px)")
 
-  const setSelectedId = useCallback((id: string | null) => setParam("select", id), [setParam])
+  const setSelectedId = useCallback((id: string | null) => setView({ select: id ?? "" }), [setView])
   function revealChannel(id: string) {
     setSelectedId(id)
     setRevealToken((t) => t + 1)
   }
 
   const traffic = useChannelTraffic(windowSec, paused)
-  // Quarantines, failed connectors and open breakers: what the counters
-  // cannot show, drawn on the nodes and connectors they touch.
-  const faults = useMapFaults()
+  // Quarantines, failed connectors and open breakers, and a cron channel's
+  // next fire: what the counters cannot show, drawn on the nodes they touch.
+  const { faults, nextFire } = useMapTelemetry(graph)
 
-  const idx = useMemo(
-    () => buildIndex(channels?.data ?? [], workflows?.data ?? [], connectors?.data ?? []),
-    [channels?.data, workflows?.data, connectors?.data],
-  )
-  const graph = useMemo(() => buildSystemGraph(idx), [idx])
   const connectorsByName = useMemo(
     () => new Map(graph.connectors.map((c) => [c.name, c])),
     [graph.connectors],
@@ -295,20 +266,6 @@ export function SystemMapPage() {
     )
   }, [graph.nodes, visible, search])
 
-  // A cron channel's next fire, for its card: the scheduler's own answer,
-  // asked only while the map holds a schedule (a pre-1.6 server has no route).
-  const hasSchedules = useMemo(() => graph.nodes.some((n) => n.schedule), [graph.nodes])
-  const { data: cronStatus } = useCronStatus({ enabled: hasSchedules })
-  const nextFire = useMemo(
-    () =>
-      new Map(
-        (cronStatus ?? [])
-          .filter((s) => s.next_fire_at)
-          .map((s) => [s.channel_name, s.next_fire_at as string]),
-      ),
-    [cronStatus],
-  )
-
   const selected = selectedId ? (graph.byId.get(selectedId) ?? null) : null
 
   // Channels the window says are actually broken, as opposed to merely refusing
@@ -322,11 +279,7 @@ export function SystemMapPage() {
   )
 
   const metricsOff = !traffic.isLoading && !traffic.available
-  const spanLabel = metricsOff
-    ? "metrics off"
-    : traffic.hasRate
-      ? formatSpan(traffic.spanSec)
-      : "waiting for a second sample"
+  const spanLabel = traffic.spanLabel
   const windowLabel = trafficWindowLabel(windowSec)
   const quarantinedNames = [...faults.quarantined.keys()].filter((name) => graph.byId.has(name))
   const failedConnectors = graph.connectors.filter((c) => faults.failedConnectors.has(c.name))
@@ -354,6 +307,24 @@ export function SystemMapPage() {
     )
   }
 
+  const inspector = selected ? (
+    <MapInspector
+      node={selected}
+      traffic={traffic.byChannel.get(selected.id)}
+      series={traffic.seriesFor(selected.id)}
+      load={load.get(selected.id)}
+      graph={graph}
+      connectorsByName={connectorsByName}
+      faults={faultsFor(selected, faults)}
+      mapFaults={faults}
+      spanLabel={spanLabel}
+      hops={hops}
+      onHopsChange={(next) => setView({ hops: next === 1 ? "" : next === 2 ? "2" : "all" })}
+      onSelect={(node) => revealChannel(node.id)}
+      onClose={() => setSelectedId(null)}
+    />
+  ) : null
+
   return (
     <div className="flex h-full flex-col gap-3">
       <PageHeader
@@ -379,7 +350,7 @@ export function SystemMapPage() {
         <Select
           value={String(windowSec)}
           onChange={(e) =>
-            setParam("window", e.target.value === String(DEFAULT_TRAFFIC_WINDOW) ? null : e.target.value)
+            setView({ window: e.target.value === String(DEFAULT_TRAFFIC_WINDOW) ? "" : e.target.value })
           }
           className="w-40"
           aria-label="Traffic window"
@@ -406,7 +377,7 @@ export function SystemMapPage() {
           <Input
             placeholder="Find a channel, route, topic or tag"
             value={search}
-            onChange={(e) => setParam("q", e.target.value || null)}
+            onChange={(e) => setView({ q: e.target.value })}
             onKeyDown={(e) => {
               // Enter selects the best match and travels to it; typing alone
               // lights the matches and dims the rest.
@@ -423,7 +394,7 @@ export function SystemMapPage() {
         </div>
         <Select
           value={lifecycle}
-          onChange={(e) => setParam("lifecycle", e.target.value === "all" ? "all" : null)}
+          onChange={(e) => setView({ lifecycle: e.target.value === "all" ? "all" : "" })}
           className="w-full sm:w-40"
           aria-label="Lifecycle"
         >
@@ -433,7 +404,7 @@ export function SystemMapPage() {
         {graph.tags.length > 0 && (
           <Select
             value={tag}
-            onChange={(e) => setParam("tag", e.target.value || null)}
+            onChange={(e) => setView({ tag: e.target.value })}
             className="w-full sm:w-36"
             aria-label="Tag"
           >
@@ -447,7 +418,7 @@ export function SystemMapPage() {
         )}
         <Select
           value={sizeMetric}
-          onChange={(e) => setParam("size", e.target.value === "rate" ? null : e.target.value)}
+          onChange={(e) => setView({ size: e.target.value === "rate" ? "" : e.target.value })}
           className="w-full sm:w-48"
           aria-label="Size by"
         >
@@ -461,10 +432,14 @@ export function SystemMapPage() {
           value={colorMetric}
           onChange={(e) => {
             const next = e.target.value
-            setParam("colour", next === "health" ? null : next)
             // Colouring by lifecycle with only live channels shown is one
-            // colour; widen the filter so the mode has something to say.
-            if (next === "lifecycle" && lifecycle === "active") setParam("lifecycle", "all")
+            // colour; widen the filter so the mode has something to say. One
+            // patch: two sequential writes would each start from the same
+            // params and the second would undo the first.
+            setView({
+              colour: next === "health" ? "" : next,
+              ...(next === "lifecycle" && lifecycle === "active" ? { lifecycle: "all" } : {}),
+            })
           }}
           className="w-full sm:w-40"
           aria-label="Colour by"
@@ -607,52 +582,20 @@ export function SystemMapPage() {
         </Card>
 
         <Card className="hidden min-h-0 overflow-hidden p-0 lg:block">
-          {selected ? (
-            <MapInspector
-              node={selected}
-              traffic={traffic.byChannel.get(selected.id)}
-              series={traffic.seriesFor(selected.id)}
-              load={load.get(selected.id)}
-              graph={graph}
-              connectorsByName={connectorsByName}
-              faults={faultsFor(selected, faults)}
-              mapFaults={faults}
-              spanLabel={spanLabel}
-              hops={hops}
-              onHopsChange={(next) => setParam("hops", next === 1 ? null : next === 2 ? "2" : "all")}
-              onSelect={(node) => revealChannel(node.id)}
-              onClose={() => setSelectedId(null)}
-            />
-          ) : (
-            <InspectorPlaceholder activeCount={traffic.activeCount} />
-          )}
+          {wide && inspector ? inspector : <InspectorPlaceholder activeCount={traffic.activeCount} />}
         </Card>
       </div>
 
       {/* Below `lg` the inspector column is gone; the same panel rises as a
           sheet, so a selection on a laptop split screen is not a dim canvas
           and nothing else. */}
-      {selected && (
+      {!wide && selected && inspector && (
         <div
           className="fixed inset-x-0 bottom-0 z-40 h-[55vh] overflow-hidden rounded-t-xl border-t bg-card shadow-lg lg:hidden"
           role="dialog"
           aria-label={`${selected.name} on the map`}
         >
-          <MapInspector
-            node={selected}
-            traffic={traffic.byChannel.get(selected.id)}
-            series={traffic.seriesFor(selected.id)}
-            load={load.get(selected.id)}
-            graph={graph}
-            connectorsByName={connectorsByName}
-            faults={faultsFor(selected, faults)}
-            mapFaults={faults}
-            spanLabel={spanLabel}
-            hops={hops}
-            onHopsChange={(next) => setParam("hops", next === 1 ? null : next === 2 ? "2" : "all")}
-            onSelect={(node) => revealChannel(node.id)}
-            onClose={() => setSelectedId(null)}
-          />
+          {inspector}
         </div>
       )}
 

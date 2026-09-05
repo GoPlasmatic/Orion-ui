@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Callout } from "@/components/ui/callout"
 import { Blocks, Plug, Radio } from "lucide-react"
+import { shortDigest } from "@/lib/utils"
+import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 
 /**
  * What this workflow's tasks reference, per the server.
@@ -19,7 +21,7 @@ export function WorkflowDependencies({ workflowId }: { workflowId: string }) {
   const { data, isLoading, error } = useWorkflowDependencies(workflowId)
   // Resolve names to ids so the connector chips can link. A name with no match
   // is a real finding: activation refuses a workflow naming a missing connector.
-  const { data: connectors } = useConnectors({ limit: 1000 })
+  const { data: connectors } = useConnectors({ limit: REGISTRY_LIMIT })
   const idByName = new Map((connectors?.data ?? []).map((c) => [c.name, c.id]))
 
   if (isLoading) return <Skeleton className="h-48 w-full" />
@@ -154,7 +156,7 @@ export function WorkflowDependencies({ workflowId }: { workflowId: string }) {
                     </Link>
                     <Badge variant="outline" className="text-xs">v{dep.version}</Badge>
                     <span className="font-mono text-xs text-muted-foreground" title={dep.digest}>
-                      {dep.digest.slice(0, 19)}…
+                      {shortDigest(dep.digest)}
                     </span>
                     <span className="flex flex-wrap gap-1">
                       {dep.functions.map((fn) => (

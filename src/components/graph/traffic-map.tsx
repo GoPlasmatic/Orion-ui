@@ -11,7 +11,7 @@ import {
   ReactFlowProvider,
   getSmoothStepPath,
   useReactFlow,
-  useViewport,
+  useStore,
   type Edge,
   type EdgeProps,
   type Node,
@@ -20,7 +20,7 @@ import {
 import { ChevronsDownUp, ChevronsUpDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useReducedMotion } from "@/lib/motion"
-import { EMPTY_FAULTS, faultsFor, type MapFaults } from "@/lib/faults"
+import { faultsFor, type MapFaults } from "@/lib/faults"
 import { CLUSTER_HEADER, layoutSystemGraph, type Cluster, type Lane } from "@/lib/map-layout"
 import { neighbourhood, type SystemGraph, type SystemNode } from "@/lib/system-graph"
 import type { ChannelTraffic, TrafficWindow } from "@/hooks/use-metrics"
@@ -115,14 +115,6 @@ const LOD_ZOOM = 0.55
  */
 const COLLAPSE_MAP_AT = 30
 const COLLAPSE_CLUSTER_AT = 6
-
-/**
- * Channels that have been drawn full at any point in this session. Module
- * scope on purpose: it is a memory, not state — it only ever grows, every
- * canvas (the map, a detail page's neighbourhood) shares it, and it needs no
- * effect to maintain, which is what keeps the layout pure.
- */
-const expandedEver = new Set<string>()
 
 const LEVEL_RANK: Record<HealthLevel, number> = { idle: 0, healthy: 1, notice: 2, warning: 3, critical: 4 }
 
@@ -258,17 +250,20 @@ export interface TrafficMapProps {
   revealToken: number
   onSelect: (node: SystemNode | null) => void
   /** Quarantines, failed connectors and open breakers, drawn on the nodes they touch. */
-  faults?: MapFaults
+  faults: MapFaults
   /** How far the focus dims from the selection: call hops, or every reachable channel. */
-  hops?: number
+  hops: number
   /**
    * Search hits: everything else dims rather than disappears, so the canvas
    * holds still while a name is typed. Null when nothing is being searched.
    */
   highlight?: ReadonlySet<string> | null
   /** A cron channel's next fire, by channel name, for its card. */
-  nextFire?: ReadonlyMap<string, string>
+  nextFire: ReadonlyMap<string, string>
 }
+
+/** Lanes and clusters are frames on the minimap; channels are the marks. */
+const minimapClass = (n: Node) => (n.type === "channel" ? "map-mini-channel" : "map-mini-frame")
 
 function TrafficMapInner({
   graph,
@@ -279,14 +274,16 @@ function TrafficMapInner({
   colorMetric,
   revealToken,
   onSelect,
-  faults = EMPTY_FAULTS,
-  hops = 1,
+  faults,
+  hops,
   highlight = null,
   nextFire,
 }: TrafficMapProps) {
   const { fitView } = useReactFlow()
-  const { zoom } = useViewport()
-  const lod: LevelOfDetail = zoom < LOD_ZOOM ? "dot" : "full"
+  // A boolean selector: the component re-renders when the level of detail
+  // flips, not on every frame of a pan or zoom.
+  const dotLod = useStore((s) => s.transform[2] < LOD_ZOOM)
+  const lod: LevelOfDetail = dotLod ? "dot" : "full"
   const reducedMotion = useReducedMotion()
   /** What each colour slot means under the current metric, for the node's label. */
   const legendLabel = useMemo(
@@ -316,19 +313,17 @@ function TrafficMapInner({
    * requests is exactly the flattening this map exists to undo. Derived load
    * counts — an internal hub is not context, it is the busiest thing here.
    *
-   * With hysteresis: once a channel has expanded in this session it stays
-   * expanded. Without it a channel that goes quiet for one window shrank back,
-   * every lane below it moved, and on a bursty system the canvas shuffled on
-   * the ten-second poll.
+   * With hysteresis: a channel that carried anything across the whole metrics
+   * buffer stays expanded, whatever the window says. Without it a channel that
+   * goes quiet for one window shrank back, every lane below it moved, and on
+   * a bursty system the canvas shuffled on the ten-second poll.
    */
   const isCompact = useCallback(
-    (id: string) => {
-      const quiet =
-        (traffic.byChannel.get(id)?.windowed ?? 0) === 0 && (load.get(id)?.effective ?? 0) === 0
-      if (!quiet) expandedEver.add(id)
-      return quiet && !expandedEver.has(id)
-    },
-    [traffic.byChannel, load],
+    (id: string) =>
+      (traffic.byChannel.get(id)?.windowed ?? 0) === 0 &&
+      (load.get(id)?.effective ?? 0) === 0 &&
+      !traffic.activeInBuffer.has(id),
+    [traffic.byChannel, traffic.activeInBuffer, load],
   )
 
   /**
@@ -510,7 +505,7 @@ function TrafficMapInner({
         focused: selectedId === node.id,
         faults: faultsFor(node, faults),
         lod,
-        nextFire: nextFire?.get(node.id) ?? null,
+        nextFire: nextFire.get(node.id) ?? null,
       }
       return [
         {
@@ -519,7 +514,7 @@ function TrafficMapInner({
           position: pos,
           width: compact ? COMPACT_W : NODE_W,
           height: compact ? COMPACT_H : NODE_H,
-          data: data as unknown as Record<string, unknown>,
+          data,
           selected: selectedId === node.id,
           // Colour alone is what the dot says at overview zoom; the name the
           // wrapper announces carries the same reading in words.
@@ -624,6 +619,43 @@ function TrafficMapInner({
     })
   }, [layout, shownEdges, rateOf, focusSet, lit, reducedMotion])
 
+  /**
+   * Keyboard selection. A focused node selects on Enter or Space and clears
+   * on Escape — React Flow reports that here, not through onNodeClick. A
+   * mouse click reaches both paths with the same answer.
+   */
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      let picked: SystemNode | null | undefined
+      for (const change of changes) {
+        if (change.type !== "select") continue
+        if (change.selected) {
+          const node = graph.byId.get(change.id)
+          if (node) picked = node
+        } else if (picked === undefined) {
+          picked = null
+        }
+      }
+      if (picked !== undefined) onSelect(picked)
+    },
+    [graph.byId, onSelect],
+  )
+  const onNodeClick = useCallback(
+    (_: unknown, node: Node) => {
+      if (node.type === "cluster") {
+        // A cluster toggles rather than selects.
+        const cluster = (node.data as ClusterNodeData).cluster
+        setClusterOverrides((prev) => new Map(prev).set(cluster.id, !cluster.collapsed))
+        return
+      }
+      // Lanes are nodes too; a click on one is a click on the canvas as far
+      // as selection is concerned.
+      onSelect((node.data as TrafficNodeData).node ?? null)
+    },
+    [onSelect],
+  )
+  const onPaneClick = useCallback(() => onSelect(null), [onSelect])
+
   return (
     <div className="relative h-full w-full">
       <ReactFlow
@@ -637,35 +669,9 @@ function TrafficMapInner({
         nodesConnectable={false}
         nodesDraggable={false}
         elevateNodesOnSelect={false}
-        onNodesChange={(changes: NodeChange[]) => {
-          // Keyboard selection. A focused node selects on Enter or Space and
-          // clears on Escape — React Flow reports that here, not through
-          // onNodeClick. A mouse click reaches both paths with the same answer.
-          let picked: SystemNode | null | undefined
-          for (const change of changes) {
-            if (change.type !== "select") continue
-            if (change.selected) {
-              const node = graph.byId.get(change.id)
-              if (node) picked = node
-            } else if (picked === undefined) {
-              picked = null
-            }
-          }
-          if (picked !== undefined) onSelect(picked)
-        }}
-        onNodeClick={(_, node) => {
-          if (node.type === "cluster") {
-            // A cluster toggles rather than selects.
-            const cluster = (node.data as ClusterNodeData).cluster
-            setClusterOverrides((prev) => new Map(prev).set(cluster.id, !cluster.collapsed))
-            return
-          }
-          // Lanes are nodes too; a click on one is a click on the canvas as
-          // far as selection is concerned.
-          const data = node.data as unknown as TrafficNodeData
-          onSelect(data?.node ?? null)
-        }}
-        onPaneClick={() => onSelect(null)}
+        onNodesChange={onNodesChange}
+        onNodeClick={onNodeClick}
+        onPaneClick={onPaneClick}
       >
         <Background gap={22} size={1} color="var(--border)" />
         <Controls showInteractive={false} className="!shadow-sm" />
@@ -677,7 +683,7 @@ function TrafficMapInner({
           <MiniMap
             pannable
             zoomable
-            nodeClassName={(n) => (n.type === "channel" ? "map-mini-channel" : "map-mini-frame")}
+            nodeClassName={minimapClass}
             aria-label="Map overview"
           />
         )}

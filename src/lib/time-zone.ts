@@ -9,17 +9,13 @@
  * and other plain functions; the page that changes it (Engine → Display)
  * re-renders itself, and every other page renders afresh when visited.
  */
+import { readStorage, writeStorage } from "@/lib/storage"
+
 export type TimeZonePreference = "local" | "utc"
 
 const KEY = "orion-timezone"
 
-function readStored(): TimeZonePreference {
-  try {
-    return localStorage.getItem(KEY) === "utc" ? "utc" : "local"
-  } catch {
-    return "local"
-  }
-}
+const readStored = (): TimeZonePreference => (readStorage(KEY) === "utc" ? "utc" : "local")
 
 let current: TimeZonePreference = typeof window === "undefined" ? "local" : readStored()
 
@@ -29,11 +25,7 @@ export function getTimeZonePreference(): TimeZonePreference {
 
 export function setTimeZonePreference(zone: TimeZonePreference): void {
   current = zone
-  try {
-    localStorage.setItem(KEY, zone)
-  } catch {
-    // Private mode or a full quota: the choice lasts for the session.
-  }
+  writeStorage(KEY, zone)
 }
 
 /** The viewer's own zone by IANA name, e.g. `Asia/Kolkata`. */

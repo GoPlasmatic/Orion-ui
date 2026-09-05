@@ -92,15 +92,6 @@ export const healthText: Record<HealthLevel, string> = {
   notice: "text-info",
 }
 
-/** Health-mode names for the slots; `legendFor` is the metric-aware reading. */
-export const healthLabel: Record<HealthLevel, string> = {
-  idle: "no traffic",
-  healthy: "healthy",
-  notice: "rejected",
-  warning: "errors",
-  critical: "failing",
-}
-
 /** Stacked-bar segment colours, in the order they are drawn. */
 export const segmentColor = {
   ok: "bg-success",

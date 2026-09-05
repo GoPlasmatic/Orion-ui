@@ -73,6 +73,49 @@ export function formatDate(date: string | number) {
   })
 }
 
+/** A short span for a label: "48 s", "4 m 20 s", "1 h 5 m" — how much of a window is buffered. */
+export function formatSpan(seconds: number): string {
+  const s = Math.round(seconds)
+  if (s < 60) return `${s} s`
+  const m = Math.floor(s / 60)
+  const rem = s % 60
+  if (m < 60) return rem ? `${m} m ${rem} s` : `${m} m`
+  const h = Math.floor(m / 60)
+  return `${h} h ${m % 60} m`
+}
+
+/** An uptime: "2d 3h 3m", "3h 12m", "45m". */
+export function formatUptime(seconds: number): string {
+  const d = Math.floor(seconds / 86400)
+  const h = Math.floor((seconds % 86400) / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (d > 0) return `${d}d ${h}h ${m}m`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** `sha256:1a2b3c4d5e6f…` — enough of a digest to tell two apart, with the whole in the title. */
+export function shortDigest(digest: string): string {
+  const hex = digest.startsWith("sha256:") ? digest.slice(7) : digest
+  return hex.length > 16 ? `${digest.slice(0, digest.length - hex.length + 12)}…` : digest
+}
+
+/** Milliseconds between two admin-plane instants, or null when either is missing. */
+export function serverSpan(
+  from: string | number | null | undefined,
+  to: string | number | null | undefined,
+): number | null {
+  const a = serverTime(from)
+  const b = serverTime(to)
+  return a != null && b != null ? b - a : null
+}
+
 /** The time of day in the display zone, for an axis tick: `05:36 PM`. */
 export function formatClock(date: string | number): string {
   const utc = getTimeZonePreference() === "utc"

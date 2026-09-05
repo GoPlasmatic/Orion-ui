@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { cn } from "@/lib/utils"
+import { copyText } from "@/lib/clipboard"
 import { ChevronDown, ChevronRight, Copy, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -22,9 +23,11 @@ export function JsonViewer({
   const json = typeof data === "string" ? data : JSON.stringify(data, null, 2)
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(json)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    void copyText(json, "JSON").then((ok) => {
+      if (!ok) return
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
   }
 
   return (

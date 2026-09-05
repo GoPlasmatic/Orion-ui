@@ -1,6 +1,5 @@
 import { useState } from "react"
-import { useQuery } from "@tanstack/react-query"
-import { useEngineStatus, useEngineReload } from "@/hooks/use-engine"
+import { useDocsServed, useEngineStatus, useEngineReload } from "@/hooks/use-engine"
 import { useReloadConnectors } from "@/hooks/use-connectors"
 import { useBackups, useCreateBackup } from "@/hooks/use-backup"
 import { useHealth } from "@/hooks/use-health"
@@ -18,23 +17,8 @@ import { PageHeader } from "@/components/shared/page-header"
 import { HealthComponents } from "@/components/shared/health-components"
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
 import { traceStatusBadgeClass } from "@/lib/status"
-import { formatDate } from "@/lib/utils"
+import { formatBytes, formatDate, formatUptime } from "@/lib/utils"
 import { RefreshCw, Archive, Database, HeartPulse, Monitor, Plug } from "lucide-react"
-
-function formatUptime(seconds: number): string {
-  const d = Math.floor(seconds / 86400)
-  const h = Math.floor((seconds % 86400) / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  if (d > 0) return `${d}d ${h}h ${m}m`
-  if (h > 0) return `${h}h ${m}m`
-  return `${m}m`
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 /**
  * The instance: its health report, the engine and connector reloads, backups
@@ -47,19 +31,9 @@ export function EnginePage() {
   const reload = useEngineReload()
   const reloadConnectors = useReloadConnectors()
   const [confirmReload, setConfirmReload] = useState(false)
-  // The spec and Swagger UI are served only when the server does not run with
-  // `environment = "production"`; a button that opens a 404 in a new tab says
-  // nothing. One HEAD, kept for the session.
-  const docs = useQuery({
-    queryKey: ["openapi-served"],
-    queryFn: async () => {
-      const res = await fetch("/api/v1/openapi.json", { method: "HEAD" })
-      return res.ok || res.status === 405
-    },
-    staleTime: 10 * 60 * 1000,
-    retry: false,
-  })
-  const docsServed = docs.data
+  // A button that opens a 404 in a new tab says nothing: a production server
+  // withholds the spec and the Swagger UI, and the probe says whether this one does.
+  const docsServed = useDocsServed().data
   const { data: backups, isLoading: backupsLoading, error: backupsError } = useBackups()
   const createBackup = useCreateBackup()
   const { data: health } = useHealth()

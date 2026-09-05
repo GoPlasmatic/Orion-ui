@@ -14,15 +14,8 @@ import {
 import { EmptyState } from "@/components/shared/empty-state"
 import { occurrenceStatusBadgeClass } from "@/lib/status"
 import { isRetryable, occurrenceStatusLabel } from "@/lib/cron"
-import { formatDate, formatDuration, serverTime } from "@/lib/utils"
+import { formatDate, formatDuration, serverSpan } from "@/lib/utils"
 import { CalendarClock, RotateCcw } from "lucide-react"
-
-/** How late an occurrence began, or how long it ran — whichever the row can say. */
-function durationOf(o: CronOccurrenceSummary): number | null {
-  const from = serverTime(o.started_at)
-  const to = serverTime(o.completed_at)
-  return from != null && to != null ? to - from : null
-}
 
 /**
  * The occurrence ledger as a table, shared by the Schedules page (every
@@ -89,7 +82,7 @@ export function OccurrencesTable({
             </TableRow>
           ) : (
             rows.map((o) => {
-              const duration = durationOf(o)
+              const duration = serverSpan(o.started_at, o.completed_at)
               return (
                 <TableRow
                   key={o.id}

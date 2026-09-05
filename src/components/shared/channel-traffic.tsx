@@ -9,7 +9,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Sparkline } from "@/components/ui/sparkline"
+import { OutcomeBar, OutcomeLegend, TrafficSparklines } from "@/components/shared/outcome-bar"
 import { traceStatusBadgeClass } from "@/lib/status"
 import {
   compactNumber,
@@ -17,7 +17,6 @@ import {
   formatPct,
   healthOf,
   healthText,
-  segmentColor,
 } from "@/lib/traffic-encoding"
 import { cn, formatDate, formatDuration, formatRelative } from "@/lib/utils"
 
@@ -89,47 +88,9 @@ export function ChannelTrafficCard({ channelName }: { channelName: string }) {
                 </dd>
               </div>
             </dl>
-            {series.rate.length >= 2 && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-xs text-muted-foreground">rate</p>
-                  <Sparkline values={series.rate} className="text-chart-1" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">errors %</p>
-                  <Sparkline values={series.errorPct} className="text-destructive" />
-                </div>
-              </div>
-            )}
-            <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
-              {t.ok > 0 && <div className={segmentColor.ok} style={{ width: `${(t.ok / t.windowed) * 100}%` }} />}
-              {t.failed > 0 && (
-                <div className={segmentColor.failed} style={{ width: `${(t.failed / t.windowed) * 100}%` }} />
-              )}
-              {t.rejected > 0 && (
-                <div className={segmentColor.rejected} style={{ width: `${(t.rejected / t.windowed) * 100}%` }} />
-              )}
-              {t.duplicate > 0 && (
-                <div className={segmentColor.duplicate} style={{ width: `${(t.duplicate / t.windowed) * 100}%` }} />
-              )}
-            </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-              {(
-                [
-                  ["ok", t.ok, segmentColor.ok],
-                  ["failed", t.failed, segmentColor.failed],
-                  [t.dominantIssue ?? "rejected", t.rejected, segmentColor.rejected],
-                  ["duplicate", t.duplicate, segmentColor.duplicate],
-                ] as const
-              )
-                .filter(([, value]) => value > 0)
-                .map(([label, value, color]) => (
-                  <span key={label} className="inline-flex items-center gap-1.5">
-                    <span className={cn("h-1.5 w-1.5 rounded-full", color)} />
-                    {label} <span className="font-mono tabular-nums">{value}</span>
-                  </span>
-                ))}
-            </div>
+            <TrafficSparklines series={series} />
+            <OutcomeBar traffic={t} />
+            <OutcomeLegend traffic={t} inline />
           </div>
         )}
       </CardContent>

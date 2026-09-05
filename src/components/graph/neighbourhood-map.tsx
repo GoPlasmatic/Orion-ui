@@ -1,16 +1,13 @@
 import { useMemo } from "react"
 import { Link, useNavigate } from "react-router"
 import { ArrowUpRight } from "lucide-react"
-import { useChannels } from "@/hooks/use-channels"
-import { useWorkflows } from "@/hooks/use-workflows"
-import { useConnectors } from "@/hooks/use-connectors"
+import { useEntityIndex } from "@/hooks/use-entity-index"
 import { useChannelTraffic, DEFAULT_TRAFFIC_WINDOW } from "@/hooks/use-metrics"
-import { useMapFaults } from "@/hooks/use-faults"
+import { useMapTelemetry } from "@/hooks/use-faults"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TrafficMap } from "@/components/graph/traffic-map"
-import { buildIndex } from "@/lib/topology"
-import { buildSystemGraph, neighbourhood } from "@/lib/system-graph"
+import { neighbourhood } from "@/lib/system-graph"
 
 export type NeighbourhoodKind = "channel" | "workflow" | "connector"
 
@@ -29,16 +26,9 @@ export type NeighbourhoodKind = "channel" | "workflow" | "connector"
  */
 export function NeighbourhoodMap({ kind, id }: { kind: NeighbourhoodKind; id: string }) {
   const navigate = useNavigate()
-  const { data: channels, isLoading } = useChannels({ limit: 1000 })
-  const { data: workflows } = useWorkflows({ limit: 1000 })
-  const { data: connectors } = useConnectors({ limit: 1000 })
+  const { graph, isLoading } = useEntityIndex()
   const traffic = useChannelTraffic(DEFAULT_TRAFFIC_WINDOW)
-  const faults = useMapFaults()
-
-  const graph = useMemo(
-    () => buildSystemGraph(buildIndex(channels?.data ?? [], workflows?.data ?? [], connectors?.data ?? [])),
-    [channels?.data, workflows?.data, connectors?.data],
-  )
+  const { faults, nextFire } = useMapTelemetry(graph)
 
   const roots = useMemo(() => {
     switch (kind) {
@@ -87,6 +77,7 @@ export function NeighbourhoodMap({ kind, id }: { kind: NeighbourhoodKind; id: st
           colorMetric="health"
           revealToken={0}
           faults={faults}
+          nextFire={nextFire}
           hops={1}
           onSelect={(node) => {
             if (node && !node.unresolved) navigate(`/channels/${node.channelId}`)

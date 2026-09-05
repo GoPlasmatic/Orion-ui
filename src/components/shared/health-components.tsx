@@ -4,13 +4,13 @@ import type { HealthResponse } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Callout } from "@/components/ui/callout"
 import { componentStateBadgeClass, isComponentFault } from "@/lib/status"
-import { componentRoute, hasComponentRoute } from "@/lib/health"
+import { componentRoute } from "@/lib/health"
 import { cn, formatDate } from "@/lib/utils"
 
-/** `cron.last_reconcile_at` is unix seconds; tolerate an ISO string too. */
-function formatInstant(value: number | string | null | undefined): string {
+/** `cron.last_reconcile_at` is unix seconds, unlike every other admin-plane timestamp; tolerate an ISO string too. */
+function formatCronInstant(value: number | string | null | undefined): string {
   if (value == null) return "never"
-  return formatDate(typeof value === "number" ? new Date(value * 1000).toISOString() : value)
+  return formatDate(typeof value === "number" ? value * 1000 : value)
 }
 
 /**
@@ -79,8 +79,8 @@ export function HealthComponents({ health }: { health: HealthResponse | undefine
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              {isComponentFault(state) && hasComponentRoute(name) && (
-                <Link to={componentRoute(name)} className="text-xs underline underline-offset-2">
+              {isComponentFault(state) && componentRoute(name) && (
+                <Link to={componentRoute(name) as string} className="text-xs underline underline-offset-2">
                   Inspect
                 </Link>
               )}
@@ -122,7 +122,7 @@ export function HealthComponents({ health }: { health: HealthResponse | undefine
             <div>
               <dt className="text-muted-foreground">Last reconcile</dt>
               <dd className="mt-0.5">
-                {formatInstant(cron.last_reconcile_at)}
+                {formatCronInstant(cron.last_reconcile_at)}
                 {cron.reconcile_age_secs != null && (
                   <span className="text-muted-foreground"> · {Math.round(cron.reconcile_age_secs)}s ago</span>
                 )}

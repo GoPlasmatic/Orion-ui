@@ -454,9 +454,8 @@ export function ChannelDetailPage() {
                   <CardTitle className="text-sm">Backpressure</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Max concurrent / node</span>
-                    <span>{channel.config.backpressure.max_concurrent_per_node}</span>
+                  <div className="text-sm">
+                    <Row label="Max concurrent / node">{channel.config.backpressure.max_concurrent_per_node}</Row>
                   </div>
                 </CardContent>
               </Card>
@@ -483,26 +482,17 @@ export function ChannelDetailPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Enabled</span>
-                      <span>{channel.config.cache.enabled ? "Yes" : "No"}</span>
-                    </div>
+                    <Row label="Enabled">{channel.config.cache.enabled ? "Yes" : "No"}</Row>
                     {channel.config.cache.ttl_secs !== undefined && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">TTL</span>
-                        <span>{channel.config.cache.ttl_secs}s</span>
-                      </div>
+                      <Row label="TTL">{channel.config.cache.ttl_secs}s</Row>
                     )}
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Key</span>
-                      <span className="font-mono text-xs">
-                        {channel.config.cache.key_logic !== undefined
-                          ? "key_logic"
-                          : channel.config.cache.cache_key_fields?.length
-                            ? channel.config.cache.cache_key_fields.join(", ")
-                            : "whole payload"}
-                      </span>
-                    </div>
+                    <Row label="Key" mono>
+                      {channel.config.cache.key_logic !== undefined
+                        ? "key_logic"
+                        : channel.config.cache.cache_key_fields?.length
+                          ? channel.config.cache.cache_key_fields.join(", ")
+                          : "whole payload"}
+                    </Row>
                   </div>
                 </CardContent>
               </Card>
@@ -515,21 +505,12 @@ export function ChannelDetailPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Mode</span>
-                      <span>{channel.config.response.mode ?? "envelope"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Cookies</span>
-                      <span>{channel.config.response.cookies ? "Workflow may set" : "Off"}</span>
-                    </div>
+                    <Row label="Mode">{channel.config.response.mode ?? "envelope"}</Row>
+                    <Row label="Cookies">{channel.config.response.cookies ? "Workflow may set" : "Off"}</Row>
                     {channel.config.response.allowed_headers && (
-                      <div className="flex justify-between gap-4">
-                        <span className="text-muted-foreground">Allowed headers</span>
-                        <span className="text-right font-mono text-xs">
-                          {channel.config.response.allowed_headers.join(", ")}
-                        </span>
-                      </div>
+                      <Row label="Allowed headers" mono>
+                        {channel.config.response.allowed_headers.join(", ")}
+                      </Row>
                     )}
                     {channel.config.response.error_bodies && (
                       <Row label="Error bodies" mono>
@@ -548,28 +529,13 @@ export function ChannelDetailPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-1 text-sm">
-                    <div className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">Authorize</span>
-                      <span className="truncate font-mono text-xs">{channel.config.oauth2_login.authorize_url}</span>
-                    </div>
-                    <div className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">Callback</span>
-                      <span className="font-mono text-xs">{channel.config.oauth2_login.callback_path}</span>
-                    </div>
-                    <div className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">Scopes</span>
-                      <span className="font-mono text-xs">
-                        {channel.config.oauth2_login.scopes?.join(" ") || "—"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">PKCE</span>
-                      <span>{channel.config.oauth2_login.pkce === false ? "Off" : "S256"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">id_token</span>
-                      <span>{channel.config.oauth2_login.id_token ? "Verified (OIDC)" : "Not verified"}</span>
-                    </div>
+                    <Row label="Authorize" mono>{channel.config.oauth2_login.authorize_url}</Row>
+                    <Row label="Callback" mono>{channel.config.oauth2_login.callback_path}</Row>
+                    <Row label="Scopes" mono>{channel.config.oauth2_login.scopes?.join(" ") || "—"}</Row>
+                    <Row label="PKCE">{channel.config.oauth2_login.pkce === false ? "Off" : "S256"}</Row>
+                    <Row label="id_token">
+                      {channel.config.oauth2_login.id_token ? "Verified (OIDC)" : "Not verified"}
+                    </Row>
                   </div>
                   <p className="mt-2 text-xs text-muted-foreground">
                     The grant reaches the workflow at{" "}
@@ -587,15 +553,9 @@ export function ChannelDetailPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Header</span>
-                      <span className="font-mono text-xs">{channel.config.deduplication.header ?? "Idempotency-Key"}</span>
-                    </div>
+                    <Row label="Header" mono>{channel.config.deduplication.header ?? "Idempotency-Key"}</Row>
                     {channel.config.deduplication.window_secs !== undefined && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Window</span>
-                        <span>{channel.config.deduplication.window_secs}s</span>
-                      </div>
+                      <Row label="Window">{channel.config.deduplication.window_secs}s</Row>
                     )}
                   </div>
                 </CardContent>
@@ -629,28 +589,18 @@ export function ChannelDetailPage() {
                 <CardContent>
                   <div className="space-y-1 text-sm">
                     {channel.config.tracing.mode !== undefined && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Mode</span>
+                      <Row label="Mode">
                         <Badge variant="outline" className="uppercase">{channel.config.tracing.mode}</Badge>
-                      </div>
+                      </Row>
                     )}
                     {channel.config.tracing.sample_rate !== undefined && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Sample Rate</span>
-                        <span>{channel.config.tracing.sample_rate}</span>
-                      </div>
+                      <Row label="Sample Rate">{channel.config.tracing.sample_rate}</Row>
                     )}
                     {channel.config.tracing.errors_only !== undefined && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Errors Only</span>
-                        <span>{channel.config.tracing.errors_only ? "Yes" : "No"}</span>
-                      </div>
+                      <Row label="Errors Only">{channel.config.tracing.errors_only ? "Yes" : "No"}</Row>
                     )}
                     {channel.config.tracing.task_details !== undefined && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Per-Task Trace</span>
-                        <span>{channel.config.tracing.task_details ? "Captured" : "Off"}</span>
-                      </div>
+                      <Row label="Per-Task Trace">{channel.config.tracing.task_details ? "Captured" : "Off"}</Row>
                     )}
                   </div>
                 </CardContent>

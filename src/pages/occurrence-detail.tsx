@@ -10,7 +10,7 @@ import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { RetrySafetyWarning } from "@/components/shared/retry-safety-warning"
 import { occurrenceStatusBadgeClass } from "@/lib/status"
 import { isRetryable, occurrenceStatusLabel } from "@/lib/cron"
-import { formatDate, formatDuration, serverTime } from "@/lib/utils"
+import { formatDate, formatDuration, serverSpan } from "@/lib/utils"
 import { RotateCcw, ScrollText } from "lucide-react"
 
 function Meta({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
@@ -22,11 +22,6 @@ function Meta({ label, value, mono }: { label: string; value: React.ReactNode; m
   )
 }
 
-const ms = (a: string | null | undefined, b: string | null | undefined): number | null => {
-  const from = serverTime(a)
-  const to = serverTime(b)
-  return from != null && to != null ? to - from : null
-}
 
 /**
  * One occurrence in full — the diagnostic detail the ledger's list leaves out:
@@ -59,8 +54,8 @@ export function OccurrenceDetailPage() {
   }
 
   const inFlight = occ.status === "claimed" || occ.status === "running"
-  const lag = ms(occ.scheduled_for, occ.started_at)
-  const duration = ms(occ.started_at, occ.completed_at)
+  const lag = serverSpan(occ.scheduled_for, occ.started_at)
+  const duration = serverSpan(occ.started_at, occ.completed_at)
 
   return (
     <div className="space-y-6">

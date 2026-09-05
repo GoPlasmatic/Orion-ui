@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { ThemeContext } from "@/lib/theme-context"
+import { readStorage, writeStorage } from "@/lib/storage"
 
 type Theme = "light" | "dark" | "system"
 
@@ -9,7 +10,7 @@ function getSystemTheme(): "light" | "dark" {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    const stored = localStorage.getItem("orion-theme") as Theme | null
+    const stored = readStorage("orion-theme") as Theme | null
     return stored ?? "dark"
   })
 
@@ -19,7 +20,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const root = document.documentElement
     root.classList.remove("light", "dark")
     root.classList.add(resolvedTheme)
-    localStorage.setItem("orion-theme", theme)
+    writeStorage("orion-theme", theme)
   }, [theme, resolvedTheme])
 
   useEffect(() => {

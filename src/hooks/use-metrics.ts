@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { formatSpan } from "@/lib/utils"
 import {
   fetchMetrics,
   counterTotal,
@@ -75,6 +76,20 @@ export const DEFAULT_TRAFFIC_WINDOW = 300
 export const trafficWindowLabel = (sec: number): string =>
   TRAFFIC_WINDOWS.find((w) => w.value === sec)?.label ?? `${sec}s`
 
+/** A `?window=` value to a window the buffer can serve; the default for anything else. */
+export function trafficWindowFromParam(raw: string | null | undefined): number {
+  const sec = Number(raw)
+  return TRAFFIC_WINDOWS.some((w) => w.value === sec) ? sec : DEFAULT_TRAFFIC_WINDOW
+}
+
+/**
+ * The one cadence every reader of `/metrics` polls at. Each observer keeps
+ * its own timer and only in-flight fetches dedupe, so two hooks at different
+ * intervals scrape at the union of both and leave the ring buffer unevenly
+ * spaced.
+ */
+export const METRICS_POLL_MS = 10_000
+
 function pushSample(s: MetricsSnapshot) {
   const last = history[history.length - 1]
   if (last && last.t === s.t) return
@@ -100,6 +115,34 @@ function messagesSplit(snap: MetricsSnapshot, channel?: string): MessageSplit {
     else if (FAILURE_STATUSES.has(status)) out.failed += l.value
     else if (status === "duplicate") out.duplicate += l.value
   }
+  return out
+}
+
+const ZERO_SPLIT: MessageSplit = { total: 0, success: 0, failed: 0, duplicate: 0 }
+
+/**
+ * Every channel's split in one pass over the snapshot, kept by snapshot
+ * identity: a per-channel sparkline used to rescan every sample twice per
+ * channel, which on a sixty-channel map was thousands of passes per poll.
+ */
+const splitCache = new WeakMap<MetricsSnapshot, Map<string, MessageSplit>>()
+function channelSplits(snap: MetricsSnapshot): Map<string, MessageSplit> {
+  const hit = splitCache.get(snap)
+  if (hit) return hit
+  const out = new Map<string, MessageSplit>()
+  for (const l of snap.lines) {
+    if (l.name !== MESSAGES) continue
+    const channel = l.labels.channel
+    if (!channel) continue
+    const split = out.get(channel) ?? { total: 0, success: 0, failed: 0, duplicate: 0 }
+    const status = l.labels.status ?? ""
+    split.total += l.value
+    if (SUCCESS_STATUSES.has(status)) split.success += l.value
+    else if (FAILURE_STATUSES.has(status)) split.failed += l.value
+    else if (status === "duplicate") split.duplicate += l.value
+    out.set(channel, split)
+  }
+  splitCache.set(snap, out)
   return out
 }
 
@@ -270,6 +313,14 @@ export interface TrafficWindow {
   available: boolean
   /** Seconds actually covered — may be short of the requested window. */
   spanSec: number
+  /** The covered span in words: "last 48 s", "waiting for a second sample", "metrics off". */
+  spanLabel: string
+  /**
+   * Channels that carried anything across the whole buffer, not just the
+   * window — the canvas keeps a card expanded while this holds, so a channel
+   * quiet for one window does not shrink and shuffle the lanes on every poll.
+   */
+  activeInBuffer: ReadonlySet<string>
   /** True once two samples exist, i.e. once a rate can be computed at all. */
   hasRate: boolean
   lastUpdated: number | null
@@ -309,7 +360,7 @@ export function useChannelTraffic(windowSec: number, paused = false): TrafficWin
   const query = useQuery({
     queryKey: ["metrics"],
     queryFn: fetchMetrics,
-    refetchInterval: paused ? false : 10_000,
+    refetchInterval: paused ? false : METRICS_POLL_MS,
   })
 
   const t = query.data?.t
@@ -320,15 +371,47 @@ export function useChannelTraffic(windowSec: number, paused = false): TrafficWin
   const cur = query.data ?? null
 
   return useMemo(() => {
-    const empty: TrafficWindow = {
+    const core = windowCore(cur, windowSec)
+    const metricsOff = !query.isLoading && !core.available
+    return {
+      ...core,
       isLoading: query.isLoading,
       isError: query.isError,
+      spanLabel: metricsOff
+        ? "metrics off"
+        : core.hasRate
+          ? `last ${formatSpan(core.spanSec)}`
+          : "waiting for a second sample",
+    }
+  }, [cur, windowSec, query.isLoading, query.isError])
+}
+
+type WindowCore = Omit<TrafficWindow, "isLoading" | "isError" | "spanLabel">
+
+/**
+ * The reduction is a function of the buffer and the window, and every hook
+ * instance on a page — the sidebar's, the page's own, a card's — asks for the
+ * same one. Computed once per poll per window and shared.
+ */
+let windowCache: { key: string; value: WindowCore } | null = null
+
+function windowCore(cur: MetricsSnapshot | null, windowSec: number): WindowCore {
+  const key = `${cur?.t ?? 0}|${windowSec}|${history.length}|${history[0]?.t ?? 0}`
+  if (windowCache?.key === key) return windowCache.value
+  const value = computeWindow(cur, windowSec)
+  windowCache = { key, value }
+  return value
+}
+
+function computeWindow(cur: MetricsSnapshot | null, windowSec: number): WindowCore {
+    const empty: WindowCore = {
       available: false,
       spanSec: 0,
       hasRate: false,
       lastUpdated: cur?.t ?? null,
       channels: [],
       byChannel: new Map(),
+      activeInBuffer: new Set(),
       totalRatePerMin: null,
       activeCount: 0,
       windowed: 0,
@@ -447,26 +530,45 @@ export function useChannelTraffic(windowSec: number, paused = false): TrafficWin
       series.errorPct.push(d.success + d.failed > 0 ? (errorPct(d) ?? 0) : 0)
       series.meanMs.push((histogramMean(a, b, DURATION) ?? 0) * 1000)
     }
+    // Per-channel trends are asked for one channel at a time (a card, the
+    // inspector), so each is computed on first ask and kept for the poll.
+    const seriesCache = new Map<string, TrafficSeries>()
     const seriesFor = (channel: string): TrafficSeries => {
+      const hit = seriesCache.get(channel)
+      if (hit) return hit
       const out: TrafficSeries = { rate: [], errorPct: [] }
       for (const [a, b] of pairs) {
         const dt = (b.t - a.t) / 1000
-        const d = deltaSplit(messagesSplit(a, channel), messagesSplit(b, channel))
+        const d = deltaSplit(
+          channelSplits(a).get(channel) ?? ZERO_SPLIT,
+          channelSplits(b).get(channel) ?? ZERO_SPLIT,
+        )
         out.rate.push(d.total < 0 ? 0 : (d.total / dt) * 60)
         out.errorPct.push(d.success + d.failed > 0 ? (errorPct(d) ?? 0) : 0)
       }
+      seriesCache.set(channel, out)
       return out
     }
 
+    // Anything that moved since the oldest buffered sample: the hysteresis
+    // the canvas keeps a card open on.
+    const oldest = history.find((s) => s.t < cur.t) ?? null
+    const activeInBuffer = new Set<string>()
+    if (oldest) {
+      const then = channelSplits(oldest)
+      for (const [channel, split] of channelSplits(cur)) {
+        if (split.total - (then.get(channel)?.total ?? 0) > 0) activeInBuffer.add(channel)
+      }
+    }
+
     return {
-      isLoading: query.isLoading,
-      isError: query.isError,
       available: true,
       spanSec,
       hasRate,
       lastUpdated: cur.t,
       channels,
       byChannel,
+      activeInBuffer,
       totalRatePerMin: totalRate,
       activeCount: channels.filter((c) => c.windowed > 0).length,
       windowed: windowedAll,
@@ -476,14 +578,13 @@ export function useChannelTraffic(windowSec: number, paused = false): TrafficWin
       series,
       seriesFor,
     }
-  }, [cur, windowSec, query.isLoading, query.isError])
 }
 
 export function useMetrics() {
   const query = useQuery({
     queryKey: ["metrics"],
     queryFn: fetchMetrics,
-    refetchInterval: 10_000,
+    refetchInterval: METRICS_POLL_MS,
   })
 
   const t = query.data?.t
@@ -491,10 +592,25 @@ export function useMetrics() {
     if (query.data) pushSample(query.data)
   }, [t]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Point-in-time values use the live query data (available on first render).
+  const snap = query.data ?? null
+  const computed = useMemo(() => cumulative(snap), [snap])
+  return {
+    isLoading: query.isLoading,
+    isError: query.isError,
+    error: query.error,
+    ...computed,
+  }
+}
+
+/**
+ * Everything `useMetrics` derives from one snapshot and the buffer before it.
+ * Memoised per snapshot by the hook: the sidebar mounts this on every page,
+ * and the reduction is a few hundred passes over the parsed scrape.
+ */
+function cumulative(snap: MetricsSnapshot | null) {
+  // Point-in-time values use the live snapshot (available on first render).
   // Rates/windows use the previous buffered sample (the current one is pushed by
   // the effect after render, so the buffer's tail is the prior poll).
-  const snap = query.data ?? null
   const cur = snap
   let prev: MetricsSnapshot | null = null
   if (snap) {
@@ -631,9 +747,6 @@ export function useMetrics() {
   })()
 
   return {
-    isLoading: query.isLoading,
-    isError: query.isError,
-    error: query.error,
     available: !!snap && snap.lines.length > 0,
     lastUpdated: cur?.t ?? null,
     hasRate,
@@ -672,7 +785,7 @@ export function useCronMetrics(): CronMetrics {
   const query = useQuery({
     queryKey: ["metrics"],
     queryFn: fetchMetrics,
-    refetchInterval: 15_000,
+    refetchInterval: METRICS_POLL_MS,
   })
   const snap = query.data ?? null
   return useMemo(() => {
@@ -725,7 +838,7 @@ export function usePluginMetrics(pluginId: string): {
   const query = useQuery({
     queryKey: ["metrics"],
     queryFn: fetchMetrics,
-    refetchInterval: 15_000,
+    refetchInterval: METRICS_POLL_MS,
   })
   const snap = query.data ?? null
   return useMemo(() => {

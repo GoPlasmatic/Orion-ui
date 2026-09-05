@@ -1,11 +1,12 @@
 import { useState } from "react"
-import { Link, useLocation, useSearchParams } from "react-router"
+import { Link, useLocation } from "react-router"
 import { dataApi, type ExtraHeaders } from "@/api/data"
 import { useChannels } from "@/hooks/use-channels"
-import { useTrace, useTraces } from "@/hooks/use-traces"
-import { tracesApi } from "@/api/traces"
-import { firstTaskPayload } from "@/lib/trace-payload"
-import { toastError } from "@/lib/toast-error"
+import { useTrace } from "@/hooks/use-traces"
+import { useLastTraceInput } from "@/hooks/use-last-trace-input"
+import { readStorageJson, writeStorageJson } from "@/lib/storage"
+import { useUrlFilters } from "@/lib/use-url-filters"
+import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { traceStatusBadgeClass } from "@/lib/status"
 import type {
   AsyncSubmitResponse,
@@ -43,6 +44,27 @@ const BODYLESS = new Set(["GET", "HEAD"])
 const isRestChannel = (c: Channel | undefined): c is Channel =>
   !!c?.route_pattern && (c.protocol === "rest" || c.protocol === "http")
 
+/** The verbs a REST channel accepts, upper-cased; every verb when it names none. */
+const allowedMethods = (c: Channel | undefined): string[] => {
+  const declared = (c?.methods ?? []).map((m) => m.toUpperCase())
+  return declared.length > 0 ? declared : REST_METHODS
+}
+
+/**
+ * How a channel seeds the method and path — on first mount, on a pick, on a
+ * deep link. One rule: a REST channel takes its route pattern and its first
+ * verb, unless the link asked for a verb the channel accepts.
+ */
+function restSeed(c: Channel | undefined, asked?: { method?: string; path?: string }) {
+  if (!isRestChannel(c)) return { method: "POST", path: "" }
+  const askedMethod = asked?.method?.toUpperCase()
+  const methods = allowedMethods(c)
+  return {
+    method: askedMethod && methods.includes(askedMethod) ? askedMethod : methods[0],
+    path: asked?.path ?? c.route_pattern ?? "",
+  }
+}
+
 /**
  * Kept in this browser only. Both used to vanish on reload: the request
  * history, and the headers a guarded channel needs — which had nowhere to be
@@ -51,6 +73,9 @@ const isRestChannel = (c: Channel | undefined): c is Channel =>
 const HISTORY_KEY = "orion-console-history"
 const HEADERS_KEY = "orion-console-headers"
 const HISTORY_MAX = 8
+
+/** The console's deep-link vocabulary. */
+const CONSOLE_KEYS = ["channel", "method", "path"] as const
 
 interface HeaderRow {
   key: string
@@ -72,32 +97,15 @@ interface HistoryEntry {
   elapsedMs?: number
 }
 
-function loadJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? (JSON.parse(raw) as T) : fallback
-  } catch {
-    return fallback
-  }
-}
-
-function saveJson(key: string, value: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value))
-  } catch {
-    // Private mode or a full quota: the console still works, it just forgets.
-  }
-}
-
 const loadHeaders = (channel: string): HeaderRow[] =>
-  loadJson<Record<string, HeaderRow[]>>(HEADERS_KEY, {})[channel] ?? []
+  readStorageJson<Record<string, HeaderRow[]>>(HEADERS_KEY, {})[channel] ?? []
 
 function saveHeaders(channel: string, rows: HeaderRow[]) {
   if (!channel) return
-  const store = loadJson<Record<string, HeaderRow[]>>(HEADERS_KEY, {})
+  const store = readStorageJson<Record<string, HeaderRow[]>>(HEADERS_KEY, {})
   if (rows.length === 0) delete store[channel]
   else store[channel] = rows
-  saveJson(HEADERS_KEY, store)
+  writeStorageJson(HEADERS_KEY, store)
 }
 
 function fmtMs(ms: number | undefined): string {
@@ -272,19 +280,16 @@ function TaskErrors({
  * channel was asked for; a bare `/console` mounts at once.
  */
 export function ConsolePage() {
-  const [params, setParams] = useSearchParams()
+  // `?channel=` selects, and `?method=&path=` complete a REST deep link: a
+  // route named by another page lands here ready to send.
+  const { values: requested, set } = useUrlFilters(CONSOLE_KEYS)
   const location = useLocation()
-  const requested = params.get("channel") ?? ""
-  // `?method=&path=` complete a REST deep link: a route named by another
-  // page lands here ready to send.
-  const requestedMethod = params.get("method") ?? undefined
-  const requestedPath = params.get("path") ?? undefined
   const handed = (location.state as { payload?: unknown } | null)?.payload
   const initialPayload =
     handed !== undefined && handed !== null ? JSON.stringify(handed, null, 2) : undefined
-  const { data: channels, isLoading } = useChannels({ limit: 200 })
+  const { data: channels, isLoading } = useChannels({ limit: REGISTRY_LIMIT })
 
-  if (requested && isLoading) {
+  if (requested.channel && isLoading) {
     return (
       <div className="space-y-6">
         <PageHeader title="Data Console" description="Send test requests to channels" />
@@ -296,11 +301,12 @@ export function ConsolePage() {
   return (
     <ConsoleForm
       channels={channels?.data ?? []}
-      initialChannel={requested}
+      initialChannel={requested.channel}
       initialPayload={initialPayload}
-      initialMethod={requestedMethod}
-      initialPath={requestedPath}
-      onChannelChange={(name) => setParams(name ? { channel: name } : {}, { replace: true })}
+      initialMethod={requested.method || undefined}
+      initialPath={requested.path || undefined}
+      // A new channel means a new route: the method and path in the URL were the old one's.
+      onChannelChange={(name) => set({ channel: name, method: "", path: "" })}
     />
   )
 }
@@ -335,17 +341,8 @@ function ConsoleForm({
   const [payload, setPayload] = useState(initialPayload ?? (initial ? SAMPLE_PAYLOAD : "{\n  \n}"))
   const [sync, setSync] = useState(true)
   const [profile, setProfile] = useState(false)
-  const [method, setMethod] = useState(() => {
-    if (!isRestChannel(initial)) return "POST"
-    const allowed = (initial.methods ?? []).map((m) => m.toUpperCase())
-    const asked = initialMethod?.toUpperCase()
-    if (asked && (allowed.length === 0 || allowed.includes(asked))) return asked
-    return allowed[0] ?? "POST"
-  })
-  const [path, setPath] = useState(() =>
-    isRestChannel(initial) ? (initialPath ?? initial.route_pattern ?? "") : "",
-  )
-  const [loadingTrace, setLoadingTrace] = useState(false)
+  const [method, setMethod] = useState(() => restSeed(initial, { method: initialMethod, path: initialPath }).method)
+  const [path, setPath] = useState(() => restSeed(initial, { method: initialMethod, path: initialPath }).path)
   const [headers, setHeaders] = useState<HeaderRow[]>(() => loadHeaders(initial?.name ?? ""))
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ProcessResponse | null>(null)
@@ -354,18 +351,13 @@ function ConsoleForm({
   const [receipt, setReceipt] = useState<AsyncSubmitResponse | null>(null)
   const [elapsedMs, setElapsedMs] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [history, setHistory] = useState<HistoryEntry[]>(() => loadJson<HistoryEntry[]>(HISTORY_KEY, []))
+  const [history, setHistory] = useState<HistoryEntry[]>(() => readStorageJson<HistoryEntry[]>(HISTORY_KEY, []))
 
   const selected = channelList.find((c) => c.name === channel)
   const restMode = isRestChannel(selected)
   // The newest trace through the selected channel: its input is the payload
-  // most worth re-sending. The list row is payload-free; the button fetches
-  // the trace itself when asked.
-  const { data: lastTraces } = useTraces(
-    { channel: channel || undefined, limit: 1, sort_by: "created_at", sort_order: "desc" },
-    { enabled: !!channel },
-  )
-  const lastTraceId = lastTraces?.data[0]?.id
+  // most worth re-sending.
+  const lastTrace = useLastTraceInput(channel || undefined)
   const bodyless = restMode && BODYLESS.has(method)
 
   const profileResult = result?._orion?.profile
@@ -395,9 +387,9 @@ function ConsoleForm({
     if (value && isBlankPayload(payload)) setPayload(SAMPLE_PAYLOAD)
     const next = channelList.find((c) => c.name === value)
     if (isRestChannel(next)) {
-      setPath(next.route_pattern ?? "")
-      const allowed = (next.methods ?? []).map((m) => m.toUpperCase())
-      setMethod(allowed.length > 0 ? allowed[0] : "POST")
+      const seed = restSeed(next)
+      setPath(seed.path)
+      setMethod(seed.method)
       setSync(true)
     }
   }
@@ -413,22 +405,10 @@ function ConsoleForm({
   }
 
   const fillFromLastTrace = async () => {
-    if (!lastTraceId) return
-    setLoadingTrace(true)
-    try {
-      const trace = await tracesApi.get(lastTraceId)
-      const input = firstTaskPayload(trace)
-      if (!input) {
-        setError("The last trace kept no request payload — nothing to reuse")
-        return
-      }
-      setPayload(JSON.stringify(input, null, 2))
-      setError(null)
-    } catch (e) {
-      toastError("Could not read the last trace", e)
-    } finally {
-      setLoadingTrace(false)
-    }
+    const input = await lastTrace.load()
+    if (!input) return
+    setPayload(JSON.stringify(input, null, 2))
+    setError(null)
   }
 
   const formatPayload = () => {
@@ -518,7 +498,7 @@ function ConsoleForm({
           },
           ...prev,
         ].slice(0, HISTORY_MAX)
-        saveJson(HISTORY_KEY, next)
+        writeStorageJson(HISTORY_KEY, next)
         return next
       })
     } catch (e) {
@@ -576,10 +556,7 @@ function ConsoleForm({
                 <div className="w-32">
                   <Label>Method</Label>
                   <Select value={method} onChange={(e) => setMethod(e.target.value)} aria-label="Method">
-                    {((selected?.methods?.length ?? 0) > 0
-                      ? selected!.methods!.map((m) => m.toUpperCase())
-                      : REST_METHODS
-                    ).map((m) => (
+                    {allowedMethods(selected).map((m) => (
                       <option key={m} value={m}>{m}</option>
                     ))}
                   </Select>
@@ -694,17 +671,17 @@ function ConsoleForm({
                     <button
                       type="button"
                       onClick={() => void fillFromLastTrace()}
-                      disabled={!lastTraceId || loadingTrace}
+                      disabled={!lastTrace.lastTraceId || lastTrace.loading}
                       className="flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
                       title={
                         !channel
                           ? "Pick a channel first"
-                          : !lastTraceId
+                          : !lastTrace.lastTraceId
                             ? "No trace has run through this channel yet"
                             : "The newest trace's request, as its first task saw it"
                       }
                     >
-                      <History className="h-3 w-3" /> {loadingTrace ? "Loading…" : "Last trace's input"}
+                      <History className="h-3 w-3" /> {lastTrace.loading ? "Loading…" : "Last trace's input"}
                     </button>
                   </div>
                 </div>
@@ -786,7 +763,7 @@ function ConsoleForm({
                 </span>
                 {traceId && (
                   <Button variant="outline" size="sm" asChild>
-                    <Link to={traceLink(traceId, traceToken).to} state={traceLink(traceId, traceToken).state}>
+                    <Link {...traceLink(traceId, traceToken)}>
                       <ExternalLink className="h-3.5 w-3.5" /> Open as trace
                     </Link>
                   </Button>
@@ -825,7 +802,7 @@ function ConsoleForm({
                     type="button"
                     onClick={() => {
                       setHistory([])
-                      saveJson(HISTORY_KEY, [])
+                      writeStorageJson(HISTORY_KEY, [])
                     }}
                     className="text-xs font-normal text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                   >
@@ -862,8 +839,7 @@ function ConsoleForm({
                     </button>
                     {h.traceId && (
                       <Link
-                        to={traceLink(h.traceId, h.traceToken).to}
-                        state={traceLink(h.traceId, h.traceToken).state}
+                        {...traceLink(h.traceId, h.traceToken)}
                         className="shrink-0 text-muted-foreground hover:text-foreground"
                         aria-label="Open trace"
                       >

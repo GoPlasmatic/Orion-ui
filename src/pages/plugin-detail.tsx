@@ -25,13 +25,8 @@ import { JsonViewer } from "@/components/shared/json-viewer"
 import { ErrorState } from "@/components/shared/error-state"
 import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { pluginHealthBadgeClass } from "@/lib/status"
-import { formatDate, formatDuration } from "@/lib/utils"
+import { formatDate, formatDuration, shortDigest } from "@/lib/utils"
 import { GitBranch, Pencil, ShieldCheck } from "lucide-react"
-
-function shortDigest(digest: string): string {
-  const hex = digest.startsWith("sha256:") ? digest.slice(7) : digest
-  return hex.length > 16 ? `${digest.slice(0, 7 + 12)}…` : digest
-}
 
 /** One manifest function's field table, in the manifest's own vocabulary. */
 function ManifestFunction({ fn }: { fn: PluginManifestFunction }) {

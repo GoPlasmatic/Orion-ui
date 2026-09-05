@@ -13,7 +13,7 @@ import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { formatDate, formatDuration, cn } from "@/lib/utils"
 import { traceStatusBadgeClass, stepResultBadgeClass, stepResultDotClass } from "@/lib/status"
 import { extractSteps, firstTaskPayload } from "@/lib/trace-payload"
-import { toast } from "sonner"
+import { copyText } from "@/lib/clipboard"
 import {
   ChevronDown,
   ChevronLeft,
@@ -192,12 +192,7 @@ export function TraceDetailPage() {
   // input the trace keeps. Re-sending it is how a failure gets reproduced.
   const firstPayload = firstTaskPayload(trace)
   const canResend = !!trace.channel && trace.mode !== "cron" && firstPayload !== null
-  const copyId = () => {
-    navigator.clipboard
-      ?.writeText(trace.id)
-      .then(() => toast.success("Trace id copied"))
-      .catch(() => toast.error("Could not copy the trace id"))
-  }
+  const copyId = () => void copyText(trace.id, "Trace id")
 
   return (
     <div className="space-y-6">

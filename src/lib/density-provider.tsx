@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { DensityContext } from "./density-context"
+import { readStorage, writeStorage } from "@/lib/storage"
 
 /** Provides the table/console density preference, persisted to localStorage. */
 export function DensityProvider({ children }: { children: ReactNode }) {
   const [compact, setCompact] = useState(
-    () => localStorage.getItem("orion-density") === "compact"
+    () => readStorage("orion-density") === "compact"
   )
 
   useEffect(() => {
-    localStorage.setItem("orion-density", compact ? "compact" : "comfortable")
+    writeStorage("orion-density", compact ? "compact" : "comfortable")
   }, [compact])
 
   // Stable identity so density consumers (every table cell) only re-render when it flips.

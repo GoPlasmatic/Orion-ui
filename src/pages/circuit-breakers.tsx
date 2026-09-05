@@ -16,15 +16,10 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { PageHeader } from "@/components/shared/page-header"
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
 import { breakerStateBadgeClass } from "@/lib/status"
+import { breakerRows, isBreakerOpen, type BreakerRow } from "@/lib/breakers"
+import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { cn } from "@/lib/utils"
 import { RefreshCw, RotateCcw } from "lucide-react"
-
-interface BreakerRow {
-  key: string
-  channel: string
-  connector: string
-  state: string
-}
 
 export function CircuitBreakersPage() {
   const queryClient = useQueryClient()
@@ -33,8 +28,8 @@ export function CircuitBreakersPage() {
   const highlighted = params.get("key")
   const scrolled = useRef(false)
   const { data, isLoading } = useCircuitBreakers({ refetchInterval: 15_000 })
-  const { data: connectors } = useConnectors({ limit: 1000 })
-  const { data: channels } = useChannels({ limit: 1000 })
+  const { data: connectors } = useConnectors({ limit: REGISTRY_LIMIT })
+  const { data: channels } = useChannels({ limit: REGISTRY_LIMIT })
   const reset = useResetCircuitBreaker()
   const resetMany = useResetCircuitBreakers()
   const [confirmAll, setConfirmAll] = useState(false)
@@ -51,16 +46,7 @@ export function CircuitBreakersPage() {
     return m
   }, [channels?.data])
 
-  const rows: BreakerRow[] = useMemo(() => {
-    return Object.entries(data?.breakers ?? {})
-      .map(([key, state]) => {
-        const sep = key.indexOf(":")
-        const channel = sep === -1 ? "—" : key.slice(0, sep)
-        const connector = sep === -1 ? key : key.slice(sep + 1)
-        return { key, channel, connector, state }
-      })
-      .sort((a, b) => a.key.localeCompare(b.key))
-  }, [data?.breakers])
+  const rows: BreakerRow[] = useMemo(() => breakerRows(data), [data])
 
   const counts = useMemo(() => {
     const c = { open: 0, half_open: 0, closed: 0 }
@@ -71,7 +57,7 @@ export function CircuitBreakersPage() {
     }
     return c
   }, [rows])
-  const notClosed = rows.filter((r) => r.state !== "closed")
+  const notClosed = rows.filter((r) => isBreakerOpen(r.state))
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["connectors", "circuit-breakers"] })
 
@@ -155,7 +141,7 @@ export function CircuitBreakersPage() {
                             {row.channel}
                           </Link>
                         ) : (
-                          row.channel
+                          row.channel || "—"
                         )}
                       </TableCell>
                       <TableCell className="font-mono text-xs">
@@ -176,7 +162,7 @@ export function CircuitBreakersPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          disabled={reset.isPending || resetMany.isPending || row.state === "closed"}
+                          disabled={reset.isPending || resetMany.isPending || !isBreakerOpen(row.state)}
                           onClick={() => reset.mutate(row.key)}
                         >
                           <RefreshCw className="h-3.5 w-3.5" />

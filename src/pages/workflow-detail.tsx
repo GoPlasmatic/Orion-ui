@@ -1,11 +1,8 @@
 import { useMemo, useState } from "react"
 import { useParams, Link, useNavigate } from "react-router"
 import { useChannels } from "@/hooks/use-channels"
-import { useTraces } from "@/hooks/use-traces"
-import { tracesApi } from "@/api/traces"
-import { firstTaskPayload } from "@/lib/trace-payload"
-import { toastError } from "@/lib/toast-error"
-import { toast } from "sonner"
+import { useLastTraceInput } from "@/hooks/use-last-trace-input"
+import { readStorage, writeStorage } from "@/lib/storage"
 import {
   useWorkflow,
   useWorkflowVersions,
@@ -46,27 +43,6 @@ const dryRunKey = (id: string) => `orion-dryrun-${id}`
 const DIAGRAM_KEY = "orion-workflow-diagram"
 const EMPTY_PAYLOAD = "{\n  \n}"
 
-function loadDryRun(id: string): string | null {
-  try {
-    return localStorage.getItem(dryRunKey(id))
-  } catch {
-    return null
-  }
-}
-function saveDryRun(id: string, text: string) {
-  try {
-    localStorage.setItem(dryRunKey(id), text)
-  } catch {
-    // Private mode: the payload lives in the editor for the session.
-  }
-}
-function loadDiagramHidden(): boolean {
-  try {
-    return localStorage.getItem(DIAGRAM_KEY) === "hidden"
-  } catch {
-    return false
-  }
-}
 
 export function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -87,23 +63,17 @@ export function WorkflowDetailPage() {
     [channelList?.data, id],
   )
   // The newest trace through a channel that runs this workflow — the input a
-  // dry run most plausibly wants. The list row is payload-free; the button
-  // fetches the trace itself when asked.
+  // dry run most plausibly wants.
   const sampleChannel = runsOn.find((c) => c.status === "active") ?? runsOn[0]
-  const { data: lastTraces } = useTraces(
-    { channel: sampleChannel?.name, limit: 1, sort_by: "created_at", sort_order: "desc" },
-    { enabled: !!sampleChannel },
-  )
-  const lastTraceId = lastTraces?.data[0]?.id
+  const lastTrace = useLastTraceInput(sampleChannel?.name)
 
   // Seeded from what this browser last ran here, so a payload survives a
   // reload and a page change; saved again on every run.
-  const [testPayload, setTestPayload] = useState(() => loadDryRun(id ?? "") ?? EMPTY_PAYLOAD)
+  const [testPayload, setTestPayload] = useState(() => readStorage(dryRunKey(id ?? "")) ?? EMPTY_PAYLOAD)
   const [testResult, setTestResult] = useState<WorkflowTestResponse | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
-  const [loadingTrace, setLoadingTrace] = useState(false)
   const [rolloutDraft, setRolloutDraft] = useState<number | null>(null)
-  const [diagramHidden, setDiagramHidden] = useState(loadDiagramHidden)
+  const [diagramHidden, setDiagramHidden] = useState(() => readStorage(DIAGRAM_KEY) === "hidden")
 
   if (isLoading) {
     return (
@@ -137,11 +107,7 @@ export function WorkflowDetailPage() {
   const toggleDiagram = () => {
     const next = !diagramHidden
     setDiagramHidden(next)
-    try {
-      localStorage.setItem(DIAGRAM_KEY, next ? "hidden" : "shown")
-    } catch {
-      // Not remembered; the toggle still works for the session.
-    }
+    writeStorage(DIAGRAM_KEY, next ? "hidden" : "shown")
   }
 
   const handleTest = () => {
@@ -155,7 +121,7 @@ export function WorkflowDetailPage() {
       setTestError("Invalid JSON payload")
       return
     }
-    saveDryRun(workflow.workflow_id, testPayload)
+    writeStorage(dryRunKey(workflow.workflow_id), testPayload)
 
     testWorkflow.mutate(
       { id: workflow.workflow_id, req: { data } },
@@ -168,24 +134,10 @@ export function WorkflowDetailPage() {
 
   /** Fill the editor with the last trace's input, as its first task saw it. */
   const fillFromLastTrace = async () => {
-    if (!lastTraceId) return
-    setLoadingTrace(true)
-    try {
-      const trace = await tracesApi.get(lastTraceId)
-      const payload = firstTaskPayload(trace)
-      if (!payload) {
-        toast.error("That trace kept no request payload", {
-          description: "The run recorded no task step with a message, so there is nothing to reuse.",
-        })
-        return
-      }
-      setTestPayload(JSON.stringify(payload, null, 2))
-      setTestError(null)
-    } catch (e) {
-      toastError("Could not read the trace", e)
-    } finally {
-      setLoadingTrace(false)
-    }
+    const payload = await lastTrace.load()
+    if (!payload) return
+    setTestPayload(JSON.stringify(payload, null, 2))
+    setTestError(null)
   }
 
   return (
@@ -390,17 +342,17 @@ export function WorkflowDetailPage() {
                   <Button
                     variant="outline"
                     onClick={() => void fillFromLastTrace()}
-                    disabled={!lastTraceId || loadingTrace}
+                    disabled={!lastTrace.lastTraceId || lastTrace.loading}
                     title={
                       !sampleChannel
                         ? "No channel runs this workflow yet, so there is no trace to borrow from"
-                        : !lastTraceId
+                        : !lastTrace.lastTraceId
                           ? `No trace has run through ${sampleChannel.name} yet`
                           : `The newest trace through ${sampleChannel.name}, as its first task saw it`
                     }
                   >
                     <History className="h-4 w-4" />
-                    {loadingTrace ? "Loading…" : "Use last trace's input"}
+                    {lastTrace.loading ? "Loading…" : "Use last trace's input"}
                   </Button>
                 </div>
 

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { Link, useNavigate, useSearchParams } from "react-router"
+import { Link, useNavigate } from "react-router"
 import { useCronStatus, useCronOccurrences, useRetryOccurrence } from "@/hooks/use-cron"
 import { useTriggerChannel } from "@/hooks/use-channels"
 import { useHealth } from "@/hooks/use-health"
@@ -21,41 +21,20 @@ import { PaginationFooter } from "@/components/shared/pagination"
 import { EmptyState } from "@/components/shared/empty-state"
 import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
 import { OccurrencesTable } from "@/components/shared/occurrences-table"
-import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
+import { PAGE_SIZE } from "@/lib/use-pagination"
+import { useListState } from "@/lib/use-list-state"
+import { useNow } from "@/lib/use-now"
+import { KpiCard } from "@/components/shared/kpi-card"
+import { ErrorState } from "@/components/shared/error-state"
 import { occurrenceStatusBadgeClass, statusChartColor } from "@/lib/status"
 import { occurrenceStatusLabel } from "@/lib/cron"
-import { formatDate, serverTime, toRfc3339, cn } from "@/lib/utils"
+import { formatDate, formatRelative, serverTime, toRfc3339, cn } from "@/lib/utils"
 import { useTimeZone } from "@/lib/use-time-zone"
 import { CalendarClock, Play, Plus, History } from "lucide-react"
 
 
-function relative(iso: string | null | undefined): string {
-  const at = serverTime(iso)
-  if (at == null) return "—"
-  const diff = at - Date.now()
-  const abs = Math.abs(diff)
-  const unit =
-    abs < 60_000
-      ? `${Math.round(abs / 1000)}s`
-      : abs < 3_600_000
-        ? `${Math.round(abs / 60_000)}m`
-        : abs < 86_400_000
-          ? `${(abs / 3_600_000).toFixed(1)}h`
-          : `${(abs / 86_400_000).toFixed(1)}d`
-  return diff >= 0 ? `in ${unit}` : `${unit} ago`
-}
-
-function Kpi({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: string }) {
-  return (
-    <Card>
-      <CardContent className="py-4">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className={cn("mt-1 text-2xl font-bold tabular-nums", tone)}>{value}</p>
-        {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
-      </CardContent>
-    </Card>
-  )
-}
+/** The ledger's filters, in the URL: a channel page or the map lands here filtered. */
+const LEDGER_KEYS = ["channel_id", "status", "since", "until"] as const
 
 /**
  * Cron channels (Orion 1.6): what is scheduled, when it next fires, and the
@@ -66,15 +45,10 @@ function Kpi({ label, value, hint, tone }: { label: string; value: string; hint?
  */
 export function SchedulesPage() {
   const navigate = useNavigate()
-  const [params, setParams] = useSearchParams()
-  const { offset, reset: resetPage, prev, next } = usePagination()
-  // Seeded from the URL so a channel page or the map can land here filtered.
-  const [channelFilter, setChannelFilter] = useState(() => params.get("channel_id") ?? "")
-  const [statusFilter, setStatusFilter] = useState<CronOccurrenceStatus | "">("")
-  const [since, setSince] = useState("")
-  const [until, setUntil] = useState("")
+  const { filters, update, offset, prev, next } = useListState(LEDGER_KEYS)
+  const now = useNow()
 
-  const { data: status, isLoading: statusLoading, error: statusError } = useCronStatus()
+  const { data: status, isLoading: statusLoading, error: statusError, refetch: refetchStatus } = useCronStatus()
   const { data: health } = useHealth()
   const metrics = useCronMetrics()
   const trigger = useTriggerChannel()
@@ -85,22 +59,13 @@ export function SchedulesPage() {
     {
       limit: PAGE_SIZE,
       offset,
-      channel_id: channelFilter || undefined,
-      status: statusFilter || undefined,
-      since: toRfc3339(since),
-      until: toRfc3339(until),
+      channel_id: filters.channel_id || undefined,
+      status: (filters.status || undefined) as CronOccurrenceStatus | undefined,
+      since: toRfc3339(filters.since),
+      until: toRfc3339(filters.until),
     },
     { refetchInterval: 10_000 },
   )
-
-  function updateChannelFilter(value: string) {
-    setChannelFilter(value)
-    const nextParams = new URLSearchParams(params)
-    if (value) nextParams.set("channel_id", value)
-    else nextParams.delete("channel_id")
-    setParams(nextParams, { replace: true })
-    resetPage()
-  }
 
   const schedules = useMemo(() => status ?? [], [status])
   // The status table sorts in the browser — one row per active cron channel
@@ -166,22 +131,22 @@ export function SchedulesPage() {
 
       {metrics.available && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Kpi
-            label="Pending occurrences"
+          <KpiCard
+            title="Pending occurrences"
             value={metrics.pending == null ? "—" : metrics.pending.toLocaleString()}
             hint="A number that only grows means work is produced faster than it runs"
-            tone={metrics.pending != null && metrics.pending > 0 ? "text-warning" : undefined}
+            valueClass={metrics.pending != null && metrics.pending > 0 ? "text-warning" : undefined}
           />
-          <Kpi
-            label="Schedule lag p95"
+          <KpiCard
+            title="Schedule lag p95"
             value={metrics.lagP95Sec == null ? "—" : `${metrics.lagP95Sec.toFixed(1)}s`}
             hint="How late an occurrence began — the scheduler's core signal"
           />
-          <Kpi
-            label="Lease renewals lost"
+          <KpiCard
+            title="Lease renewals lost"
             value={metrics.leaseRenewalFailures.toLocaleString()}
             hint="Attempts cancelled mid-run; whether their side effects landed is unknowable"
-            tone={metrics.leaseRenewalFailures > 0 ? "text-destructive" : undefined}
+            valueClass={metrics.leaseRenewalFailures > 0 ? "text-destructive" : undefined}
           />
           <Card>
             <CardContent className="py-4">
@@ -216,9 +181,7 @@ export function SchedulesPage() {
         </CardHeader>
         <CardContent>
           {statusError ? (
-            <Callout variant="destructive">
-              {statusError instanceof Error ? statusError.message : "Failed to load schedules"}
-            </Callout>
+            <ErrorState title="Failed to load schedules" error={statusError} onRetry={() => refetchStatus()} />
           ) : statusLoading ? (
             <Skeleton className="h-24 w-full" />
           ) : schedules.length === 0 ? (
@@ -271,7 +234,7 @@ export function SchedulesPage() {
                     </TableCell>
                     <TableCell className="tabular-nums">
                       {s.next_fire_at ? (
-                        <span title={formatDate(s.next_fire_at)}>{relative(s.next_fire_at)}</span>
+                        <span title={formatDate(s.next_fire_at)}>{formatRelative(s.next_fire_at, now) ?? "—"}</span>
                       ) : (
                         <span className="text-muted-foreground" title="The reconciler has not seen the channel yet — it appears within one poll interval of activation">
                           pending
@@ -285,7 +248,7 @@ export function SchedulesPage() {
                             {s.last_status}
                           </Badge>
                           <span className="text-xs text-muted-foreground" title={s.last_scheduled_for ? formatDate(s.last_scheduled_for) : undefined}>
-                            {relative(s.last_completed_at ?? s.last_scheduled_for)}
+                            {formatRelative(s.last_completed_at ?? s.last_scheduled_for, now) ?? "—"}
                           </span>
                         </span>
                       ) : (
@@ -300,7 +263,7 @@ export function SchedulesPage() {
                         <Button
                           variant="ghost"
                           size="xs"
-                          onClick={() => updateChannelFilter(s.channel_id)}
+                          onClick={() => update({ channel_id: s.channel_id })}
                           title="Show this channel's occurrences"
                         >
                           <History /> History
@@ -334,8 +297,8 @@ export function SchedulesPage() {
         </div>
         <FilterBar>
           <Select
-            value={channelFilter}
-            onChange={(e) => updateChannelFilter(e.target.value)}
+            value={filters.channel_id}
+            onChange={(e) => update({ channel_id: e.target.value })}
             className={FILTER_W}
             aria-label="Filter by channel"
           >
@@ -345,16 +308,13 @@ export function SchedulesPage() {
                 {s.channel_name}
               </option>
             ))}
-            {channelFilter && !schedules.some((s) => s.channel_id === channelFilter) && (
-              <option value={channelFilter}>{channelFilter}</option>
+            {filters.channel_id && !schedules.some((s) => s.channel_id === filters.channel_id) && (
+              <option value={filters.channel_id}>{filters.channel_id}</option>
             )}
           </Select>
           <Select
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value as CronOccurrenceStatus | "")
-              resetPage()
-            }}
+            value={filters.status}
+            onChange={(e) => update({ status: e.target.value })}
             className={FILTER_W}
             aria-label="Filter by status"
           >
@@ -367,21 +327,15 @@ export function SchedulesPage() {
           </Select>
           <Input
             type="datetime-local"
-            value={since}
-            onChange={(e) => {
-              setSince(e.target.value)
-              resetPage()
-            }}
+            value={filters.since}
+            onChange={(e) => update({ since: e.target.value })}
             className="w-52"
             aria-label="Scheduled since"
           />
           <Input
             type="datetime-local"
-            value={until}
-            onChange={(e) => {
-              setUntil(e.target.value)
-              resetPage()
-            }}
+            value={filters.until}
+            onChange={(e) => update({ until: e.target.value })}
             className="w-52"
             aria-label="Scheduled until"
           />

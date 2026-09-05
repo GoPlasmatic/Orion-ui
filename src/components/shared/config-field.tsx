@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
+import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 
 /** A titled group of related config fields. */
 export function ConfigSection({
@@ -265,7 +266,7 @@ export function ConnectorField({
   types?: ConnectorType[]
   includeEmpty?: string
 }) {
-  const { data } = useConnectors({ limit: 1000 })
+  const { data } = useConnectors({ limit: REGISTRY_LIMIT })
   const list = (data?.data ?? []).filter((c) => !types || types.includes(c.connector_type))
   const stray = value && !list.some((c) => c.name === value)
   const options = [

@@ -2,35 +2,33 @@ import { useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router"
 import { useChannels, useImportChannels } from "@/hooks/use-channels"
 import { useHealth } from "@/hooks/use-health"
+import { useExport } from "@/hooks/use-export"
 import { ImportDialog } from "@/components/shared/import-dialog"
-import type { CreateChannelRequest, SortOrder } from "@/api/types"
-import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
-import { activatableRow, listTableFeatures, ROW_ACTIVATABLE } from "@/lib/table"
-import { useUrlFilters, nextSort } from "@/lib/use-url-filters"
+import type { CreateChannelRequest } from "@/api/types"
+import { useTable, createColumnHelper } from "@tanstack/react-table"
+import { listTableFeatures } from "@/lib/table"
+import { useListState } from "@/lib/use-list-state"
 import type { Channel, EntityStatus, ChannelProtocol, ChannelType } from "@/api/types"
-import { Table, TableHeader, TableBody, TableRow, TableCell } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { toast } from "sonner"
 import { channelsApi } from "@/api/channels"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
-import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
+import { PAGE_SIZE } from "@/lib/use-pagination"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { EmptyState } from "@/components/shared/empty-state"
+import { EntityTable } from "@/components/shared/entity-table"
 import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
-import { SortableHead } from "@/components/shared/sortable-head"
 import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
 import { cronTransport } from "@/lib/cron"
 import { CalendarClock, Download, Plus, Radio, Upload } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, Channel>()
 
-/** Filters and sort, all in the URL so a filtered list is a link. */
-const FILTER_KEYS = ["status", "protocol", "type", "tag", "sort", "order"] as const
+/** Filters in the URL so a filtered list is a link; sort and page ride along. */
+const FILTER_KEYS = ["status", "protocol", "type", "tag"] as const
 
 /** Column id → the server's `sort_by` field; the rest are not sortable. */
 const SORT_FIELDS: Record<string, string> = {
@@ -157,22 +155,12 @@ function buildColumns(quarantined: ReadonlyMap<string, string>) {
 
 export function ChannelsPage() {
   const navigate = useNavigate()
-  const { offset, reset: resetPage, prev, next } = usePagination()
-  const { values: filters, set } = useUrlFilters(FILTER_KEYS)
+  const { filters, update, sortQuery, sort, offset, prev, next } = useListState(FILTER_KEYS, SORT_FIELDS)
   const statusFilter = filters.status as EntityStatus | ""
   const protocolFilter = filters.protocol as ChannelProtocol | ""
   const typeFilter = filters.type as ChannelType | ""
-  const sortBy = SORT_FIELDS[filters.sort] ? filters.sort : ""
-  const sortOrder = (filters.order === "asc" || filters.order === "desc" ? filters.order : "") as SortOrder | ""
   const [showImport, setShowImport] = useState(false)
-  const [exporting, setExporting] = useState(false)
   const { data: health } = useHealth()
-
-  // Any filter change re-anchors paging to the first page.
-  const update = (patch: Partial<Record<(typeof FILTER_KEYS)[number], string>>) => {
-    set(patch)
-    resetPage()
-  }
 
   const quarantined = useMemo(
     () => new Map((health?.channels?.quarantined ?? []).map((q) => [q.channel, q.reason ?? ""])),
@@ -180,36 +168,22 @@ export function ChannelsPage() {
   )
   const columns = useMemo(() => buildColumns(quarantined), [quarantined])
 
-  // Export honours the active filters, and emits the shape /import accepts.
-  const handleExport = async () => {
-    setExporting(true)
-    try {
-      const channels = await channelsApi.export({
-        status: statusFilter || undefined,
-        protocol: protocolFilter || undefined,
-        channel_type: typeFilter || undefined,
-        tag: filters.tag || undefined,
-      })
-      downloadJson(channels, "orion-channels")
-      toast.success(`Exported ${channels.length} channel${channels.length !== 1 ? "s" : ""}`)
-    } catch (e) {
-      toast.error("Export failed", { description: e instanceof Error ? e.message : undefined })
-    } finally {
-      setExporting(false)
-    }
-  }
-  const importChannels = useImportChannels()
-
-  const { data, isLoading } = useChannels({
-    limit: PAGE_SIZE,
-    offset,
+  const query = {
     status: statusFilter || undefined,
     protocol: protocolFilter || undefined,
     channel_type: typeFilter || undefined,
     tag: filters.tag || undefined,
-    sort_by: sortBy || undefined,
-    sort_order: sortBy ? sortOrder || undefined : undefined,
+  }
+
+  // Export honours the active filters, and emits the shape /import accepts.
+  const exportAll = useExport(async () => {
+    const channels = await channelsApi.export(query)
+    downloadJson(channels, "orion-channels")
+    return `Exported ${channels.length} channel${channels.length !== 1 ? "s" : ""}`
   })
+  const importChannels = useImportChannels()
+
+  const { data, isLoading } = useChannels({ limit: PAGE_SIZE, offset, ...query, ...sortQuery })
 
   const table = useTable({
     features: listTableFeatures,
@@ -220,9 +194,9 @@ export function ChannelsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Channels" description="Manage service endpoints and routing">
-        <Button variant="outline" onClick={handleExport} disabled={exporting}>
+        <Button variant="outline" onClick={exportAll.run} disabled={exportAll.pending}>
           <Download className="h-4 w-4" />
-          {exporting ? "Exporting..." : "Export"}
+          {exportAll.pending ? "Exporting..." : "Export"}
         </Button>
         <Button variant="outline" onClick={() => setShowImport(true)}>
           <Upload className="h-4 w-4" />
@@ -287,75 +261,29 @@ export function ChannelsPage() {
         />
       </FilterBar>
 
-      <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => {
-                  const field = SORT_FIELDS[header.column.id]
-                  return (
-                    <SortableHead
-                      key={header.id}
-                      field={field}
-                      sort={sortBy}
-                      order={sortOrder}
-                      onSort={field ? () => update(nextSort({ sort: sortBy, order: sortOrder }, field, field === "updated_at")) : undefined}
-                    >
-                      {flexRender(header.column.columnDef.header, header.getContext())}
-                    </SortableHead>
-                  )
-                })}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                <TableRow key={i}>
-                  {columns.map((_, j) => (
-                    <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : table.getRowModel().rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={columns.length} className="p-0">
-                  <EmptyState
-                    icon={Radio}
-                    title="No channels yet"
-                    description="Channels are the service endpoints that receive requests and run a workflow. Create your first one or import existing definitions."
-                    action={
-                      <>
-                        <Button variant="outline" onClick={() => setShowImport(true)}>
-                          <Upload className="h-4 w-4" /> Import
-                        </Button>
-                        <Button onClick={() => navigate("/channels/new")}>
-                          <Plus className="h-4 w-4" /> Create Channel
-                        </Button>
-                      </>
-                    }
-                  />
-                </TableCell>
-              </TableRow>
-            ) : (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  className={ROW_ACTIVATABLE}
-                  {...activatableRow(() => navigate(`/channels/${row.original.channel_id}`))}
-                >
-                  {row.getAllCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      <EntityTable
+        table={table}
+        isLoading={isLoading}
+        sort={sort}
+        onOpen={(channel) => navigate(`/channels/${channel.channel_id}`)}
+        empty={
+          <EmptyState
+            icon={Radio}
+            title="No channels yet"
+            description="Channels are the service endpoints that receive requests and run a workflow. Create your first one or import existing definitions."
+            action={
+              <>
+                <Button variant="outline" onClick={() => setShowImport(true)}>
+                  <Upload className="h-4 w-4" /> Import
+                </Button>
+                <Button onClick={() => navigate("/channels/new")}>
+                  <Plus className="h-4 w-4" /> Create Channel
+                </Button>
+              </>
+            }
+          />
+        }
+      />
 
       <PaginationFooter
         offset={offset}

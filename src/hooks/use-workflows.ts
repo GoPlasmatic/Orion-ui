@@ -1,3 +1,4 @@
+import { useMemo } from "react"
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { toastError } from "@/lib/toast-error"
@@ -73,6 +74,20 @@ export function useWorkflowVersions(id: string) {
     queryFn: () => workflowsApi.listVersions(id),
     enabled: !!id,
   })
+}
+
+/**
+ * The version that runs: the active one, or the newest when none is active.
+ * `useWorkflow(id)` answers the *latest* version, which is the draft while
+ * one is open — the wrong witness for what a retry or a requeue will execute.
+ */
+export function useActiveWorkflow(id: string) {
+  const versions = useWorkflowVersions(id)
+  const workflow = useMemo(() => {
+    const rows = versions.data?.data ?? []
+    return rows.find((w) => w.status === "active") ?? [...rows].sort((a, b) => b.version - a.version)[0] ?? null
+  }, [versions.data])
+  return { workflow, isLoading: versions.isLoading }
 }
 
 export function useChangeWorkflowStatus() {
