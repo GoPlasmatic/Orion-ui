@@ -315,7 +315,7 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 - **`src/lib/use-pagination.ts`** — `usePagination()` + `PAGE_SIZE`, paired with `PaginationFooter`. Lives in `lib/` because the fast-refresh lint rule forbids non-component exports from component files.
 - **`src/lib/time-zone.ts`** + `time-zone-provider.tsx` / `use-time-zone.ts` — the display
   zone (`local` | `utc`, `localStorage["orion-timezone"]`), chosen on Engine → Display (the card
-  also holds theme, incl. "Follow the system", and density). A module variable is what
+  also holds theme, incl. "Follow the system"). A module variable is what
   `formatDate` reads, so non-React code sees the same value; the provider is what re-renders on
   a change. Every absolute time in the app goes through `formatDate`, which is how one
   preference reaches every page.
@@ -530,7 +530,7 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
 /console            -> ConsolePage (?channel=<name> preselects it and seeds its REST route)
 /packages           -> PackagesPage (read-only)
 /engine             -> EnginePage (#component-<name> scrolls the health report to that row;
-                                   the Display card: theme, time zone, density)
+                                   the Display card: theme, time zone)
 /settings           -> redirect to /engine, keeping search and hash (the page's name until 2026-09-05)
 *                   -> NotFoundPage
 ```
@@ -620,7 +620,7 @@ Server-side offset/limit pagination via `usePagination()` + `PaginationFooter`. 
   both with the absolute `formatDate()` in the element's `title`. Every absolute time goes
   through `formatDate` — `toLocaleString` by hand bypasses the zone preference.
 - **Per-browser preferences** live in `localStorage`, never the server: `orion-timezone`,
-  `orion-sidebar`, `orion-getting-started-dismissed`, the theme and density keys, the
+  `orion-sidebar`, `orion-getting-started-dismissed`, the theme key, the
   console's history and headers, the palette's recents (`orion-palette-recent`), a workflow's
   last dry-run payload (`orion-dryrun-<id>`) and whether its diagram is folded
   (`orion-workflow-diagram`), all through `lib/storage.ts`, so a page renders correctly when

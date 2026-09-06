@@ -16,7 +16,6 @@ import type { ReactElement } from "react"
 import { render, screen, cleanup } from "@testing-library/react"
 import { MemoryRouter } from "react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { DensityProvider } from "@/lib/density-provider"
 import { ThemeProvider } from "@/lib/theme-provider"
 import { TimeZoneProvider } from "@/lib/time-zone-provider"
 import type {
@@ -155,9 +154,7 @@ function renderPage(ui: ReactElement) {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
         <ThemeProvider>
-          <DensityProvider>
-            <TimeZoneProvider>{ui}</TimeZoneProvider>
-          </DensityProvider>
+          <TimeZoneProvider>{ui}</TimeZoneProvider>
         </ThemeProvider>
       </MemoryRouter>
     </QueryClientProvider>

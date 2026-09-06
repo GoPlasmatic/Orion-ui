@@ -3,8 +3,8 @@
  * a read that answers `null` and a write that does nothing when the accessor
  * throws (a private window, blocked site data, a full quota), so the page
  * renders and the choice lasts for the session. Every preference — theme,
- * density, time zone, the sidebar, the console's history and headers, the
- * palette's recents, a dry-run payload — goes through here rather than
+ * time zone, the sidebar, the console's history and headers, the palette's
+ * recents, a dry-run payload — goes through here rather than
  * wrapping its own try/catch.
  */
 export function readStorage(key: string): string | null {

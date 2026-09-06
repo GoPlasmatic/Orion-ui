@@ -10,7 +10,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster } from "sonner"
 import { ThemeProvider } from "@/lib/theme-provider"
 import { useTheme } from "@/lib/use-theme"
-import { DensityProvider } from "@/lib/density-provider"
 import { TimeZoneProvider } from "@/lib/time-zone-provider"
 import { AppLayout } from "@/components/layout/app-layout"
 import { OperationsPage } from "@/pages/operations"
@@ -109,14 +108,12 @@ function ThemedToaster() {
 export default function App() {
   return (
     <ThemeProvider>
-      <DensityProvider>
       <TimeZoneProvider>
-      <QueryClientProvider client={queryClient}>
-        <ThemedToaster />
-        <RouterProvider router={router} />
-      </QueryClientProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThemedToaster />
+          <RouterProvider router={router} />
+        </QueryClientProvider>
       </TimeZoneProvider>
-      </DensityProvider>
     </ThemeProvider>
   )
 }

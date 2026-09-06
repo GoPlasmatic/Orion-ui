@@ -115,7 +115,7 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 | **Data Console** | Send test requests to any channel — including REST-routed channels by method and path — with optional profiling |
 | **Health** | The whole `/health` report, component by component, with the admin-only detail — background tasks, plugin loads, the scheduler's own numbers — and what each degraded state means |
 | **Backups** | Create and list database backups from Engine (SQLite) |
-| **Polish** | Command palette (⌘K, or `?`), `g` + key page shortcuts, light/dark/system themes, density modes, times in local or UTC, a collapsible sidebar and a drawer on narrow screens, a first-run checklist, empty states, import wizards, unsaved-changes guard on every form |
+| **Polish** | Command palette (⌘K, or `?`), `g` + key page shortcuts, light/dark/system themes, times in local or UTC, a collapsible sidebar and a drawer on narrow screens, a first-run checklist, empty states, import wizards, unsaved-changes guard on every form |
 
 ## Pages
 
@@ -187,7 +187,7 @@ src/
 │   ├── layout/     # App shell (sidebar, header, command palette)
 │   ├── graph/      # Topology and relationship graphs
 │   └── traces/     # Trace analytics and detail views
-└── lib/            # Utilities, theme/density providers, topology builders
+└── lib/            # Utilities, theme and time-zone providers, topology builders
 ```
 
 ## Built With

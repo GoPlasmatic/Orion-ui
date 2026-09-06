@@ -4,10 +4,8 @@ import { useReloadConnectors } from "@/hooks/use-connectors"
 import { useBackups, useCreateBackup } from "@/hooks/use-backup"
 import { useHealth } from "@/hooks/use-health"
 import { useTheme } from "@/lib/use-theme"
-import { useDensity } from "@/lib/use-density"
 import { useTimeZone } from "@/lib/use-time-zone"
 import { Select } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -24,7 +22,7 @@ import { RefreshCw, Archive, Database, HeartPulse, Monitor, Plug } from "lucide-
  * The instance: its health report, the engine and connector reloads, backups
  * and the API reference. Named "Settings" until 2026-09-05, which sent
  * operators looking for health to a page whose name promised preferences;
- * theme and density live in the header.
+ * the theme toggle lives in the header.
  */
 export function EnginePage() {
   const { data: engine } = useEngineStatus()
@@ -38,7 +36,6 @@ export function EnginePage() {
   const createBackup = useCreateBackup()
   const { data: health } = useHealth()
   const { theme, setTheme } = useTheme()
-  const { compact, setCompact } = useDensity()
   const { zone, setZone, label: zoneLabel, localName } = useTimeZone()
 
   return (
@@ -76,9 +73,9 @@ export function EnginePage() {
         </CardContent>
       </Card>
 
-      {/* Display preferences. The header toggles theme and density too; this
-          is where all three are named, and the only place "system" theme and
-          the display zone can be chosen. */}
+      {/* Display preferences. The header toggles the theme too; this is
+          where both are named, and the only place "system" theme and the
+          display zone can be chosen. */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -88,7 +85,7 @@ export function EnginePage() {
             How this browser shows the console. Kept in this browser only.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-3">
+        <CardContent className="grid gap-4 sm:grid-cols-2">
           <div>
             <Label htmlFor="display-theme">Theme</Label>
             <Select
@@ -116,14 +113,6 @@ export function EnginePage() {
               <option value="local">Local time</option>
               <option value="utc">UTC</option>
             </Select>
-          </div>
-          <div>
-            <Label htmlFor="display-density" hint="Tighter rows in every table.">
-              Compact tables
-            </Label>
-            <div className="pt-1.5">
-              <Switch id="display-density" checked={compact} onCheckedChange={setCompact} aria-label="Compact tables" />
-            </div>
           </div>
         </CardContent>
       </Card>

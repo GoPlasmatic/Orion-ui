@@ -2,12 +2,11 @@ import { Link } from "react-router"
 import { useHealth } from "@/hooks/use-health"
 import { useCircuitBreakers } from "@/hooks/use-connectors"
 import { useTheme } from "@/lib/use-theme"
-import { useDensity } from "@/lib/use-density"
 import { useTimeZone } from "@/lib/use-time-zone"
 import { isComponentFault } from "@/lib/status"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Globe, Menu, Moon, Rows2, Rows3, Search, Sun } from "lucide-react"
+import { Globe, Menu, Moon, Search, Sun } from "lucide-react"
 
 type EngineState = "healthy" | "degraded" | "unreachable" | "checking"
 
@@ -39,7 +38,6 @@ export function Header({
   // dashboard's own poll refreshes the shared key whenever it is open.
   const { data: breakers } = useCircuitBreakers()
   const { resolvedTheme, setTheme } = useTheme()
-  const { compact, setCompact } = useDensity()
 
   const faults = Object.entries(health?.components ?? {})
     .filter(([, state]) => isComponentFault(state))
@@ -100,16 +98,6 @@ export function Header({
           </Link>
         )}
         <div className="flex items-center rounded-md border bg-background/50 p-0.5">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => setCompact(!compact)}
-            className="text-muted-foreground"
-            aria-label={compact ? "Switch to comfortable density" : "Switch to compact density"}
-            title={compact ? "Comfortable density" : "Compact density"}
-          >
-            {compact ? <Rows2 /> : <Rows3 />}
-          </Button>
           <Button
             variant="ghost"
             size="icon-sm"
