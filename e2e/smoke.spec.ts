@@ -237,10 +237,16 @@ test("archiving the cron channel stops it", async ({ page }) => {
 test("the plugins page renders and the upload form validates server-side", async ({ page }) => {
   await page.goto("/plugins")
   // A fresh CI container has none; a developer's server may hold some. Either
-  // way the page must land on one of its two shapes, never on a blank.
-  await expect(
-    page.getByText("No plugins yet").or(page.getByRole("columnheader", { name: "Plugin" }))
-  ).toBeVisible()
+  // way the page must land on its table, never on a blank or an error. The
+  // header row is drawn in every table state and the empty state sits inside
+  // the table beneath it, so the two are not alternatives: asserting one *or*
+  // the other matched both once the list had settled (a strict-mode
+  // violation) and passed only when the assertion polled first.
+  await expect(page.getByRole("columnheader", { name: "Plugin" })).toBeVisible()
+  // The list settled: the row below the header carries text — "No plugins yet"
+  // on a fresh server, the first plugin on a developer's — where a skeleton
+  // row carries none.
+  await expect(page.getByRole("row", { name: /\S/ }).nth(1)).toBeVisible()
 
   await page.goto("/plugins/new")
   // The seeded manifest names no component: the client asks for one before
