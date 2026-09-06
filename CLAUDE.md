@@ -19,6 +19,12 @@ npm run generate:api # Patch + regenerate src/api/schema.d.ts from contracts/ope
 npm run check:contract # Fail if schema.d.ts is stale relative to the vendored spec
 ```
 
+Two version pins in `package.json` are deliberate. `typescript` is held at `~5.9`: 7.x is the
+native compiler and ships no JS compiler API (`lib/typescript.js`), which `typescript-eslint`
+and `openapi-typescript` both need — their peer ranges (`<6.1` and `^5`) refuse 6.x/7.x, so an
+install with either fails. `@xyflow/react` is pinned *exactly* to the version
+`@goplasmatic/dataflow-ui` pins exactly; see Visualization Libraries.
+
 ## Server contract
 
 `contracts/openapi.json` is the vendored copy of the server's OpenAPI 3.1 spec (source:
@@ -551,6 +557,10 @@ Dev server proxies `/api`, `/health`, `/healthz`, `/readyz`, `/metrics` to `proc
 
 - **`@goplasmatic/dataflow-ui`** — `WorkflowVisualizer` renders workflow task pipelines with tree/flow/graph views and optional debug tracing. CSS imported in `main.tsx`.
 - **`@goplasmatic/datalogic-ui`** — `DataLogicEditor` renders JSONLogic expressions as interactive flow diagrams. Read-only (`editable={false}`) in viewers; editable with `onChange` in the workflow form's condition editor and the channel config's validation / key-logic / JWT authorization-logic fields (via the shared `LogicField` in `config-field.tsx`). CSS imported in `main.tsx`.
+- **`@xyflow/react`** is pinned exactly (no caret) to the version `@goplasmatic/dataflow-ui`
+  declares as an *exact* dependency. A root range that resolves past it makes npm nest a
+  second copy under dataflow-ui and the `react-flow` chunk doubles (178 kB → 301 kB). When
+  dataflow-ui moves, move the pin with it; `npm ls @xyflow/react` must show one copy.
 - **CodeMirror 6** (`codemirror`, `@codemirror/*`, `@lezer/*`) — the JSON editor behind
   `shared/json-editor.tsx`; see `lib/editor-types.ts`. Themed through the CSS variables in
   `json-editor-view.tsx` (never a bundled theme), split into its own chunk by `vite.config.ts`.
