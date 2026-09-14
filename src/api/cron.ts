@@ -22,12 +22,35 @@ import type {
  * because that is what it acts on, and it goes through the same claim and
  * singleton path a scheduled occurrence does.
  */
+
+/**
+ * `since` / `until` on this endpoint are `chrono::NaiveDateTime` — and unlike
+ * the audit plane's `start_time`/`end_time`, which accept either spelling, the
+ * deserializer here refuses a trailing zone or fraction outright:
+ * `2026-09-13T03:00:00.000Z` answers 400 `since: trailing input`, and only
+ * `2026-09-13T03:00:00` is taken.
+ *
+ * Every value the app has is a UTC instant from `Date.toISOString()` or
+ * `toRfc3339()`, so the trim happens here, at the one boundary that needs it,
+ * rather than in each caller — a caller that forgot produced a silently empty
+ * result, not a visible error.
+ */
+function toNaiveUtc(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?Z?$/.exec(value)
+  return match ? match[1] : value
+}
+
 export const cronApi = {
   // Newest first. Summaries only — an occurrence carries no payload, so this
   // is for readability rather than cost.
-  listOccurrences: (params: ListCronOccurrencesParams = {}) =>
+  listOccurrences: ({ since, until, ...rest }: ListCronOccurrencesParams = {}) =>
     api.get<PaginatedResponse<CronOccurrenceSummary>>(
-      `admin/cron/occurrences${buildQuery(params as Record<string, string | number | undefined>)}`
+      `admin/cron/occurrences${buildQuery({
+        ...rest,
+        since: toNaiveUtc(since),
+        until: toNaiveUtc(until),
+      } as Record<string, string | number | undefined>)}`
     ),
 
   getOccurrence: (id: string) =>
