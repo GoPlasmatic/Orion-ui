@@ -33,6 +33,9 @@ import { PackagesPage } from "@/pages/packages"
 import { PluginsPage } from "@/pages/plugins"
 import { PluginDetailPage } from "@/pages/plugin-detail"
 import { PluginFormPage } from "@/pages/plugin-form"
+import { ModelsPage } from "@/pages/models"
+import { ModelDetailPage } from "@/pages/model-detail"
+import { ModelFormPage } from "@/pages/model-form"
 import { SchedulesPage } from "@/pages/schedules"
 import { OccurrenceDetailPage } from "@/pages/occurrence-detail"
 import { EnginePage } from "@/pages/engine"
@@ -79,6 +82,10 @@ const router = createBrowserRouter(
       <Route path="plugins/new" element={<PluginFormPage />} />
       <Route path="plugins/:id" element={<PluginDetailPage />} />
       <Route path="plugins/:id/edit" element={<PluginFormPage />} />
+      <Route path="models" element={<ModelsPage />} />
+      <Route path="models/new" element={<ModelFormPage />} />
+      <Route path="models/:id" element={<ModelDetailPage />} />
+      <Route path="models/:id/edit" element={<ModelFormPage />} />
       <Route path="connectors" element={<ConnectorsPage />} />
       <Route path="connectors/new" element={<ConnectorFormPage />} />
       <Route path="connectors/:id" element={<ConnectorDetailPage />} />

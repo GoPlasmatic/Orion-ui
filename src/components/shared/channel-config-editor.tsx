@@ -1,8 +1,15 @@
+import type { ReactNode } from "react"
 import { BUILTIN_KEY_HEADERS } from "@/api/types"
-import type { ChannelConfig, ChannelProtocol, JsonLogicValue } from "@/api/types"
+import type {
+  ChannelConfig,
+  ChannelProtocol,
+  JsonLogicValue,
+  RateLimitConfig,
+} from "@/api/types"
 import { useTheme } from "@/lib/use-theme"
 import { CRON_REFUSED_CONFIG_KEYS } from "@/lib/cron"
 import { ConfigEditorShell } from "@/components/shared/config-editor-shell"
+import { Button } from "@/components/ui/button"
 import { ChannelAuthEditor } from "@/components/shared/channel-auth-editor"
 import { OAuth2LoginEditor } from "@/components/shared/oauth2-login-editor"
 import { Callout } from "@/components/ui/callout"
@@ -95,6 +102,94 @@ function findUndeclaredKeyHeaders(
  * single source of truth; the JSON view edits the same object and syncs back on
  * every valid parse. Empty sub-objects are pruned so unset config keys stay unset.
  */
+/**
+ * A key expression reading a header the key context does not carry. Since 1.1
+ * that is refused with a 429 on every request rather than silently collapsing
+ * every caller into one bucket — the same rule for both limiters, so one
+ * sentence for both.
+ */
+function UndeclaredHeaders({ headers }: { headers: string[] }) {
+  if (headers.length === 0) return null
+  return (
+    <Callout variant="destructive" icon={false} className="px-3 py-2 text-xs">
+      Key logic reads {headers.map((h) => `"${h}"`).join(", ")}, which is not in the key context.
+      Every request will be refused with 429 until the header is added to Key headers.
+    </Callout>
+  )
+}
+
+/**
+ * The controls a `RateLimitConfig` takes. Both limiters are the same block —
+ * `rate_limit` keyed on the address before authentication, and
+ * `principal_rate_limit` keyed on the verified claims after it — so they are
+ * one component, and anything the server adds to the shape is wired once.
+ *
+ * The key-logic caption differs substantively between the two (what the
+ * context holds, whether a key is required), so it arrives as `children`
+ * rather than being flattened into a prop string.
+ */
+function RateLimitFields({
+  configKey,
+  limit,
+  starter,
+  theme,
+  setSub,
+  alwaysShowHeaders,
+  children,
+}: {
+  configKey: "rate_limit" | "principal_rate_limit"
+  limit: RateLimitConfig
+  starter: JsonLogicValue
+  theme: "light" | "dark"
+  setSub: (key: "rate_limit" | "principal_rate_limit", field: string, val: unknown) => void
+  /** The principal limiter requires a key, so its headers list is always offered. */
+  alwaysShowHeaders?: boolean
+  children: ReactNode
+}) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-4">
+        <NumberField
+          label="Requests / second"
+          unit="req/s"
+          value={limit.requests_per_second}
+          onChange={(v) => setSub(configKey, "requests_per_second", v)}
+        />
+        <NumberField
+          label="Burst"
+          value={limit.burst}
+          onChange={(v) => setSub(configKey, "burst", v)}
+        />
+      </div>
+      <SelectField
+        label="On backend error"
+        value={limit.on_backend_error}
+        onChange={(v) => setSub(configKey, "on_backend_error", v)}
+        options={BACKEND_FAILURE_MODES}
+        includeEmpty="Allow (default)"
+      />
+      <div>
+        {children}
+        <LogicField
+          logic={limit.key_logic}
+          onChange={(v) => setSub(configKey, "key_logic", v)}
+          addLabel="Add key logic"
+          starter={starter}
+          theme={theme}
+        />
+      </div>
+      {(alwaysShowHeaders || limit.key_logic !== undefined) && (
+        <StringListField
+          label="Key headers"
+          value={limit.key_headers}
+          onChange={(v) => setSub(configKey, "key_headers", v)}
+          placeholder="device-id, x-partner-id"
+        />
+      )}
+    </>
+  )
+}
+
 export function ChannelConfigEditor({ value, onChange, protocol }: ChannelConfigEditorProps) {
   const { resolvedTheme } = useTheme()
   const isCron = protocol === "cron"
@@ -124,6 +219,7 @@ export function ChannelConfigEditor({ value, onChange, protocol }: ChannelConfig
   }
 
   const rateLimit = value.rate_limit ?? {}
+  const principalLimit = value.principal_rate_limit
   const backpressure = value.backpressure ?? {}
   const request = value.request ?? {}
   const response = value.response ?? {}
@@ -138,6 +234,17 @@ export function ChannelConfigEditor({ value, onChange, protocol }: ChannelConfig
     rateLimit.key_logic,
     rateLimit.key_headers
   )
+  // The principal limiter's context is the address limiter's plus `auth`, so a
+  // header it reads has to be declared the same way.
+  const undeclaredPrincipalHeaders = findUndeclaredKeyHeaders(
+    principalLimit?.key_logic,
+    principalLimit?.key_headers
+  )
+  // Both are refused at create, not at run time, so saying so here saves a
+  // round trip — and the second one is the subtler mistake: a quota keyed on
+  // nothing would be a per-address limit wearing a per-user label.
+  const principalNeedsJwt = !!principalLimit && value.auth?.mode !== "jwt"
+  const principalNeedsKeyLogic = !!principalLimit && principalLimit.key_logic == null
 
   if (isCron) {
     return (
@@ -248,55 +355,105 @@ export function ChannelConfigEditor({ value, onChange, protocol }: ChannelConfig
         )}
 
         <ConfigSection title="Rate limiting" description="Throttle inbound requests.">
-            <div className="grid grid-cols-2 gap-4">
-              <NumberField
-                label="Requests / second"
-                unit="req/s"
-                value={rateLimit.requests_per_second}
-                onChange={(v) => setSub("rate_limit", "requests_per_second", v)}
-              />
-              <NumberField
-                label="Burst"
-                value={rateLimit.burst}
-                onChange={(v) => setSub("rate_limit", "burst", v)}
-              />
-            </div>
-            <SelectField
-              label="On backend error"
-              value={rateLimit.on_backend_error}
-              onChange={(v) => setSub("rate_limit", "on_backend_error", v)}
-              options={BACKEND_FAILURE_MODES}
-              includeEmpty="Allow (default)"
-            />
-            <div>
+            <RateLimitFields
+              configKey="rate_limit"
+              limit={rateLimit}
+              starter={{ var: "client_ip" }}
+              theme={resolvedTheme}
+              setSub={setSub}
+            >
               <p className="mb-1 text-sm font-medium">Key logic</p>
               <p className="mb-2 text-xs text-muted-foreground">
                 JSONLogic over {"{client_ip, channel, headers}"} that derives the rate-limit
                 bucket key — e.g. per API key or per tenant. Unset limits per caller identity.
               </p>
-              <LogicField
-                logic={rateLimit.key_logic}
-                onChange={(v) => setSub("rate_limit", "key_logic", v)}
-                addLabel="Add key logic"
-                starter={{ var: "client_ip" }}
-                theme={resolvedTheme}
-              />
-            </div>
-            {rateLimit.key_logic !== undefined && (
-              <StringListField
-                label="Key headers"
-                value={rateLimit.key_headers}
-                onChange={(v) => setSub("rate_limit", "key_headers", v)}
-                placeholder="device-id, x-partner-id"
-              />
+            </RateLimitFields>
+            <UndeclaredHeaders headers={undeclaredKeyHeaders} />
+          </ConfigSection>
+
+          <ConfigSection
+            title="Per-principal quota"
+            description="A second limit, applied after authentication and keyed on the verified caller."
+          >
+            <Callout variant="muted" icon={false} className="px-3 py-2 text-xs">
+              Rate limiting above runs <em>before</em> authentication — so it can only key on the
+              address or a caller-supplied header, which bounds an honest client rather than
+              metering a user. This block runs straight after authentication, on the verified
+              claims. Both apply and keep separate buckets; the address limit stays the cheap
+              outer guard. HTTP sync and async only — Kafka, channel calls and cron carry no
+              credential to key on.
+            </Callout>
+
+            {!principalLimit ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setTop("principal_rate_limit", { key_logic: { var: "auth.sub" } })
+                }
+              >
+                Add a per-principal quota
+              </Button>
+            ) : (
+              <>
+                <RateLimitFields
+                  configKey="principal_rate_limit"
+                  limit={principalLimit}
+                  starter={{ var: "auth.sub" }}
+                  theme={resolvedTheme}
+                  setSub={setSub}
+                  alwaysShowHeaders
+                >
+                  <p className="mb-1 text-sm font-medium">
+                    Key logic <span className="text-destructive">*</span>
+                  </p>
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    JSONLogic over {"{client_ip, channel, headers, auth}"}, where{" "}
+                    <code className="font-mono">auth</code> is the verified claims —{" "}
+                    <code className="font-mono">{'{"var": "auth.sub"}'}</code> meters a user,{" "}
+                    <code className="font-mono">
+                      {'{"cat": [{"var": "auth.tenant"}, "|", {"var": "auth.sub"}]}'}
+                    </code>{" "}
+                    a tenant and a user together. Required: there is no fallback for a principal.
+                  </p>
+                </RateLimitFields>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setTop("principal_rate_limit", undefined)}
+                >
+                  Remove the quota
+                </Button>
+              </>
             )}
-            {undeclaredKeyHeaders.length > 0 && (
+
+            {principalNeedsKeyLogic && (
               <Callout variant="destructive" icon={false} className="px-3 py-2 text-xs">
-                Key logic reads {undeclaredKeyHeaders.map((h) => `"${h}"`).join(", ")}, which is
-                not in the key context. Every request will be refused with 429 until the header is
-                added to Key headers.
+                Key logic is required here. The address limiter falls back to the caller identity
+                when none is given; a principal has no such fallback, and inventing one would
+                silently turn a per-user quota into a per-address one — so the server refuses the
+                config at save.
               </Callout>
             )}
+            {principalNeedsJwt && (
+              <Callout variant="destructive" icon={false} className="px-3 py-2 text-xs">
+                A per-principal quota needs <code className="font-mono">auth.mode = "jwt"</code>
+                {value.auth?.mode ? (
+                  <>
+                    {" "}
+                    — this channel authenticates with{" "}
+                    <code className="font-mono">{value.auth.mode}</code>
+                  </>
+                ) : (
+                  " — this channel has no authentication"
+                )}
+                . It is the only mode that exposes claims, so the key could never be computed and
+                every request would be refused; the server refuses the config instead.
+              </Callout>
+            )}
+            <UndeclaredHeaders headers={undeclaredPrincipalHeaders} />
           </ConfigSection>
 
           <ConfigSection

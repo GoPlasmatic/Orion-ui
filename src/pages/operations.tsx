@@ -52,17 +52,18 @@ import { errorLevel, healthText } from "@/lib/traffic-encoding"
 import { auditResourceRoute } from "@/lib/audit-routes"
 import {
   Activity,
-  RefreshCw,
   AlertTriangle,
   Blocks,
+  Boxes,
   CalendarClock,
-  ZapOff,
-  CircleOff,
   CheckCircle2,
   ChevronRight,
+  CircleOff,
   Network,
   Plug,
+  RefreshCw,
   ShieldAlert,
+  ZapOff,
 } from "lucide-react"
 
 /** Rows the outcome chart will draw before it starts saying "top N of M". */
@@ -78,6 +79,7 @@ const KIND_ICON: Record<AttentionKind, LucideIcon> = {
   quarantine: ShieldAlert,
   connector: Plug,
   plugin: Blocks,
+  model: Boxes,
   erroring: AlertTriangle,
   occurrence: CalendarClock,
   component: AlertTriangle,

@@ -45,6 +45,19 @@ const CRON_LAG = "orion_cron_schedule_lag_seconds"
 const CRON_LEASE_FAILURES = "orion_cron_lease_renewal_failures_total"
 const CRON_EXECUTION = "orion_cron_execution_duration_seconds"
 
+// Orion 1.8 model metrics, labelled by model and runtime. `category` is the
+// host's own classification of an inference failure, not a runtime's error
+// text — nine stable values, of which `timeout` is the only retryable one.
+const MODEL_INFERENCES = "orion_model_inferences_total"
+const MODEL_DURATION = "orion_model_inference_duration_seconds"
+// Time an inference waited for its model's concurrency permit, which is the
+// signal that separates "the graph is slow" from "the node is saturated".
+const MODEL_QUEUE = "orion_model_queue_seconds"
+const MODEL_FAILURES = "orion_model_failures_total"
+// `source` is `admission` (the probe load), `preload` (at a generation build)
+// or `demand` (a first inference paying the cold load).
+const MODEL_LOADS = "orion_model_loads_total"
+
 // Orion 1.6 plugin metrics, labelled by plugin and function.
 const PLUGIN_INVOCATIONS = "orion_plugin_invocations_total"
 const PLUGIN_FAILURES = "orion_plugin_failures_total"
@@ -863,4 +876,85 @@ export function usePluginMetrics(pluginId: string): {
     })
     return { available: functions.length > 0, functions }
   }, [snap, pluginId])
+}
+
+
+export interface ModelMetrics {
+  /** False when this node has served no inference of the model since it started. */
+  available: boolean
+  inferences: number
+  errors: number
+  /** Failures by the host's nine stable categories, zeroes dropped. */
+  failures: { category: string; value: number }[]
+  p95Ms: number | null
+  meanMs: number | null
+  /** p95 wait for a concurrency permit — saturation, not graph cost. */
+  queueP95Ms: number | null
+  /** Loads by source: how many were the probe, the preload, or a cold request. */
+  loads: { source: string; value: number }[]
+  /** Cold loads paid by a request — what `models.preload` exists to avoid. */
+  demandLoads: number
+  /** The runtimes this node actually ran it on. */
+  runtimes: string[]
+}
+
+/**
+ * One model's inference counters on this node, since the server started.
+ *
+ * Cumulative rather than windowed, like the plugin card: a model is called
+ * from inside a workflow, so there is no per-channel rate to window it
+ * against, and the question an operator has here is "is it working and what
+ * does it cost", not "what is it doing this minute".
+ */
+export function useModelMetrics(modelId: string): ModelMetrics {
+  const query = useQuery({
+    queryKey: ["metrics"],
+    queryFn: fetchMetrics,
+    refetchInterval: METRICS_POLL_MS,
+  })
+  const snap = query.data ?? null
+  return useMemo(() => {
+    const empty: ModelMetrics = {
+      available: false,
+      inferences: 0,
+      errors: 0,
+      failures: [],
+      p95Ms: null,
+      meanMs: null,
+      queueP95Ms: null,
+      loads: [],
+      demandLoads: 0,
+      runtimes: [],
+    }
+    if (!snap || !modelId) return empty
+    const filter = { model: modelId }
+    const inferences = counterTotal(snap, MODEL_INFERENCES, filter)
+    const loads = [...sumByLabel(snap, MODEL_LOADS, "source", filter).entries()]
+      .map(([source, value]) => ({ source, value }))
+      .filter((x) => x.value > 0)
+    // A model that has only ever been probed still has a load row, so the
+    // card is worth showing even before the first inference.
+    if (inferences === 0 && loads.length === 0) return empty
+    const p95 = histogramQuantile(snap, MODEL_DURATION, P95, filter)
+    // `null` as the baseline: cumulative since the process started, matching
+    // the rest of this card. A windowed mean would need the ring buffer, and
+    // a model has no per-channel rate to window it against.
+    const mean = histogramMean(null, snap, MODEL_DURATION, filter)
+    const queueP95 = histogramQuantile(snap, MODEL_QUEUE, P95, filter)
+    return {
+      available: true,
+      inferences,
+      errors: counterTotal(snap, MODEL_INFERENCES, { ...filter, outcome: "error" }),
+      failures: [...sumByLabel(snap, MODEL_FAILURES, "category", filter).entries()]
+        .map(([category, value]) => ({ category, value }))
+        .filter((x) => x.value > 0)
+        .sort((a, b) => b.value - a.value),
+      p95Ms: p95 == null ? null : p95 * 1000,
+      meanMs: mean == null ? null : mean * 1000,
+      queueP95Ms: queueP95 == null ? null : queueP95 * 1000,
+      loads,
+      demandLoads: counterTotal(snap, MODEL_LOADS, { ...filter, source: "demand" }),
+      runtimes: labelValues(snap, MODEL_INFERENCES, "runtime", filter).sort(),
+    }
+  }, [snap, modelId])
 }

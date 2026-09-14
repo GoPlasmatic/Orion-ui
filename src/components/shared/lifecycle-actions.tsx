@@ -21,6 +21,16 @@ interface LifecycleActionsProps {
   onPreflight?: () => void
   preflight?: ValidationResponse | null
   preflightPending?: boolean
+  /**
+   * Why activation is refused right now, when that is knowable *before* the
+   * request. The button is disabled and carries this as its tooltip.
+   *
+   * Only for a gate the loaded entity already answers — a model whose
+   * admission verdict is not `passed` (409), say. A gate that needs the server
+   * to evaluate it belongs in the pre-flight, not here: disabling a button on
+   * a guess is worse than a refusal that explains itself.
+   */
+  activateRefusedReason?: string | null
 }
 
 export function LifecycleActions({
@@ -33,6 +43,7 @@ export function LifecycleActions({
   onPreflight,
   preflight,
   preflightPending,
+  activateRefusedReason,
 }: LifecycleActionsProps) {
   const [confirmAction, setConfirmAction] = useState<"archive" | "delete" | null>(null)
 
@@ -46,7 +57,12 @@ export function LifecycleActions({
           </Button>
         )}
         {status === "draft" && onActivate && (
-          <Button size="sm" onClick={onActivate} disabled={isPending}>
+          <Button
+            size="sm"
+            onClick={onActivate}
+            disabled={isPending || !!activateRefusedReason}
+            title={activateRefusedReason ?? undefined}
+          >
             <Play className="h-3.5 w-3.5" />
             Activate
           </Button>

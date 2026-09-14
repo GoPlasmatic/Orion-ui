@@ -94,10 +94,25 @@ export function formatUptime(seconds: number): string {
   return `${m}m`
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+/**
+ * A byte count at the precision an operator reads it at: whole numbers under
+ * 1 kB and at every step's low end, one decimal in between, and `—` for a
+ * figure the server did not report.
+ *
+ * One implementation on purpose. A backup size, a plugin component, a model
+ * artifact and the model cache are all "how big is it", and four formatters
+ * meant `6144` rendered `6.0 KB` on one page and `6.0 kB` on the next.
+ */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null) return "—"
+  const units = ["B", "kB", "MB", "GB", "TB"]
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return `${value < 10 && unit > 0 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
 }
 
 /** `sha256:1a2b3c4d5e6f…` — enough of a digest to tell two apart, with the whole in the title. */

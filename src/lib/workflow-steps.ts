@@ -125,9 +125,19 @@ export interface StepIssue {
   /** The coordinate the author typed, e.g. `tasks[1].tasks[0].function.name`. */
   path: string
   message: string
+  /**
+   * How loudly to say it. Absent means `warning` — a defect in the document.
+   * `info` is an advisory: the document is well-formed and will save, it just
+   * may not mean what the author intends (the 1.8 tensor-key escape).
+   *
+   * On the issue rather than on its producer, so a renderer groups by what
+   * varies instead of by which function emitted it.
+   */
+  severity?: "warning" | "info"
 }
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
+/** A JSON object — not an array, not null. Shared with the other JSON walkers. */
+export const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v)
 
 /**

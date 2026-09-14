@@ -1,6 +1,6 @@
 /**
  * Where an audit row's resource id leads. The row names the resource by the id
- * its own page is keyed on — a channel UUID, a workflow slug, a plugin id — so
+ * its own page is keyed on — a channel UUID, a workflow slug, a plugin or model id — so
  * the id is a link wherever a page exists for it. A breaker is addressed by its
  * key; a DLQ entry and a package by their list.
  */
@@ -9,6 +9,7 @@ const ROUTES: Record<string, (id: string) => string> = {
   workflow: (id) => `/workflows/${id}`,
   connector: (id) => `/connectors/${id}`,
   plugin: (id) => `/plugins/${encodeURIComponent(id)}`,
+  model: (id) => `/models/${encodeURIComponent(id)}`,
   cron_occurrence: (id) => `/schedules/occurrences/${id}`,
   circuit_breaker: (id) => `/circuit-breakers?key=${encodeURIComponent(id)}`,
   trace_dlq: () => "/trace-dlq",

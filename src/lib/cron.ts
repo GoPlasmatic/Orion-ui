@@ -33,6 +33,12 @@ export const CRON_REFUSED_CONFIG_KEYS = [
   "auth",
   "origin_allow_list",
   "rate_limit",
+  // Not on the server's own refusal list, because it is refused transitively:
+  // `principal_rate_limit` requires `auth.mode = "jwt"`, and a cron channel is
+  // refused `auth` outright. Stripping it here keeps a protocol switch saveable
+  // — leaving it behind drops `auth` and then fails the save on a block that
+  // can never be valid without it.
+  "principal_rate_limit",
   "deduplication",
   "cache",
   "request",

@@ -72,6 +72,7 @@ const { traceDlqApi } = await import("@/api/trace-dlq")
 const { packagesApi } = await import("@/api/packages")
 const { pluginsApi } = await import("@/api/plugins")
 const { cronApi } = await import("@/api/cron")
+const { modelsApi } = await import("@/api/models")
 
 /** Resolve a client path ("admin/workflows/x?y=1" or "/health") to spec-path + query. */
 function normalize(rawPath: string): { url: string; query: string | undefined } {
@@ -293,6 +294,49 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
     retryOccurrence: () => cronApi.retryOccurrence("occ-1"),
     status: () => cronApi.status(),
   },
+  modelsApi: {
+    list: () =>
+      modelsApi.list({
+        limit: 10,
+        offset: 0,
+        status: "active",
+        tag: "t",
+        admission: "passed",
+        sort_by: "model_id",
+        sort_order: "asc",
+      }),
+    get: () => modelsApi.get("ada.c4-tiny"),
+    create: () =>
+      modelsApi.create({
+        manifest: { abi: "orion:model@1.0.0", name: "ada.c4-tiny" },
+        artifact: { connector: "models", key: "c4-tiny.onnx", digest: "sha256:0" },
+      }),
+    update: () => modelsApi.update("ada.c4-tiny", { tags: ["t"] }),
+    delete: () => modelsApi.delete("ada.c4-tiny"),
+    validate: () =>
+      modelsApi.validate({
+        manifest: { abi: "orion:model@1.0.0", name: "ada.c4-tiny" },
+        artifact: { connector: "models", key: "c4-tiny.onnx", digest: "sha256:0" },
+      }),
+    changeStatus: () =>
+      modelsApi.changeStatus("ada.c4-tiny", { status: "active" }, { reload: "defer" }),
+    changeStatusDryRun: () => modelsApi.changeStatusDryRun("ada.c4-tiny", { status: "active" }),
+    admit: () => modelsApi.admit("ada.c4-tiny", { wait: true }),
+    listVersions: () => modelsApi.listVersions("ada.c4-tiny", { limit: 10, offset: 0 }),
+    createVersion: () => modelsApi.createVersion("ada.c4-tiny"),
+    dependencies: () => modelsApi.dependencies("ada.c4-tiny"),
+    import: () => modelsApi.import([], { dryRun: true, onConflict: "new_version" }),
+    export: () =>
+      modelsApi.export({
+        status: "active",
+        tag: "t",
+        admission: "passed",
+        limit: 10,
+        offset: 0,
+        sort_by: "model_id",
+        sort_order: "asc",
+      }),
+  },
 }
 
 const MODULES: Record<string, object> = {
@@ -308,6 +352,7 @@ const MODULES: Record<string, object> = {
   packagesApi,
   pluginsApi,
   cronApi,
+  modelsApi,
 }
 
 describe("API layer ↔ OpenAPI contract", () => {

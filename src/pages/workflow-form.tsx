@@ -16,9 +16,10 @@ import {
   groupMembers,
   isTaskGroup,
   lintSteps,
-  type StepIssue,
 } from "@/lib/workflow-steps"
-import { rangeAtPath } from "@/lib/json-path"
+import { cn } from "@/lib/utils"
+import { positionIssues, toDiagnostics, type PositionedIssue } from "@/lib/json-path"
+import { tensorKeyAdvisories } from "@/lib/tensor-keys"
 import { stepCompletions } from "@/lib/workflow-completions"
 import { toVisualizerWorkflow } from "@/lib/workflow-mapper"
 import { useTheme } from "@/lib/use-theme"
@@ -153,12 +154,6 @@ function uniquifyIds(step: unknown, taken: Set<string>): unknown {
   }
   if (Array.isArray(node.tasks)) node.tasks.forEach((child) => uniquifyIds(child, taken))
   return node
-}
-
-/** A lint finding with the place in the document it was found. */
-interface PositionedIssue extends StepIssue {
-  from?: number
-  to?: number
 }
 
 /**
@@ -324,29 +319,35 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
    * Save: the server has the final word, and a lint that refuses to submit
    * would be a second, disagreeing validator.
    */
-  const lint = useCallback(({ doc, tree, syntaxErrors }: LintContext): Diagnostic[] => {
-    if (syntaxErrors.length > 0) {
-      setTaskIssues([])
-      return syntaxErrors
-    }
-    const { steps, error } = parseStepArray(doc)
-    if (!steps) {
-      setTaskIssues([{ path: "tasks", message: error, from: 0 }])
-      return [{ from: 0, to: doc.length, severity: "error", message: error }]
-    }
-    const issues = lintSteps(steps)
-    const positioned: PositionedIssue[] = issues.map((issue) => {
-      const range = rangeAtPath(tree, doc, issue.path)
-      return { ...issue, from: range?.from, to: range?.to }
-    })
-    setTaskIssues(positioned)
-    return positioned.map((issue) => ({
-      from: issue.from ?? 0,
-      to: issue.to ?? issue.from ?? 0,
-      severity: "warning",
-      message: `${issue.path} — ${issue.message}`,
-    }))
-  }, [])
+  const lint = useCallback(
+    ({ doc, tree, syntaxErrors }: LintContext): Diagnostic[] => {
+      if (syntaxErrors.length > 0) {
+        setTaskIssues([])
+        return syntaxErrors
+      }
+      const { steps, error } = parseStepArray(doc)
+      if (!steps) {
+        setTaskIssues([{ path: "tasks", message: error, from: 0 }])
+        return [{ from: 0, to: doc.length, severity: "error", message: error }]
+      }
+      const positioned = positionIssues(
+        [
+          ...lintSteps(steps),
+          // The 1.8 tensor-key advisory, live rather than on Validate. Runs on
+          // the same parse, so it costs one more walk of an already-parsed tree.
+          ...tensorKeyAdvisories(steps, functions),
+        ],
+        tree,
+        doc,
+      )
+      setTaskIssues(positioned)
+      return toDiagnostics(positioned)
+    },
+    // The editor holds the lint behind its own ref and updates it in an
+    // effect, so a changed identity is free — it simply takes effect on the
+    // next run. `map`, the case that matters most, needs no catalogue at all.
+    [functions],
+  )
 
   // The preview follows the document, a beat behind it, and keeps the last
   // document that passed the shape lint while the current one is mid-edit.
@@ -459,6 +460,9 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
 
   // The preview draws what the server would see, on the visualizer the detail
   // page uses — so the diagram is not a surprise after Save.
+  const noteFindings = taskIssues.filter((i) => i.severity === "info").length
+  const shapeFindings = taskIssues.length - noteFindings
+
   const previewWorkflow = useMemo(
     () =>
       previewSteps
@@ -614,7 +618,7 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
                 <span>
                   {taskIssues.length === 0
                     ? "shape lint: no findings · Validate checks the registry"
-                    : `${taskIssues.length} shape finding${taskIssues.length === 1 ? "" : "s"} · click one to go there`}
+                    : `${shapeFindings} shape finding${shapeFindings === 1 ? "" : "s"}${noteFindings > 0 ? `, ${noteFindings} note${noteFindings === 1 ? "" : "s"}` : ""} · click one to go there`}
                 </span>
               </div>
               {tasksError && <p className="text-xs text-destructive">{tasksError}</p>}
@@ -625,7 +629,12 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
                       <button
                         type="button"
                         onClick={() => issue.from != null && editorRef.current?.goTo(issue.from, issue.to)}
-                        className="w-full rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-left text-xs text-warning transition-colors hover:bg-warning/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                        className={cn(
+                          "w-full rounded-md border px-3 py-1.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                          issue.severity === "info"
+                            ? "border-info/40 bg-info/10 text-info hover:bg-info/15"
+                            : "border-warning/40 bg-warning/10 text-warning hover:bg-warning/15",
+                        )}
                       >
                         <span className="font-mono">{issue.path}</span> — {issue.message}
                       </button>

@@ -28,6 +28,7 @@ export type AttentionKind =
   | "quarantine"
   | "connector"
   | "plugin"
+  | "model"
   | "erroring"
   | "occurrence"
   | "component"
@@ -122,6 +123,10 @@ export function useAttentionItems(
     const quarantined = health?.channels?.quarantined ?? []
     const failedConnectors = health?.connectors?.failed_to_load ?? []
     const failedPlugins = health?.plugins?.failed_to_load ?? []
+    // A model this node's generation could not carry quarantines every
+    // workflow naming it by literal id, exactly as a failed plugin does — so
+    // it is the same severity and reads the same way.
+    const failedModels = health?.models?.failed_to_load ?? []
     const degraded = Object.entries(health?.components ?? {}).filter(([, state]) =>
       isComponentFault(state),
     )
@@ -197,6 +202,17 @@ export function useAttentionItems(
           label: `Plugin not loaded: ${issue.plugin} v${issue.version}`,
           detail: `${issue.stage}: ${issue.reason}`,
           to: `/plugins/${encodeURIComponent(issue.plugin)}`,
+        }),
+      ),
+      ...failedModels.map(
+        (issue): AttentionItem => ({
+          key: `model-${issue.model}-${issue.version}`,
+          severity: 1,
+          tone: "destructive",
+          kind: "model",
+          label: `Model not serving: ${issue.model} v${issue.version}`,
+          detail: `${issue.stage}: ${issue.reason}`,
+          to: `/models/${encodeURIComponent(issue.model)}`,
         }),
       ),
       ...erroring.map(

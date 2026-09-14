@@ -47,6 +47,7 @@ describe("cron channels (Orion 1.6)", () => {
     const config: ChannelConfig = {
       auth: { mode: "api_key", keys: ["k"] },
       rate_limit: { requests_per_second: 5 },
+      principal_rate_limit: { requests_per_second: 1, key_logic: { var: "auth.sub" } },
       backpressure: { max_concurrent_per_node: 2 },
       timeout_ms: 1000,
       origin_allow_list: ["*"],

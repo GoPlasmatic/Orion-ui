@@ -100,8 +100,13 @@ function editorTheme(dark: boolean) {
       ".cm-tooltip-lint": { fontFamily: "var(--font-sans)", fontSize: "12px" },
       ".cm-diagnostic-error": { borderLeftColor: "var(--destructive)" },
       ".cm-diagnostic-warning": { borderLeftColor: "var(--warning)" },
+      // `info` is a note rather than a defect — the 1.8 tensor-key advisory is
+      // the one that uses it — so it reads in the informational ink and with a
+      // plain underline rather than the wavy one a fault gets.
+      ".cm-diagnostic-info": { borderLeftColor: "var(--info)" },
       ".cm-lintRange-error": { backgroundImage: "none", textDecoration: "underline wavy var(--destructive)" },
       ".cm-lintRange-warning": { backgroundImage: "none", textDecoration: "underline wavy var(--warning)" },
+      ".cm-lintRange-info": { backgroundImage: "none", textDecoration: "underline dotted var(--info)" },
       ".cm-lint-marker-error": { content: "none" },
       ".cm-gutter-lint .cm-lint-marker": { width: "0.8em", height: "0.8em" },
     },

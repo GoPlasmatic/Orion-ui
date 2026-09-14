@@ -1,4 +1,6 @@
 import type { SyntaxNode, Tree } from "@lezer/common"
+import type { Diagnostic } from "@/lib/editor-types"
+import type { StepIssue } from "@/lib/workflow-steps"
 
 /**
  * From a lint path to a place in the document.
@@ -95,4 +97,41 @@ export function rangeAtPath(tree: Tree, doc: string, path: string): PathRange | 
   // An ancestor: its first line is enough to say "this task".
   const eol = doc.indexOf("\n", node.from)
   return { from: node.from, to: eol === -1 ? node.to : Math.min(node.to, eol), exact }
+}
+
+
+/** A lint finding with the range in the document it was resolved to. */
+export interface PositionedIssue extends StepIssue {
+  from?: number
+  to?: number
+}
+
+/**
+ * Resolve each finding's path to a range, once, for the two things that want
+ * it: the editor's own diagnostics and the clickable list beside it.
+ *
+ * Every JSON-authoring form needs the same pair, and the fallbacks are a
+ * convention rather than an obvious choice — an unresolved path underlines the
+ * document's start, and a range with no end collapses to a caret — so they are
+ * spelled here rather than per form.
+ */
+export function positionIssues(
+  issues: StepIssue[],
+  tree: Tree,
+  doc: string,
+): PositionedIssue[] {
+  return issues.map((issue) => {
+    const range = rangeAtPath(tree, doc, issue.path)
+    return { ...issue, from: range?.from, to: range?.to }
+  })
+}
+
+/** Positioned findings as CodeMirror diagnostics, `path — message` per line. */
+export function toDiagnostics(issues: PositionedIssue[]): Diagnostic[] {
+  return issues.map((issue) => ({
+    from: issue.from ?? 0,
+    to: issue.to ?? issue.from ?? 0,
+    severity: issue.severity ?? "warning",
+    message: `${issue.path} — ${issue.message}`,
+  }))
 }

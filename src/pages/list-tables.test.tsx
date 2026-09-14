@@ -1,5 +1,5 @@
 /**
- * Render guard for the five list pages built on `@tanstack/react-table`.
+ * Render guard for the six list pages built on `@tanstack/react-table`.
  *
  * These pages share one table contract — `columnHelper.columns()`, `useTable({
  * features })`, `getHeaderGroups()`, `row.getAllCells()` and `flexRender()` —
@@ -22,6 +22,7 @@ import type {
   AuditLog,
   Channel,
   ConnectorListItem,
+  Model,
   PaginatedResponse,
   Trace,
   Workflow,
@@ -116,6 +117,28 @@ const workflowRows: Workflow[] = [
   },
 ]
 
+const modelRows: Model[] = [
+  {
+    model_id: "ada.c4-tiny",
+    version: 2,
+    status: "active",
+    digest: "sha256:ddd",
+    abi: "orion:model@1.0.0",
+    model_version: "0.1.0",
+    format: "onnx",
+    manifest: { abi: "orion:model@1.0.0", name: "ada.c4-tiny" },
+    inputs: ["board"],
+    outputs: ["policy"],
+    artifact: { connector: "models", key: "c4-tiny.onnx", digest: "sha256:ddd", size: 6144 },
+    admission: { state: "passed", node: "node-a", at: "2026-01-02T00:00:00Z" },
+    stats: { parameters: 1479, nodes: 12, opset: 17, artifact_bytes: 6144, probe_ms: 0.0055 },
+    tags: ["games"],
+    content_hash: "sha256:eee",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-02T00:00:00Z",
+  },
+]
+
 vi.mock("@/api/audit", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/audit")>()
   return { ...mod, auditApi: { ...mod.auditApi, list: async () => page(auditRows) } }
@@ -139,12 +162,17 @@ vi.mock("@/api/workflows", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/workflows")>()
   return { ...mod, workflowsApi: { ...mod.workflowsApi, list: async () => page(workflowRows) } }
 })
+vi.mock("@/api/models", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/api/models")>()
+  return { ...mod, modelsApi: { ...mod.modelsApi, list: async () => page(modelRows) } }
+})
 
 import { AuditPage } from "@/pages/audit"
 import { ChannelsPage } from "@/pages/channels"
 import { ConnectorsPage } from "@/pages/connectors"
 import { TracesPage } from "@/pages/traces"
 import { WorkflowsPage } from "@/pages/workflows"
+import { ModelsPage } from "@/pages/models"
 
 function renderPage(ui: ReactElement) {
   const queryClient = new QueryClient({
@@ -205,5 +233,15 @@ describe("list page tables", () => {
     expect(await screen.findByText("settle-payment")).toBeInTheDocument()
     expectHeaders(["Name", "Tags", "Status", "Version", "Tasks", "Updated"])
     expect(screen.getByText("billing")).toBeInTheDocument()
+  })
+
+  it("models renders headers and row cells", async () => {
+    renderPage(<ModelsPage />)
+    expect(await screen.findByText("ada.c4-tiny")).toBeInTheDocument()
+    expectHeaders(["Model", "Admission", "Parameters", "Status", "This node", "Version", "Updated"])
+    // The verdict is the column no other entity has, and the stats are only
+    // there once it has passed — so both are real assertions, not decoration.
+    expect(screen.getByText("passed")).toBeInTheDocument()
+    expect(screen.getByText("1,479")).toBeInTheDocument()
   })
 })

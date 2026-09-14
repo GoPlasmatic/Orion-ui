@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react"
 import {
   Activity,
   Blocks,
+  Boxes,
   CalendarClock,
   Cpu,
   FileText,
@@ -84,6 +85,13 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: Blocks,
         keywords: "wasm webassembly custom functions",
         shortcut: "p",
+      },
+      {
+        to: "/models",
+        label: "Models",
+        icon: Boxes,
+        keywords: "onnx inference model_infer tensor graph admission",
+        shortcut: "i",
       },
       {
         to: "/console",

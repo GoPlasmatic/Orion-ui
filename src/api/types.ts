@@ -395,6 +395,33 @@ export interface OAuth2LoginConfig {
 export interface ChannelConfig {
   auth?: ChannelAuthConfig
   rate_limit?: RateLimitConfig
+  /**
+   * A second limit (1.7), applied **after** authentication and keyed on the
+   * verified principal rather than the caller's address.
+   *
+   * `rate_limit` runs *before* `check_auth` — deliberately, so a refusal costs
+   * the least work and credential-stuffing is metered like any other traffic —
+   * so it cannot know who the caller is. The only identities available to it
+   * are the address and a request header, and a header is caller-supplied: a
+   * key derived from one bounds an honest client, which is a burst control and
+   * not a quota. This block is the quota half; both apply and keep separate
+   * buckets, and a refusal from either is a 429 counted under the channel's
+   * name.
+   *
+   * Same fields as `rate_limit`, with two rules enforced at **create** rather
+   * than at run time:
+   * - `key_logic` is REQUIRED. The address limiter can fall back to the caller
+   *   identity; a principal cannot, and inventing one would silently turn a
+   *   per-user quota into a per-address one.
+   * - `auth.mode` must be `jwt` — the one mode that exposes claims. On any
+   *   other, the key could never be computed and every request would be
+   *   refused, so the config is refused instead.
+   *
+   * Its `key_logic` context is the outer limiter's plus `auth`, the verified
+   * claims: `{"var": "auth.sub"}` is the usual key. Runs on the ingresses that
+   * authenticate — HTTP sync and async — never Kafka, `channel_call` or cron.
+   */
+  principal_rate_limit?: RateLimitConfig
   backpressure?: BackpressureConfig
   timeout_ms?: number
   origin_allow_list?: string[]
@@ -925,6 +952,32 @@ export interface PluginLoadIssue {
   reason: string
 }
 
+/** One model version a runtime holds on this node right now (1.8). */
+export interface ModelLoaded {
+  // The identity a generation, a trace and a package all name the model by —
+  // and the only key `/health` reports residency under, because a digest is
+  // what a session cache is keyed by.
+  digest: string
+  runtime: string
+  device: string
+  resident_bytes: number
+}
+
+/**
+ * Why a model version is not serving on this node (1.8). `stage` is `disabled`
+ * (the runtime is off here while an active row exists), `admission` (no node
+ * ever recorded a passing verdict), `manifest`, `artifact` or `adapter`. Every
+ * workflow naming the model by literal id is quarantined, exactly as one
+ * naming an unavailable plugin function is.
+ */
+export interface ModelLoadIssue {
+  model: string
+  version: number
+  digest: string
+  stage: string
+  reason: string
+}
+
 /** A supervised background task, from the admin-only `/health` detail (1.4). */
 export interface BackgroundTaskReport {
   name: string
@@ -948,7 +1001,10 @@ export interface HealthResponse {
    * `connectors`, `channels`, `background_tasks`, `engine_reload` (1.4 — the
    * last reload failed, so this node serves the previous generation) and
    * `plugins` (1.6 — `disabled` when the sandbox is off and nothing needs it;
-   * `degraded` when an active plugin did not load). Conditionally: `kafka`
+   * `degraded` when an active plugin did not load) and `models` (1.8 — the
+   * same three states, and additionally `degraded` while this node's admission
+   * worker is down, which is the state in which a new registration would wait
+   * for its verdict forever). Conditionally: `kafka`
    * when enabled, `cron` when the node has something to say about schedules
    * (on, or off while an active cron channel is quarantined),
    * `config_propagation` and `cluster_redis` in cluster mode.
@@ -995,6 +1051,29 @@ export interface HealthResponse {
   plugins?: {
     loaded?: PluginLoaded[]
     failed_to_load?: PluginLoadIssue[]
+    [key: string]: unknown
+  }
+  /**
+   * Model residency on this node (1.8), admin-only detail. Absent entirely on
+   * a node without the runtime that has nothing stored needing it; present
+   * with `failed_to_load` alone on one holding an active row it cannot serve,
+   * because the quarantine that follows is only explained here.
+   *
+   * Note the asymmetry with the admission verdict on the row itself: a verdict
+   * is recorded once, by whichever node took the registration, and shared
+   * cluster-wide — but every node's artifact cache is its own, so residency
+   * here says nothing about any peer.
+   */
+  models?: {
+    // This node's name, as `admission.node` would spell it.
+    node?: string
+    admission_queue_capacity?: number
+    // Bytes the artifact cache directory holds, swept to `models.max_cache_bytes`.
+    cache_bytes?: number
+    // Bytes resident across every runtime, bounded by `models.max_loaded_bytes`.
+    loaded_bytes?: number
+    loaded?: ModelLoaded[]
+    failed_to_load?: ModelLoadIssue[]
     [key: string]: unknown
   }
   /**
@@ -1661,4 +1740,297 @@ export interface UpdatePluginRequest {
   digest?: string | null
   signature?: string | null
   tags?: string[] | null
+}
+
+// --- Models (1.8) ------------------------------------------------------------
+// ONNX graphs as the fifth versioned entity, with the workflow's lifecycle and
+// one verb of its own: `admit`. What sets a model apart is that Orion never
+// holds its bytes. A row names an object in a bucket — a `storage` connector,
+// a key, and the `sha256:` digest the bytes must hash to — and no node serves
+// an artifact it has not fetched from that bucket and hashed to the claim
+// itself. Registration answers 202: the manifest, the connector and the
+// object's existence are checked synchronously, and the node's admission
+// worker then fetches, verifies, reads the graph and probes it before the
+// verdict lands on the row. Activation is refused until that verdict is
+// `passed`.
+//
+// Off by default (`models.enabled = false`): registering, admitting and
+// activating answer 400 while reads answer normally, and a stored active row
+// quarantines the workflows naming it rather than aborting the node.
+
+/**
+ * How far admission got. `pending` until a node has probed the artifact, then
+ * `passed` or `failed` with the `stage` it stopped at. The wire value is an
+ * open string — an unknown one reads as neutral rather than as a failure.
+ */
+export const ADMISSION_STATES = [
+  { value: "pending", label: "Admission pending" },
+  { value: "passed", label: "Admission passed" },
+  { value: "failed", label: "Admission failed" },
+] as const
+export type AdmissionState = (typeof ADMISSION_STATES)[number]["value"] | (string & {})
+
+/** The admission verdict on a model version — whether a node fetched, verified and loaded the artifact. */
+export interface ModelAdmission {
+  state: AdmissionState
+  // The stage a `failed` verdict stopped at. Set alongside a verdict, so
+  // `{ state: "pending" }` is the whole of a fresh version's admission.
+  stage?: string | null
+  reason?: string | null
+  // The node that recorded the verdict. In a cluster admission runs *once*,
+  // on the node that took the registration, and peers load on that verdict
+  // without re-probing — so this keeps naming the one that ran it.
+  node?: string | null
+  at?: string | null
+}
+
+/**
+ * Where a model version's bytes are. The reference *is* the content — a row
+ * never carries bytes — so `connector`, `key` and `digest` are what the
+ * content hash covers. `size` is an advisory hint admission confirms.
+ */
+export interface ModelArtifactRef {
+  // The `storage` connector the artifact is read through, by name. It must
+  // exist and allow reads (`operations.presign_get`) on every instance the
+  // model is promoted to — the bytes travel through it, never in the package.
+  connector: string
+  key: string
+  // `sha256:<hex>` of the artifact bytes, as claimed at registration and
+  // confirmed by admission. The identity a generation, a trace and a package
+  // all name the model by.
+  digest: string
+  size?: number | null
+}
+
+/**
+ * What admission read out of the model, on the node that admitted it. Absent
+ * until the verdict passes. The graph numbers are read from the ONNX protobuf
+ * itself, so they are identical on every node and every runtime; the probe
+ * numbers describe the admitting node alone.
+ */
+export interface ModelStats {
+  // Summed over the initializers. A tensor a `Constant` node carries in an
+  // attribute is not counted. `models.max_parameters` applies to this, not to
+  // whatever the manifest claimed.
+  parameters?: number
+  nodes?: number
+  ir_version?: number
+  opset?: number
+  artifact_bytes?: number
+  // Median of five probe inferences over zero-filled inputs, in ms. Admission
+  // requires it within `models.max_probe_ms`.
+  probe_ms?: number
+  runtime?: string
+  device?: string
+}
+
+/** Whether the node answering has a model version resident, and if not, why. */
+export interface ModelHealth {
+  // From the verdict and the lifecycle: `disabled` (models are off here),
+  // `pending` / `rejected` while admission has not passed, `inactive` for a
+  // draft or archived version. For the active admitted version, on a node
+  // that loads models: `admitted` (nothing has asked for it yet), `loaded`,
+  // `evicted` (was resident, dropped under `models.max_loaded_bytes`) or
+  // `failed` (the generation could not carry it).
+  state:
+    | "disabled"
+    | "pending"
+    | "rejected"
+    | "inactive"
+    | "admitted"
+    | "loaded"
+    | "evicted"
+    | "failed"
+    | (string & {})
+  reason?: string | null
+  runtime?: string | null
+  device?: string | null
+  resident_bytes?: number | null
+}
+
+/** One input tensor and how a message becomes it. */
+export interface ModelInputDecl {
+  // The graph's input name — also the context key the default adapter reads.
+  name: string
+  // A datavalue dtype wire name (`f32`, `i64`, `bool`, …), lowercase.
+  dtype: string
+  // The fixed shape; every dimension positive.
+  shape: number[]
+  // JSONLogic over the JSON the task hands over, producing this input's
+  // tensor. Absent means the default, `{"tensor": [{"var": name}, dtype]}`.
+  // May not read `{"secret": …}`, `now` or `random`: a manifest's author is
+  // not the secrets' owner, and a replay must reproduce the same tensors.
+  adapter?: JsonLogicValue
+  [key: string]: unknown
+}
+
+/** One output tensor the graph declares. */
+export interface ModelOutputDecl {
+  name: string
+  dtype: string
+  shape: number[]
+  [key: string]: unknown
+}
+
+/**
+ * Where a pipeline put the bytes for a serving instance — the deployable twin
+ * of `artifact`, which is a path on the authoring machine. `compile` writes
+ * both into a package's `models[]` entry. A served row ignores both: the
+ * registration request's own `artifact` reference is its authority.
+ */
+export interface ModelManifestReference {
+  connector: string
+  key: string
+}
+
+/**
+ * The `orion:model@1.0.0` document: what the model takes, what it gives back,
+ * and the JSONLogic that marshals a message into tensors and a result back
+ * out. Leave an adapter or the result out and the default applies, which is
+ * enough for a caller that already speaks tensors.
+ */
+export interface ModelManifest {
+  // Must be `orion:model@1.0.0`.
+  abi?: string
+  // The model id: lowercase labels joined by `.`; `orion.*` is reserved.
+  name?: string
+  // The author's own version string. Orion assigns the entity version.
+  version?: string
+  // The artifact format a runtime this build knows serves (`onnx`). Which
+  // runtime loads it is the node's `[models.default_runtime]` row.
+  format?: string
+  // Path of the artifact relative to the manifest — read by the offline
+  // tooling and the CLI only (`lint`, `dry-run`, `test`, `compile`).
+  artifact?: string
+  reference?: ModelManifestReference
+  description?: string
+  inputs?: ModelInputDecl[]
+  outputs?: ModelOutputDecl[]
+  // JSONLogic over the outputs, each by name, producing what the task writes.
+  // Absent means a nested list per output.
+  result?: JsonLogicValue
+  [key: string]: unknown
+}
+
+/** One version of a model, as every model endpoint returns it. */
+export interface Model {
+  model_id: string
+  version: number
+  status: EntityStatus
+  // `sha256:…` of the artifact bytes, as claimed at registration.
+  digest: string
+  // The manifest ABI the model was registered against.
+  abi: string
+  // The author's own version string from the manifest, informational.
+  model_version: string
+  // The artifact format the manifest declares (`onnx`).
+  format: string
+  // The validated manifest as JSON — what was registered, with nothing the
+  // server inferred added to it.
+  manifest: ModelManifest
+  // The tensor names, in manifest order, repeated at the top level so a client
+  // need not walk the manifest to learn the model's signature.
+  inputs: string[]
+  outputs: string[]
+  artifact: ModelArtifactRef
+  admission: ModelAdmission
+  // `null` until admission passes.
+  stats?: ModelStats | null
+  // Detached Ed25519 signature over `digest`, base64, when the registration
+  // carried one. Not part of the content hash: the digest is the identity and
+  // the signature only attests to it.
+  signature?: string | null
+  tags: string[]
+  // Over the importable content (manifest, the artifact reference without its
+  // size, tags). The signature, the verdict and the stats are not in it.
+  content_hash: string
+  // Present only on the single-entity read, and only when the serving node has
+  // an opinion: this node's residency for the version.
+  health?: ModelHealth | null
+  created_at: string
+  updated_at: string
+}
+
+/** One active workflow that names a model, and the tasks that do. */
+export interface ModelDependant {
+  workflow_id: string
+  version: number
+  // The ids of the `model_infer` tasks whose `input.model` is this id as a
+  // literal.
+  task_ids: string[]
+}
+
+/** What depends on a model: the active workflows naming it. */
+export interface ModelDependencies {
+  model_id: string
+  version: number
+  // The ones an archive or delete is refused for (409).
+  workflows: ModelDependant[]
+  // Always true. A task whose `input.model` is an expression resolves per
+  // message, so a reference of that kind is neither listed nor gated on — it
+  // fails the call as `unavailable` instead.
+  dynamic_references_unlisted: boolean
+}
+
+/** What the bucket said about the object, when `validate` got that far. */
+export interface ArtifactHead {
+  size?: number | null
+  etag?: string | null
+}
+
+/** The `/validate` envelope for models: the shared shape plus the object's HEAD. */
+export interface ModelValidationResponse extends ValidationResponse {
+  head?: ArtifactHead | null
+}
+
+export interface ListModelsParams {
+  limit?: number
+  offset?: number
+  status?: EntityStatus
+  tag?: string
+  // Narrow to a verdict: `pending`, `passed` or `failed`.
+  admission?: AdmissionState
+  // `model_id` (default), `status`, `created_at`, `updated_at`.
+  sort_by?: string
+  sort_order?: SortOrder
+}
+
+/**
+ * No `include_artifacts` counterpart to the plugin export: a model *always*
+ * exports as a reference. The target fetches the object through its own
+ * connector of that name and admits it itself.
+ */
+export type ExportModelsParams = ListModelsParams
+
+/**
+ * What `POST admin/models` and the import accept. Nothing is uploaded: the
+ * server fetches the bytes from the connector at admission.
+ */
+export interface CreateModelRequest {
+  manifest: ModelManifest
+  artifact: ModelArtifactRef
+  // Must equal the manifest's `name` when given; the manifest is the source of
+  // truth for the id.
+  model_id?: string | null
+  // Detached Ed25519 signature over the digest string, base64. Required when
+  // the node's `[models.trust]` names keys; stored either way.
+  signature?: string | null
+  tags?: string[]
+}
+
+/** `PUT admin/models/{id}`: every field optional, absent means keep. */
+export interface UpdateModelRequest {
+  manifest?: ModelManifest
+  // A changed artifact reference resets the verdict to `pending` and queues
+  // the draft again; a manifest or tag change alone keeps it.
+  artifact?: ModelArtifactRef | null
+  signature?: string | null
+  tags?: string[] | null
+}
+
+/** `POST admin/models/{id}/admit`: 202 with the job queued, or 200 with the verdict. */
+export interface AdmitModelOptions {
+  // Run admission inline and answer with the verdict recorded, rather than
+  // queueing it and answering 202.
+  wait?: boolean
 }

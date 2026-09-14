@@ -1,0 +1,113 @@
+# TYPE orion_model_loads_total counter
+orion_model_loads_total{model="example.c4-tiny",runtime="tract",outcome="ok",source="preload"} 1
+orion_model_loads_total{model="example.c4-tiny",runtime="tract",outcome="ok",source="admission"} 1
+# TYPE orion_model_inferences_total counter
+orion_model_inferences_total{model="example.c4-tiny",runtime="tract",outcome="ok"} 13
+orion_model_inferences_total{model="example.c4-tiny",runtime="tract",outcome="error"} 7
+# TYPE orion_model_failures_total counter
+orion_model_failures_total{model="example.c4-tiny",runtime="tract",category="adapter"} 7
+# TYPE orion_model_admissions_total counter
+orion_model_admissions_total{outcome="passed",stage="none"} 1
+# TYPE orion_model_fetch_bytes_total counter
+orion_model_fetch_bytes_total{model="example.c4-tiny",outcome="ok"} 6171
+# TYPE orion_model_loaded_bytes gauge
+orion_model_loaded_bytes 6171
+# TYPE orion_model_live_inferences gauge
+orion_model_live_inferences 1
+# TYPE orion_model_cache_bytes gauge
+orion_model_cache_bytes 6171
+# TYPE orion_model_admission_duration_seconds histogram
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="0.0005"} 0
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="0.001"} 0
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="0.0025"} 0
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="0.005"} 0
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="0.01"} 0
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="0.025"} 1
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="0.05"} 1
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="0.1"} 1
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="0.25"} 1
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="0.5"} 1
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="1"} 1
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="2.5"} 1
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="5"} 1
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="10"} 1
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="30"} 1
+orion_model_admission_duration_seconds_bucket{outcome="passed",le="+Inf"} 1
+orion_model_admission_duration_seconds_sum{outcome="passed"} 0.010450459
+orion_model_admission_duration_seconds_count{outcome="passed"} 1
+# TYPE orion_model_fetch_duration_seconds histogram
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="0.0005"} 0
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="0.001"} 0
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="0.0025"} 1
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="0.005"} 1
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="0.01"} 1
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="0.025"} 1
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="0.05"} 1
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="0.1"} 1
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="0.25"} 1
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="0.5"} 1
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="1"} 1
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="2.5"} 1
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="5"} 1
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="10"} 1
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="30"} 1
+orion_model_fetch_duration_seconds_bucket{model="example.c4-tiny",outcome="ok",le="+Inf"} 1
+orion_model_fetch_duration_seconds_sum{model="example.c4-tiny",outcome="ok"} 0.001876167
+orion_model_fetch_duration_seconds_count{model="example.c4-tiny",outcome="ok"} 1
+# TYPE orion_model_inference_duration_seconds histogram
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.0005"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.001"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.0025"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.005"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.01"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.025"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.05"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.1"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.25"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.5"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="1"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="2.5"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="5"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="10"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="30"} 20
+orion_model_inference_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="+Inf"} 20
+orion_model_inference_duration_seconds_sum{model="example.c4-tiny",runtime="tract"} 0.0029640419999999996
+orion_model_inference_duration_seconds_count{model="example.c4-tiny",runtime="tract"} 20
+# TYPE orion_model_load_duration_seconds histogram
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.0005"} 0
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.001"} 0
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.0025"} 1
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.005"} 1
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.01"} 2
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.025"} 2
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.05"} 2
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.1"} 2
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.25"} 2
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.5"} 2
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="1"} 2
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="2.5"} 2
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="5"} 2
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="10"} 2
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="30"} 2
+orion_model_load_duration_seconds_bucket{model="example.c4-tiny",runtime="tract",le="+Inf"} 2
+orion_model_load_duration_seconds_sum{model="example.c4-tiny",runtime="tract"} 0.0082835
+orion_model_load_duration_seconds_count{model="example.c4-tiny",runtime="tract"} 2
+# TYPE orion_model_queue_seconds histogram
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.0005"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.001"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.0025"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.005"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.01"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.025"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.05"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.1"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.25"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="0.5"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="1"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="2.5"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="5"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="10"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="30"} 13
+orion_model_queue_seconds_bucket{model="example.c4-tiny",runtime="tract",le="+Inf"} 13
+orion_model_queue_seconds_sum{model="example.c4-tiny",runtime="tract"} 0.000023544
+orion_model_queue_seconds_count{model="example.c4-tiny",runtime="tract"} 13
