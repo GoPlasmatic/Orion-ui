@@ -25,6 +25,15 @@ and `openapi-typescript` both need — their peer ranges (`<6.1` and `^5`) refus
 install with either fails. `@xyflow/react` is pinned *exactly* to the version
 `@goplasmatic/dataflow-ui` pins exactly; see Visualization Libraries.
 
+The `overrides` block is deliberate too. Both entries force a *patch* bump inside the same minor
+line on a transitive dependency its parent pins to an exact version — which is why `npm audit fix`
+is a no-op on them and an override is the only lever. `monaco-editor` (via
+`@monaco-editor/react` <- `@goplasmatic/dataflow-ui`) pins `dompurify` at `3.4.8`, vulnerable
+through `3.4.12`; `@redocly/openapi-core` (via `openapi-typescript`) pins `js-yaml` at `4.3.1`,
+vulnerable through that version. Each override is scoped to the pinning parent rather than
+declared globally, so nothing else in the tree is forced onto a version it did not ask for. Drop
+an entry once its parent ships a release that depends on the patched version itself.
+
 ## Server contract
 
 `contracts/openapi.json` is the vendored copy of the server's OpenAPI 3.1 spec (source:
