@@ -64,6 +64,95 @@ describe("lintManifest", () => {
     expect(paths({ ...valid, inputs })).toContain("inputs[0].shape")
   })
 
+  /**
+   * 1.8.1 (#318): a dimension is a count *or* a name standing for whatever the
+   * call brings. Before this the lint required a whole number, so it reported
+   * the server's headline feature as two errors in the author's editor.
+   */
+  describe("a variable axis", () => {
+    const dynamic = {
+      ...valid,
+      inputs: [{ name: "board", dtype: "f32", shape: ["N", 3] }],
+      outputs: [{ name: "policy", dtype: "f32", shape: ["N", 1] }],
+      result: undefined,
+    }
+
+    it("accepts a named dimension in an input and an output", () => {
+      expect(lintManifest(dynamic)).toEqual([])
+    })
+
+    it("accepts a shape mixing names and counts", () => {
+      const inputs = [{ name: "a", dtype: "f32", shape: [1, "H", "W", 3] }]
+      expect(lintManifest({ ...dynamic, inputs, outputs: undefined })).toEqual([])
+    })
+
+    it("refuses a name that does not start with a letter or underscore", () => {
+      const inputs = [{ name: "a", dtype: "f32", shape: ["2N"] }]
+      expect(paths({ ...dynamic, inputs, outputs: undefined })).toEqual(["inputs[0].shape[0]"])
+    })
+
+    it("refuses a name carrying anything but letters, digits and underscore", () => {
+      const inputs = [{ name: "a", dtype: "f32", shape: ["batch-size"] }]
+      expect(paths({ ...dynamic, inputs, outputs: undefined })).toEqual(["inputs[0].shape[0]"])
+    })
+
+    it("still refuses a zero count, and points at naming the axis instead", () => {
+      const inputs = [{ name: "a", dtype: "f32", shape: [1, 0] }]
+      const found = lintManifest({ ...dynamic, inputs, outputs: undefined })
+      expect(found.map((i) => i.path)).toEqual(["inputs[0].shape[1]"])
+      expect(found[0].message).toContain("Name the dimension instead")
+    })
+
+    it("still refuses a dimension that is neither a count nor a name", () => {
+      const inputs = [{ name: "a", dtype: "f32", shape: [1.5] }]
+      expect(paths({ ...dynamic, inputs, outputs: undefined })).toEqual(["inputs[0].shape[0]"])
+    })
+  })
+
+  /**
+   * `probe_dims` says what to run each named axis at for the admission probe,
+   * which needs concrete tensors. A declared name it leaves out is probed at
+   * 1, so an absent entry is never a finding — what is refused is an entry
+   * that means nothing.
+   */
+  describe("probe_dims", () => {
+    const dynamic = {
+      ...valid,
+      inputs: [{ name: "board", dtype: "f32", shape: ["N", 3] }],
+      outputs: undefined,
+      result: undefined,
+    }
+
+    it("accepts a size for a name a shape declares", () => {
+      expect(lintManifest({ ...dynamic, probe_dims: { N: 8 } })).toEqual([])
+    })
+
+    it("accepts a manifest that names an axis and leaves probe_dims out", () => {
+      expect(lintManifest(dynamic)).toEqual([])
+    })
+
+    it("refuses a name no shape declares, listing the ones that are", () => {
+      const found = lintManifest({ ...dynamic, probe_dims: { M: 8 } })
+      expect(found.map((i) => i.path)).toEqual(["probe_dims.M"])
+      expect(found[0].message).toContain("'N'")
+    })
+
+    it("says so plainly when the manifest names no dimension at all", () => {
+      const found = lintManifest({ ...valid, probe_dims: { N: 8 } })
+      expect(found.map((i) => i.path)).toEqual(["probe_dims.N"])
+      expect(found[0].message).toContain("no shape in this manifest declares")
+    })
+
+    it("refuses a non-positive size — the probe builds a real tensor of it", () => {
+      expect(paths({ ...dynamic, probe_dims: { N: 0 } })).toEqual(["probe_dims.N"])
+    })
+
+    it("reads a name an output alone declares", () => {
+      const outputs = [{ name: "policy", dtype: "f32", shape: ["T", 1] }]
+      expect(lintManifest({ ...dynamic, outputs, probe_dims: { T: 4 } })).toEqual([])
+    })
+  })
+
   describe("dtype", () => {
     it("refuses an unknown one", () => {
       const inputs = [{ name: "a", dtype: "float32", shape: [1] }]
@@ -155,6 +244,10 @@ describe("checkModelName", () => {
 describe("formatTensorType", () => {
   it("renders dtype and shape the way a signature reads", () => {
     expect(formatTensorType("f32", [1, 2, 6, 7])).toBe("f32[1, 2, 6, 7]")
+  })
+
+  it("prints a named dimension as its name — the size is whatever the call brings", () => {
+    expect(formatTensorType("f32", ["N", 3])).toBe("f32[N, 3]")
   })
 
   it("survives a declaration that did not lint", () => {

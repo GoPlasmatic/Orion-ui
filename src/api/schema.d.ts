@@ -3037,9 +3037,19 @@ export interface components {
             ir_version?: number;
             /**
              * Format: int64
-             * @description Node count of the top-level graph.
+             * @description Node count of the graph, of every subgraph body it carries (`If`,
+             *     `Loop`, `Scan`) and of every model-local function.
              */
             nodes?: number;
+            /**
+             * @description The distinct operators those nodes ask a runtime for, sorted, each
+             *     qualified by its domain unless that is the default one — so
+             *     `ai.onnx.ml.LinearRegressor`, but plain `Gemm`. What the graph needs
+             *     implemented, which is what a row cannot otherwise say: it holds the
+             *     artifact's reference, not its bytes. Empty on a version admitted
+             *     before this was recorded.
+             */
+            operators?: string[];
             /**
              * Format: int64
              * @description The default-domain opset the model imports.
@@ -3047,11 +3057,23 @@ export interface components {
             opset?: number;
             /**
              * Format: int64
-             * @description Total parameter count across the model's initializers — the sum of
-             *     the product of each initializer's dimensions. A tensor a `Constant`
-             *     node carries in an attribute is not counted.
+             * @description Every value the graph carries, counted from the graph itself: each
+             *     initializer, each tensor or list of numbers a node holds in an
+             *     attribute, through every subgraph body and every model-local
+             *     function. Moving weights from one of those fields to another does
+             *     not move this number, which is what lets `models.max_parameters`
+             *     bound it.
              */
             parameters?: number;
+            /**
+             * @description What each named dimension in the manifest's shapes was bound to for
+             *     the probe. Absent when the manifest declares fixed shapes, which is
+             *     most of them; present when it does not, because `probe_ms` over a
+             *     variable axis says nothing without the size behind it.
+             */
+            probe_dims?: {
+                [key: string]: number;
+            };
             /**
              * Format: double
              * @description The admission probe's wall time per inference, in milliseconds: the

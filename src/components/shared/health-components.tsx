@@ -1,6 +1,6 @@
 import { useEffect } from "react"
 import { Link, useLocation } from "react-router"
-import type { HealthResponse } from "@/api/types"
+import { loadedModelKey, type HealthResponse } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Callout } from "@/components/ui/callout"
 import { componentStateBadgeClass, isComponentFault } from "@/lib/status"
@@ -234,10 +234,18 @@ export function HealthComponents({ health }: { health: HealthResponse | undefine
           {loadedModels.length > 0 && (
             <ul className="mt-3 space-y-1 text-xs">
               {loadedModels.map((m) => (
-                <li key={m.digest} className="flex flex-wrap items-center gap-2">
+                <li key={loadedModelKey(m)} className="flex flex-wrap items-center gap-2">
                   <span className="font-mono" title={m.digest}>
                     {shortDigest(m.digest)}
                   </span>
+                  {m.binding && (
+                    <span
+                      className="font-mono text-muted-foreground"
+                      title={`Binding ${m.binding} — the inputs' names, dtypes and shapes and the output names, in manifest order. Two manifests over one artifact that bind the graph differently are two sessions.`}
+                    >
+                      {m.binding.slice(0, 8)}
+                    </span>
+                  )}
                   <span className="text-muted-foreground">
                     {m.runtime}/{m.device} · {formatBytes(m.resident_bytes)}
                   </span>
@@ -247,8 +255,9 @@ export function HealthComponents({ health }: { health: HealthResponse | undefine
           )}
           <p className="mt-2 text-xs text-muted-foreground">
             Residency is this node's alone — the admission verdict is shared across the cluster,
-            the bytes are not. A model is listed by digest because that is what the session cache
-            is keyed by.
+            the bytes are not. A row is a loaded <em>session</em>, keyed by digest, binding,
+            runtime and device: two manifests over one artifact that declare their outputs in a
+            different order are two plans over one graph, so one digest can appear twice.
           </p>
         </div>
       )}

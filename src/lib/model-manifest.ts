@@ -1,5 +1,4 @@
-import type { ModelManifest } from "@/api/types"
-import type { ModelAdmission } from "@/api/types"
+import type { ModelAdmission, ModelDim, ModelManifest } from "@/api/types"
 import { isObject, type StepIssue } from "@/lib/workflow-steps"
 
 /**
@@ -93,19 +92,51 @@ function checkDtype(dtype: unknown): string | null {
   return null
 }
 
-function checkShape(path: string, shape: unknown, out: StepIssue[]): void {
+/**
+ * A named dimension: a letter or `_`, then letters, digits and `_`. Mirrors
+ * the server's `check_dim_name`.
+ */
+function checkDimName(name: string): string | null {
+  if (name === "") return "a named dimension must not be empty"
+  if (!/^[A-Za-z_]/.test(name)) {
+    return `a named dimension must start with a letter or '_': '${name}'`
+  }
+  if (!/^[A-Za-z0-9_]+$/.test(name)) {
+    return `a named dimension may hold only letters, digits and '_': '${name}'`
+  }
+  return null
+}
+
+/**
+ * One shape's dimensions, collecting the names it declares.
+ *
+ * Since 1.8.1 a dimension is a count **or** a name standing for whatever the
+ * call brings. A name binds on its first occurrence in a call and every later
+ * occurrence — in another input, or in an output — must equal that binding,
+ * which is what makes `["N", 3]` on an output mean the N the input had. Only
+ * the server can check that, because it happens per message; what is checked
+ * here is that a name is spellable.
+ */
+function checkShape(path: string, shape: unknown, names: Set<string>, out: StepIssue[]): void {
   if (!Array.isArray(shape) || shape.length === 0) {
     out.push({ path: `${path}.shape`, message: "must list at least one dimension" })
     return
   }
   shape.forEach((dim, i) => {
-    if (typeof dim !== "number" || !Number.isInteger(dim)) {
-      out.push({ path: `${path}.shape[${i}]`, message: "must be a whole number" })
+    if (typeof dim === "string") {
+      const reason = checkDimName(dim)
+      if (reason) out.push({ path: `${path}.shape[${i}]`, message: reason })
+      else names.add(dim)
+    } else if (typeof dim !== "number" || !Number.isInteger(dim)) {
+      out.push({
+        path: `${path}.shape[${i}]`,
+        message: "must be a whole number, or a name standing for a dimension a call decides",
+      })
     } else if (dim <= 0) {
       out.push({
         path: `${path}.shape[${i}]`,
         message:
-          "every dimension must be positive: a model declares fixed shapes, and a zero dimension is a tensor with nothing in it",
+          "a fixed dimension must be positive: a zero dimension is a tensor with nothing in it. Name the dimension instead to let a call decide it",
       })
     }
   })
@@ -131,6 +162,7 @@ function checkTensorDecl(
   path: string,
   decl: unknown,
   seen: Set<string>,
+  names: Set<string>,
   out: StepIssue[],
 ): void {
   if (!isObject(decl)) {
@@ -147,7 +179,41 @@ function checkTensorDecl(
   }
   const dtype = checkDtype(decl.dtype)
   if (dtype) out.push({ path: `${path}.dtype`, message: dtype })
-  checkShape(path, decl.shape, out)
+  checkShape(path, decl.shape, names, out)
+}
+
+/**
+ * `probe_dims`: what each named dimension is worth to the admission probe,
+ * which needs concrete tensors to run its five zero-filled inferences.
+ *
+ * A name the manifest declares and this leaves out is probed at 1 — the
+ * smallest tensor there is — so an absent entry is never a finding. What is
+ * refused is an entry that means nothing: a name no shape declares, or a size
+ * the probe cannot build a tensor of.
+ */
+function checkProbeDims(probeDims: unknown, names: Set<string>, out: StepIssue[]): void {
+  if (!isObject(probeDims)) {
+    out.push({ path: "probe_dims", message: "must be an object of dimension name to size" })
+    return
+  }
+  const declared = [...names].sort()
+  for (const [name, size] of Object.entries(probeDims)) {
+    const path = `probe_dims.${name}`
+    if (!names.has(name)) {
+      out.push({
+        path,
+        message:
+          declared.length === 0
+            ? "no shape in this manifest declares a named dimension"
+            : `'${name}' is not a dimension this manifest names; it names ${declared.map((d) => `'${d}'`).join(", ")}`,
+      })
+    } else if (typeof size !== "number" || !Number.isInteger(size) || size <= 0) {
+      out.push({
+        path,
+        message: "a probe dimension must be a positive whole number: the probe builds a real tensor of it",
+      })
+    }
+  }
 }
 
 /**
@@ -228,6 +294,11 @@ export function lintManifest(manifest: unknown): StepIssue[] {
     }
   }
 
+  // Every named dimension the shapes declare, across inputs *and* outputs: a
+  // name means the same axis wherever it appears, which is what lets an
+  // output's `["N", 1]` mean the N an input bound.
+  const names = new Set<string>()
+
   const inputs = manifest.inputs
   if (!Array.isArray(inputs) || inputs.length === 0) {
     out.push({ path: "inputs", message: "a model must declare at least one input" })
@@ -235,7 +306,7 @@ export function lintManifest(manifest: unknown): StepIssue[] {
     const seen = new Set<string>()
     inputs.forEach((input, i) => {
       const path = `inputs[${i}]`
-      checkTensorDecl(path, input, seen, out)
+      checkTensorDecl(path, input, seen, names, out)
       if (isObject(input) && input.adapter !== undefined) {
         screen(`${path}.adapter`, input.adapter, out)
       }
@@ -248,17 +319,27 @@ export function lintManifest(manifest: unknown): StepIssue[] {
       out.push({ path: "outputs", message: "must be a JSON array" })
     } else {
       const seen = new Set<string>()
-      outputs.forEach((output, i) => checkTensorDecl(`outputs[${i}]`, output, seen, out))
+      outputs.forEach((output, i) => checkTensorDecl(`outputs[${i}]`, output, seen, names, out))
     }
   }
+
+  if (manifest.probe_dims !== undefined) checkProbeDims(manifest.probe_dims, names, out)
 
   if (manifest.result !== undefined) screen("result", manifest.result, out)
 
   return out
 }
 
-/** `f32[1, 2, 6, 7]` — how a tensor declaration reads in a signature table. */
-export function formatTensorType(dtype: string | undefined, shape: number[] | undefined): string {
+/**
+ * `f32[1, 2, 6, 7]` — how a tensor declaration reads in a signature table. A
+ * named dimension prints as its name (`f32[N, 3]`), which is how it is
+ * written and the only thing that could be shown: the size is whatever the
+ * call brings.
+ */
+export function formatTensorType(
+  dtype: string | undefined,
+  shape: ModelDim[] | undefined
+): string {
   const dims = Array.isArray(shape) ? shape.join(", ") : ""
   return `${dtype ?? "?"}[${dims}]`
 }

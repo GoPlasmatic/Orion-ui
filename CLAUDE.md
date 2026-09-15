@@ -71,7 +71,7 @@ Orion UI is a React 19 dashboard for the Orion workflow engine. It uses Vite 8, 
 
 ### Core Domain
 
-Targets the Orion **v1.6** API (dataflow-rs 3.12 / datalogic-rs 5.4). Four primitives with a
+Targets the Orion **v1.8.1** API (dataflow-rs 3.13 / datalogic-rs 5.5). Five primitives with a
 Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 
 - **Channels** — Service endpoints (sync/async, REST/HTTP/Kafka/**cron**). Config covers `auth`
@@ -117,6 +117,19 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   | `plugin`), optional `aliases`, `input_fields` is **absent** for an engine built-in, every
   entry carries `retry_safety` (1.6) and a `plugin` entry names the plugin version and digest
   serving it.
+- **Models** — ONNX graphs as the fifth versioned entity (`/models`, 1.8), with the workflow's
+  lifecycle and one verb of its own: **`admit`**. What sets a model apart is that Orion never
+  holds its bytes — a row carries the `orion:model@1.0.0` manifest and an *artifact reference*
+  (a `storage` connector, an object key, and the `sha256:` digest the bytes must hash to).
+  Registration answers **202**; the node's admission worker then fetches, verifies the digest,
+  reads the graph and probes it before the verdict lands on the row, so a create is not the end
+  of the story — poll `get` until `admission.state` leaves `pending`. Activation is a 409 until
+  that verdict is `passed`; archive and delete are a 409 while an active workflow names the
+  model, which `dependencies` lists ahead of time. Full CRUD + Validate + re-admit + versions +
+  import/export (references only — a model never travels as bytes). The single read carries
+  `health`: this node's residency. Manifests are authored as JSON with a client-side lint
+  (`lib/model-manifest.ts`) mirroring the server's `model/manifest.rs`. Off by default
+  (`models.enabled = false`): writes answer 400 while reads answer normally.
 - **Trace DLQ** — Operator view of the async dead-letter queue (`/trace-dlq`): inspect, requeue,
   purge.
 - **Packages** — Read-only promotion receipts (`/packages`). `PUT admin/packages/{name}` is
@@ -127,6 +140,52 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   loads and failures, the scheduler's own numbers. The Operations dashboard shows only the faults.
 
 ### v1.x wire contracts worth remembering
+
+- **A model manifest's shape dimension is a count *or* a name (1.8.1).** `"shape": ["N", 3]`
+  describes a graph exported with a dynamic axis. A name **binds on its first occurrence in a
+  call** and every later occurrence — in another input, or in an output — must equal that
+  binding, which is what makes `["N", 3]` on an output mean the N the input brought. Every axis
+  given as a number is exactly as strict as before, and `models.max_input_elements` still bounds
+  one message. One session serves every size. `probe_dims` says what to run each name at for the
+  admission probe (a declared name it leaves out is probed at 1); an entry naming an axis no
+  shape declares is refused. `ModelDim` is the type; `lib/model-manifest.ts` is the one lint.
+  **A shape is not `number[]`** — that typing is what made the lint report the feature as an
+  error at the coordinate the author typed.
+- **`ModelStats` is what admission read, and it is not stable across versions.** Graph numbers
+  (`parameters`, `nodes`, `operators`) come from the ONNX protobuf, so they are identical on
+  every node and runtime; probe numbers (`probe_ms`, `probe_dims`, `runtime`, `device`) are the
+  admitting node's alone. Since 1.8.1 `parameters` counts *every* value the graph carries —
+  initializers, tensors and number lists in node attributes, through subgraph bodies and
+  model-local functions — where it summed initializers alone, so an `ai.onnx.ml` model that read
+  as parameterless now reports its real size and one just under `models.max_parameters` can be
+  refused on re-admission. `nodes` likewise covers the whole document. `operators` (1.8.1) is the
+  distinct operator set, sorted, domain-qualified unless default — empty on a version admitted
+  before it was recorded. **Stored stats are written at admission and never recomputed.**
+- **`/health`'s resident model rows are sessions, not versions (1.8.1).** The session cache keys
+  on digest **+ binding + runtime + device**, because a load is a function of the bytes, the
+  manifest and the device. Registering one artifact under several manifests is expressly
+  representable, so **one digest can appear twice** — key a list on `loadedModelKey(m)`, never on
+  `digest`. The binding covers the inputs' names, dtypes and shapes and the output names, in
+  manifest order, and deliberately nothing else.
+- **`model_infer`** takes `model` (a literal id or JSONLogic routing per message), `input`,
+  `output` (default `temp_data.inference`), `raw`, `runtime`, `timeout_ms` (JSONLogic since
+  1.8.1, like `channel_call`'s and `http_call`'s — a computed value can only *lower* the host
+  cap) and `stats_output` (`{id, version, digest, runtime, device, parameters, artifact_bytes,
+  ops, peak_ops, queued_ms, inference_ms, cold_load}`; `ops`/`peak_ops` are 1.8.1 — what the
+  manifest's expressions charged, `peak_ops` being the number `engine.ops_budget` is compared
+  against). A workflow naming a model the set does not serve by *literal* id is **quarantined**;
+  a computed one is answered per message and fails as `unavailable`.
+- **The JSONLogic tensor family (1.8) is a live-operator hazard.** Seven of its twenty names —
+  `shape`, `full`, `cast`, `pad`, `crop`, `concat`, `stack` — are ordinary JSON keys, and in a
+  template position a single-key object whose key is a live operator is a *call*, not data. A
+  stored mapping emitting `{"shape": [6, 7]}` changed meaning in 1.8; the fix is the `$` escape
+  (`{"$shape": [6, 7]}`). `lib/tensor-keys.ts` is the advisory, driven by the catalogue's
+  `template_at`, and is why `template_at` must never be hardcoded.
+- **`models.preload` / `models.preload_tags` (1.8.1) are server config with no admin endpoint**,
+  like `[vars]` and `[secrets]`. `preload` reads the *literal* `model` of active workflows, so a
+  workflow routing with a computed one warms nothing; `preload_tags` names the hot set by tag
+  instead, as a union with the mode. This is what makes a model's **tags** operationally
+  load-bearing rather than decorative.
 
 - **A cron channel's schedule is `transport_config` (1.6).** `{ schedule, timezone?, payload?,
   misfire_policy?, max_catch_up?, concurrency? }` — six-field expression (seconds first; five- and
@@ -143,10 +202,12 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   increments `attempt`; only `failed` / `skipped_*` accept it (409 otherwise). Re-running finished
   work is a *trigger*, which mints a new occurrence. Failed occurrences never enter the trace DLQ.
   Cron runs **do** count in `orion_messages_total{channel}`, unlike `channel_call` targets.
-- **`/health` components (1.4–1.6):** always `database`, `engine` (constant ok), `connectors`,
+- **`/health` components (1.4–1.8):** always `database`, `engine` (constant ok), `connectors`,
   `channels`, `background_tasks`, `engine_reload` (the last reload failed — serving the previous
-  generation) and `plugins` (`disabled` when the sandbox is off and nothing needs it; a *state*,
-  not a fault — `lib/status.ts::isComponentFault` keeps it off the dashboard); conditionally
+  generation), `plugins` and `models` (each `disabled` when that runtime is off and nothing needs
+  it; a *state*, not a fault — `lib/status.ts::isComponentFault` keeps both off the dashboard;
+  `models` degrades when the generation could not carry an active model, which quarantines the
+  workflows naming it, or when the admission worker is down); conditionally
   `kafka`, `cron` (on, or off while an active cron channel is quarantined), `config_propagation`
   and `cluster_redis`. `degraded` on `engine_reload`/`config_propagation`/`cron` does not fail
   `/readyz`. Admin-only detail adds `plugins.{loaded,failed_to_load}` (a failed load quarantines
@@ -181,9 +242,12 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   links). `/traces/:id?token=` is still read for old links.
 - **Trace `mode` is open:** `sync` | `async` | `kafka` (1.4 — no `channel_id`, no `input_json`)
   | `cron` (1.6). `TRACE_MODES` drives the filter.
-- **Audit vocabulary** gained `resource_type: plugin` and `cron_occurrence`, and actions
-  `trigger` (channel) and `retry` (cron_occurrence). Status changes are named for the status
-  requested (`status_active`, `status_archived`); there is no `activate` action.
+- **Audit vocabulary** gained `resource_type: plugin` and `cron_occurrence` (1.6), `model`
+  (1.8), and actions `trigger` (channel), `retry` (cron_occurrence) and `admit` (model). Status
+  changes are named for the status requested (`status_active`, `status_archived`); there is no
+  `activate` action. The filter dropdowns in `pages/audit.tsx` are that vocabulary written out by
+  hand — a new resource type or action has to be added there *and* to `lib/audit-routes.ts`, or
+  the rows arrive unfilterable.
 - **`response.cookies` (1.5)** is its own switch — a shaped channel's workflow may then set
   cookies declaratively through `data._orion.response.cookies`. A response that sets a cookie is
   never stored in the response cache. `cache.key_logic` is the general form of
@@ -299,7 +363,7 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 
 ### Layers
 
-- **`src/api/`** — Typed API client. `client.ts` wraps fetch with the `/api/v1` base path, parses the structured error envelope onto `ApiError` (incl. `details[]` and `requestId`), and exports `buildQuery()`, `unwrap()`, and `api.send()` for arbitrary-method data-plane calls. `RequestOptions.changeContext` sends `X-Orion-Change-Context` so a multi-request promotion's audit rows can be grouped. Domain modules: `channels.ts`, `workflows.ts`, `connectors.ts`, `traces.ts`, `trace-dlq.ts`, `packages.ts`, `engine.ts`, `audit.ts`, `backup.ts`, `functions.ts`, `data.ts`. All types hand-written in `types.ts`.
+- **`src/api/`** — Typed API client. `client.ts` wraps fetch with the `/api/v1` base path, parses the structured error envelope onto `ApiError` (incl. `details[]` and `requestId`), and exports `buildQuery()`, `unwrap()`, and `api.send()` for arbitrary-method data-plane calls. `RequestOptions.changeContext` sends `X-Orion-Change-Context` so a multi-request promotion's audit rows can be grouped. Domain modules: `channels.ts`, `workflows.ts`, `connectors.ts`, `traces.ts`, `trace-dlq.ts`, `packages.ts`, `engine.ts`, `audit.ts`, `backup.ts`, `functions.ts`, `data.ts`, `plugins.ts`, `cron.ts`, `models.ts`. All types hand-written in `types.ts`.
 - **`src/hooks/`** — TanStack Query wrappers. One hook file per domain (`use-channels.ts`, `use-workflows.ts`, etc.). Query keys are `["entity", params]` arrays. Mutations invalidate via `queryClient.invalidateQueries`. The client default is `staleTime: 30_000` (a page visited twice in a row does not refetch its lists; polled queries keep their own `refetchInterval`, and invalidation ignores staleness), and every paginated list hook sets `placeholderData: keepPreviousData` so a page turn holds the last page instead of dropping to a skeleton.
 - **`src/pages/`** — Route-level components. Named exports like `ChannelsPage`, `WorkflowDetailPage`. Data fetching via hooks, not inline.
 - **`src/components/ui/`** — Shadcn-style primitives using `React.forwardRef`, CVA variants, and
@@ -504,6 +568,22 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   moved. `use-metrics.ts` also exposes `useCronMetrics` (pending gauge, lag p95, occurrences by
   status, lease failures) and `usePluginMetrics` (per-function invocations, errors, p95), both
   reading the shared `["metrics"]` poll.
+- **`src/api/models.ts`** — the 1.8 entity. Hooks in `use-models.ts` (`useModel` polls while
+  `admission.state` is `pending`, the shape `useTrace` uses). `use-metrics.ts` exposes
+  `useModelMetrics` (`orion_model_inferences_total`, `orion_model_inference_duration_seconds`,
+  `orion_model_failures_total` by its nine categories), reading the same `["metrics"]` poll.
+- **`src/lib/model-manifest.ts`** — reading and shape-checking an `orion:model@1.0.0` manifest:
+  `lintManifest` (mirrors the server's `model/manifest.rs`, reporting at the coordinate the
+  author typed so `lib/json-path.ts` can map it to a range, exactly as `lintSteps` does for a
+  workflow's steps), `checkModelName`, `formatTensorType`, `blankManifest`, `admissionStage` /
+  `admissionFailure`. It is the *fast half* — server-side Validate is the authority, since only
+  the serving engine can compile the adapters on its own operator vocabulary. Findings render as
+  CodeMirror diagnostics at **warning** severity (`.cm-lintRange`, never `-error`): they are a
+  squiggle and a hover tooltip, **not page text**, so a test asserting on visible message text
+  passes whether the lint is right or wrong.
+- **`src/lib/tensor-keys.ts`** — the 1.8 tensor-operator advisory: which stored expressions hold
+  a single-key object whose key is now a live tensor operator, and therefore changed meaning.
+  Driven by the catalogue's `template_at`, never a hardcoded field list.
 
 ### Routing
 
@@ -525,6 +605,10 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
 /plugins/new        -> PluginFormPage (upload)
 /plugins/:id        -> PluginDetailPage
 /plugins/:id/edit   -> PluginFormPage (edit; draft only)
+/models             -> ModelsPage
+/models/new         -> ModelFormPage (register)
+/models/:id         -> ModelDetailPage
+/models/:id/edit    -> ModelFormPage (edit; draft only)
 /connectors         -> ConnectorsPage
 /connectors/new     -> ConnectorFormPage (create)
 /connectors/:id     -> ConnectorDetailPage (?test=1 opens the probe dialog)

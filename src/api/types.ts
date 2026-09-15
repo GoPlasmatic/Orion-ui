@@ -952,15 +952,38 @@ export interface PluginLoadIssue {
   reason: string
 }
 
-/** One model version a runtime holds on this node right now (1.8). */
+/**
+ * One loaded session a runtime holds on this node right now (1.8).
+ *
+ * A row is a *session*, not a model version. Since 1.8.1 the session cache is
+ * keyed by digest, **binding**, runtime and device, because a load is a
+ * function of the bytes, the manifest and the device: two manifests over one
+ * artifact that declare their outputs in different orders are two plans over
+ * one graph and get two sessions. Registering one artifact under several
+ * manifests is expressly representable — one graph for two tenants with
+ * different adapters, two result expressions compared over one file — so
+ * `digest` alone does not identify a row.
+ */
 export interface ModelLoaded {
-  // The identity a generation, a trace and a package all name the model by —
-  // and the only key `/health` reports residency under, because a digest is
-  // what a session cache is keyed by.
+  // The identity a generation, a trace and a package all name the model by.
+  // Not unique among these rows on its own — see `binding`.
   digest: string
+  /**
+   * A fingerprint of what the load actually read (1.8.1): the inputs' names,
+   * dtypes and shapes and the output names, in manifest order. Everything else
+   * stays out of it on purpose — the model's name and version, its adapters,
+   * its result expression — so two manifests that bind the graph the same way
+   * still share one resident session. Absent from a pre-1.8.1 node.
+   */
+  binding?: string
   runtime: string
   device: string
   resident_bytes: number
+}
+
+/** The key one resident session is identified by — see `ModelLoaded.binding`. */
+export function loadedModelKey(m: ModelLoaded): string {
+  return `${m.digest}|${m.binding ?? ""}|${m.runtime}|${m.device}`
 }
 
 /**
@@ -1809,14 +1832,41 @@ export interface ModelArtifactRef {
  * numbers describe the admitting node alone.
  */
 export interface ModelStats {
-  // Summed over the initializers. A tensor a `Constant` node carries in an
-  // attribute is not counted. `models.max_parameters` applies to this, not to
-  // whatever the manifest claimed.
+  // Every value the graph carries, wherever it carries it (1.8.1): each
+  // initializer, each tensor or list of numbers a node holds in an attribute,
+  // through every subgraph body (`If`, `Loop`, `Scan`) and every model-local
+  // function. Before 1.8.1 this summed the initializers alone, so a graph
+  // carrying its weights in `Constant` attributes — every `ai.onnx.ml` model,
+  // with no rewrite at all — reported zero. `models.max_parameters` applies to
+  // this, not to whatever the manifest claimed. Stored stats are written at
+  // admission and never recomputed, so a row keeps the number the node that
+  // admitted it measured.
   parameters?: number
+  // The whole document's node count since 1.8.1 — the graph, every subgraph
+  // body and every model-local function — where it was the top-level graph's.
   nodes?: number
   ir_version?: number
   opset?: number
   artifact_bytes?: number
+  /**
+   * The distinct operators those nodes ask a runtime for (1.8.1), sorted, each
+   * qualified by its domain unless that is the default one — so
+   * `ai.onnx.ml.LinearRegressor`, but plain `Gemm`.
+   *
+   * What the graph needs *implemented*, which is the one question a model row
+   * cannot otherwise answer: the row holds the artifact's reference and not
+   * its bytes, and the node may no longer have them cached. Empty on a version
+   * admitted before 1.8.1 recorded it.
+   */
+  operators?: string[]
+  /**
+   * What each named dimension was bound to for the admission probe (1.8.1).
+   * Absent when the manifest declares fixed shapes, which is most of them —
+   * present when it does not, because `probe_ms` over a variable axis says
+   * nothing without the size behind it. A declared name this leaves out was
+   * probed at 1.
+   */
+  probe_dims?: Record<string, number>
   // Median of five probe inferences over zero-filled inputs, in ms. Admission
   // requires it within `models.max_probe_ms`.
   probe_ms?: number
@@ -1848,14 +1898,28 @@ export interface ModelHealth {
   resident_bytes?: number | null
 }
 
+/**
+ * One dimension of a declared shape (1.8.1): a positive count, or a name
+ * standing for whatever the call brings.
+ *
+ * A name **binds on its first occurrence in a call** and every later
+ * occurrence — in another input, or in an output — must equal that binding,
+ * which is what makes `["N", 3]` on an output mean the N the input had. Every
+ * axis the author did not name stays exactly as strict as it was. A fixed
+ * dimension serialises as the number it always was, so a manifest that names
+ * nothing is byte-identical to one written before 1.8.1 — which matters,
+ * because a loaded session's cache key is a hash of the binding.
+ */
+export type ModelDim = number | string
+
 /** One input tensor and how a message becomes it. */
 export interface ModelInputDecl {
   // The graph's input name — also the context key the default adapter reads.
   name: string
   // A datavalue dtype wire name (`f32`, `i64`, `bool`, …), lowercase.
   dtype: string
-  // The fixed shape; every dimension positive.
-  shape: number[]
+  // Every dimension a positive count or a name a call decides — see `ModelDim`.
+  shape: ModelDim[]
   // JSONLogic over the JSON the task hands over, producing this input's
   // tensor. Absent means the default, `{"tensor": [{"var": name}, dtype]}`.
   // May not read `{"secret": …}`, `now` or `random`: a manifest's author is
@@ -1868,7 +1932,9 @@ export interface ModelInputDecl {
 export interface ModelOutputDecl {
   name: string
   dtype: string
-  shape: number[]
+  // A name here must be one an input also declares, or it binds to whatever
+  // the graph produces.
+  shape: ModelDim[]
   [key: string]: unknown
 }
 
@@ -1909,6 +1975,15 @@ export interface ModelManifest {
   // JSONLogic over the outputs, each by name, producing what the task writes.
   // Absent means a nested list per output.
   result?: JsonLogicValue
+  /**
+   * What each named dimension is worth to the admission probe (1.8.1), which
+   * needs concrete shapes to build the zero-filled tensors it runs. Only for
+   * the probe: a declared name left out of it is probed at 1, the smallest
+   * tensor there is. The binding lands in `stats.probe_dims`, which is the
+   * only thing that makes `probe_ms` comparable between two models with a
+   * variable axis. An entry naming a dimension no shape declares is refused.
+   */
+  probe_dims?: Record<string, number>
   [key: string]: unknown
 }
 

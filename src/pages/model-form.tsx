@@ -204,13 +204,22 @@ function ModelForm({ existing }: { existing?: Model }) {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Declares the model's id, every input and output the graph has — name, dtype and a fixed
-            shape — and the JSONLogic that marshals a message into those tensors and the outputs
-            back out. Leave an <code className="font-mono">adapter</code> or the{" "}
+            Declares the model's id, every input and output the graph has — name, dtype and shape —
+            and the JSONLogic that marshals a message into those tensors and the outputs back out.
+            Leave an <code className="font-mono">adapter</code> or the{" "}
             <code className="font-mono">result</code> out and the default applies, which is enough
             for a caller that already speaks tensors. An adapter may not read{" "}
             <code className="font-mono">{`{"secret": …}`}</code>,{" "}
             <code className="font-mono">now</code> or <code className="font-mono">random</code>.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            A dimension is a positive count or a <strong>name</strong> —{" "}
+            <code className="font-mono">{`"shape": ["N", 3]`}</code> — for a graph exported with a
+            dynamic axis. The name binds to what each call brings, and one session serves every
+            size. Name the same axis in an output and it means the one the input bound. Admission
+            needs concrete tensors, so{" "}
+            <code className="font-mono">probe_dims</code> says what to probe each name at; a name
+            it leaves out is probed at 1.
           </p>
           <JsonEditor
             value={manifestText}

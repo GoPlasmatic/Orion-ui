@@ -269,3 +269,77 @@ test("the health report on Engine names the 1.6 components", async ({ page }) =>
   await expect(page.getByText("engine_reload")).toBeVisible()
   await expect(page.getByText("plugins", { exact: true })).toBeVisible()
 })
+
+// ---- Orion 1.8: models ---------------------------------------------------------
+
+test("the models page renders and the registration validates server-side", async ({ page }) => {
+  await page.goto("/models")
+  // Same contract as the plugins list: the header row is drawn in every table
+  // state and the empty state sits inside the table beneath it, so asserting
+  // the header and then a settled row below it matches both a fresh CI
+  // container and a developer's populated server.
+  await expect(page.getByRole("columnheader", { name: "Model" })).toBeVisible()
+  await expect(page.getByRole("row", { name: /\S/ }).nth(1)).toBeVisible()
+
+  await page.goto("/models/new")
+  // The seeded manifest has an empty name and no artifact reference, so the
+  // client refuses before the round trip — the connector is asked for first.
+  await page.getByRole("button", { name: "Validate" }).click()
+  await expect(page.getByText(/^Choose the storage connector/)).toBeVisible()
+})
+
+/**
+ * 1.8.1 (#318): a shape's dimension may be a name. The client lint used to
+ * require a whole number, so it reported a valid manifest as two errors in the
+ * author's own editor.
+ *
+ * The findings are CodeMirror diagnostics — a wavy underline and a hover
+ * tooltip, not page text — so what this asserts is the marker itself. An
+ * assertion on visible text passes whether or not the lint is wrong, which is
+ * how the first cut of this test was vacuous.
+ */
+test("a manifest with a variable axis is not refused by the client", async ({ page }) => {
+  await page.goto("/models/new")
+  const manifest = {
+    abi: "orion:model@1.0.0",
+    name: `smoke.dyn-${runId}`,
+    version: "0.1.0",
+    format: "onnx",
+    inputs: [{ name: "x", dtype: "f32", shape: ["N", 3] }],
+    outputs: [{ name: "y", dtype: "f32", shape: ["N", 1] }],
+    probe_dims: { N: 8 },
+  }
+  // The editor's aria-label sits on CodeMirror's own `.cm-content`, which is
+  // the contenteditable — so this is the element to fill, not a wrapper.
+  const editor = page.getByLabel("Model manifest")
+  await editor.click()
+  await editor.fill(JSON.stringify(manifest, null, 2))
+
+  await page.getByLabel("Object key").fill("smoke-dyn.onnx")
+  await page.getByLabel("Artifact digest").fill("sha256:" + "0".repeat(64))
+
+  // The lint is debounced, so let it settle before reading the markers: a
+  // count taken too early is zero whatever the rules say. Findings render at
+  // *warning* severity, so match the base class rather than `-error`, which
+  // nothing here ever carries.
+  await expect(editor).toContainText("probe_dims")
+  await page.waitForTimeout(1_500)
+  await expect(page.locator(".cm-lintRange")).toHaveCount(0)
+
+  // And the client still stops on the artifact — which is the point: the stop
+  // is about the reference, never about the shape.
+  await page.getByRole("button", { name: "Validate" }).click()
+  await expect(page.getByText(/^Choose the storage connector/)).toBeVisible()
+})
+
+test("the audit log can be filtered to models", async ({ page }) => {
+  await page.goto("/audit")
+  // Both halves of the model vocabulary the server writes — the entity and
+  // its own verb — are offerable, so a model's history is reachable.
+  await page.getByLabel("Filter by resource type").selectOption("model")
+  await page.getByLabel("Filter by action").selectOption("admit")
+  await expect(page).toHaveURL(/resource_type=model/)
+  await expect(page).toHaveURL(/action=admit/)
+  // The filtered list still renders its table rather than an error.
+  await expect(page.getByRole("columnheader", { name: "Action" })).toBeVisible()
+})

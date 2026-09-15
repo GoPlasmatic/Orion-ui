@@ -206,6 +206,7 @@ export function AuditPage() {
           <option value="status_active">Activate</option>
           <option value="status_archived">Archive</option>
           <option value="update_rollout">Update rollout</option>
+          <option value="admit">Admit (model)</option>
           <option value="import">Import</option>
           <option value="test">Test</option>
           <option value="trigger">Trigger (cron)</option>
@@ -228,6 +229,7 @@ export function AuditPage() {
           <option value="workflow">Workflow</option>
           <option value="connector">Connector</option>
           <option value="plugin">Plugin</option>
+          <option value="model">Model</option>
           <option value="cron_occurrence">Cron occurrence</option>
           <option value="engine">Engine</option>
           <option value="circuit_breaker">Circuit breaker</option>

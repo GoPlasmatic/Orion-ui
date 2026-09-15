@@ -207,6 +207,18 @@ export function ModelDetailPage() {
   const admitted = model.admission.state === "passed"
   const inputs = model.manifest?.inputs ?? []
   const outputs = model.manifest?.outputs ?? []
+  const operators = stats?.operators ?? []
+  // Sorted so the reading is stable; the server sends an object, not a list.
+  const probeDims = Object.entries(stats?.probe_dims ?? {}).sort(([a], [b]) => a.localeCompare(b))
+  // Every axis the manifest left for a call to decide, across inputs and
+  // outputs — a name means the same axis wherever it appears.
+  const variableAxes = [
+    ...new Set(
+      [...inputs, ...outputs].flatMap((d) =>
+        (d.shape ?? []).filter((dim): dim is string => typeof dim === "string")
+      )
+    ),
+  ].sort()
 
   // Knowable before the request, so the button says so rather than the server
   // answering 409 after a round trip.
@@ -531,6 +543,14 @@ export function ModelDetailPage() {
                         <dt className="text-muted-foreground">Probe</dt>
                         <dd className="mt-0.5 tabular-nums" title="Median of five inferences over zero-filled inputs">
                           {stats.probe_ms != null ? formatDuration(stats.probe_ms) : "—"}
+                          {probeDims.length > 0 && (
+                            <span
+                              className="ml-1.5 font-mono text-xs text-muted-foreground"
+                              title="What each named dimension was bound to for the probe. A declared name the manifest does not mention is probed at 1."
+                            >
+                              at {probeDims.map(([name, size]) => `${name}=${size}`).join(", ")}
+                            </span>
+                          )}
                         </dd>
                       </div>
                       <div>
@@ -548,12 +568,46 @@ export function ModelDetailPage() {
                         </dd>
                       </div>
                     </dl>
+
+                    {/* The one question the row cannot otherwise answer: it holds the
+                        artifact's reference, not its bytes, and this node may no longer
+                        have them cached. Empty on a version admitted before 1.8.1. */}
+                    {operators.length > 0 && (
+                      <div className="mt-6 space-y-2">
+                        <h3 className="text-sm font-semibold">
+                          Operators{" "}
+                          <span className="font-normal text-muted-foreground">
+                            ({operators.length})
+                          </span>
+                        </h3>
+                        <div className="flex flex-wrap gap-1">
+                          {operators.map((op) => (
+                            <Badge key={op} variant="outline" className="font-mono text-[10px]">
+                              {op}
+                            </Badge>
+                          ))}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          What the graph asks a runtime for, gathered over the graph, every
+                          subgraph body and every model-local function — each qualified by its
+                          domain unless that is the default one. This is what to check before
+                          rolling out a runtime upgrade, and the first thing to read when a model
+                          that admitted last month stops loading.
+                        </p>
+                      </div>
+                    )}
+
                     <p className="mt-4 text-xs text-muted-foreground">
                       The graph numbers are read from the ONNX protobuf itself, so they are the same
                       on every node and every runtime — which is why a workflow scoring a
                       competition reads <code className="font-mono">parameters</code> from here
-                      rather than trusting the entrant's claim. The probe numbers describe the
-                      admitting node alone.
+                      rather than trusting the entrant's claim. Since 1.8.1 it counts every value
+                      the graph carries and not the initializers alone, so a model that kept its
+                      weights in node attributes now reports more than it did — enough that one
+                      sitting just under <code className="font-mono">models.max_parameters</code>{" "}
+                      can be refused on re-admission, and a ranking on the field can move. Stored
+                      stats are never recomputed: this row holds what the node that admitted it
+                      measured. The probe numbers describe the admitting node alone.
                     </p>
                   </>
                 )}
@@ -570,6 +624,21 @@ export function ModelDetailPage() {
             <CardContent className="space-y-6">
               <SignatureTable title="Inputs" decls={inputs} kind="input" />
               <SignatureTable title="Outputs" decls={outputs} kind="output" />
+              {variableAxes.length > 0 && (
+                <Callout variant="info">
+                  This model declares a variable axis:{" "}
+                  {variableAxes.map((n) => (
+                    <code key={n} className="mr-1 font-mono">
+                      {n}
+                    </code>
+                  ))}
+                  — one session serves every size. A name binds to what the call brings on its
+                  first occurrence, and every later occurrence, in another input or in an output,
+                  must equal that binding. Every axis given as a number is as strict as it ever
+                  was, and <code className="font-mono">models.max_input_elements</code> still
+                  bounds what one message may hand over.
+                </Callout>
+              )}
               <p className="text-xs text-muted-foreground">
                 A task never spells a tensor: it names the model, hands over the JSON root every
                 adapter reads (<code className="font-mono">input</code>), and says where the result
