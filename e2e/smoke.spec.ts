@@ -336,10 +336,17 @@ test("the audit log can be filtered to models", async ({ page }) => {
   await page.goto("/audit")
   // Both halves of the model vocabulary the server writes — the entity and
   // its own verb — are offerable, so a model's history is reachable.
+  //
+  // One filter at a time, each awaited: `useUrlFilters.set` composes a patch
+  // into the params of the last *render*, so two changes driven inside one
+  // render cycle do not compose and the second drops the first. A person
+  // always has a render between two dropdowns; automation does not, and
+  // asserting both at once failed in CI while passing locally.
   await page.getByLabel("Filter by resource type").selectOption("model")
-  await page.getByLabel("Filter by action").selectOption("admit")
   await expect(page).toHaveURL(/resource_type=model/)
+  await page.getByLabel("Filter by action").selectOption("admit")
   await expect(page).toHaveURL(/action=admit/)
+  await expect(page).toHaveURL(/resource_type=model/)
   // The filtered list still renders its table rather than an error.
   await expect(page.getByRole("columnheader", { name: "Action" })).toBeVisible()
 })
