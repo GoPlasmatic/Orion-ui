@@ -9,18 +9,18 @@ import { useTable, createColumnHelper } from "@tanstack/react-table"
 import { listTableFeatures } from "@/lib/table"
 import { useListState } from "@/lib/use-list-state"
 import type { Channel, EntityStatus, ChannelProtocol, ChannelType } from "@/api/types"
+import { CHANNEL_PROTOCOLS, CHANNEL_TYPES, ENTITY_STATUSES } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
 import { channelsApi } from "@/api/channels"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
 import { PAGE_SIZE } from "@/lib/use-pagination"
 import { StatusBadge } from "@/components/shared/status-badge"
-import { EmptyState } from "@/components/shared/empty-state"
+import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { EntityTable } from "@/components/shared/entity-table"
-import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
+import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter-bar"
 import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
 import { cronTransport } from "@/lib/cron"
 import { CalendarClock, Download, Plus, Radio, Upload } from "lucide-react"
@@ -29,6 +29,13 @@ const columnHelper = createColumnHelper<typeof listTableFeatures, Channel>()
 
 /** Filters in the URL so a filtered list is a link; sort and page ride along. */
 const FILTER_KEYS = ["status", "protocol", "type", "tag"] as const
+
+/** What each dropdown accepts; anything else in the URL reads as unset. */
+const FILTER_VALUES = {
+  status: ENTITY_STATUSES,
+  protocol: CHANNEL_PROTOCOLS,
+  type: CHANNEL_TYPES,
+}
 
 /** Column id → the server's `sort_by` field; the rest are not sortable. */
 const SORT_FIELDS: Record<string, string> = {
@@ -155,7 +162,11 @@ function buildColumns(quarantined: ReadonlyMap<string, string>) {
 
 export function ChannelsPage() {
   const navigate = useNavigate()
-  const { filters, update, sortQuery, sort, offset, prev, next } = useListState(FILTER_KEYS, SORT_FIELDS)
+  const { filters, update, clear, hasFilters, sortQuery, sort, offset, prev, next } = useListState(
+    FILTER_KEYS,
+    SORT_FIELDS,
+    { values: FILTER_VALUES },
+  )
   const statusFilter = filters.status as EntityStatus | ""
   const protocolFilter = filters.protocol as ChannelProtocol | ""
   const typeFilter = filters.type as ChannelType | ""
@@ -252,12 +263,12 @@ export function ChannelsPage() {
           <option value="sync">Sync</option>
           <option value="async">Async</option>
         </Select>
-        <Input
+        <FilterTextInput
           value={filters.tag}
-          onChange={(e) => update({ tag: e.target.value })}
-          placeholder="Filter by tag..."
-          className={FILTER_W}
-          aria-label="Filter by tag"
+          onChange={(tag) => update({ tag })}
+          placeholder="Exact tag..."
+          ariaLabel="Filter by tag"
+          title="Matches one whole tag, not part of one"
         />
       </FilterBar>
 
@@ -267,21 +278,25 @@ export function ChannelsPage() {
         sort={sort}
         onOpen={(channel) => navigate(`/channels/${channel.channel_id}`)}
         empty={
-          <EmptyState
-            icon={Radio}
-            title="No channels yet"
-            description="Channels are the service endpoints that receive requests and run a workflow. Create your first one or import existing definitions."
-            action={
-              <>
-                <Button variant="outline" onClick={() => setShowImport(true)}>
-                  <Upload className="h-4 w-4" /> Import
-                </Button>
-                <Button onClick={() => navigate("/channels/new")}>
-                  <Plus className="h-4 w-4" /> Create Channel
-                </Button>
-              </>
-            }
-          />
+          hasFilters ? (
+            <NoMatches noun="channels" onClear={clear} />
+          ) : (
+            <EmptyState
+              icon={Radio}
+              title="No channels yet"
+              description="Channels are the service endpoints that receive requests and run a workflow. Create your first one or import existing definitions."
+              action={
+                <>
+                  <Button variant="outline" onClick={() => setShowImport(true)}>
+                    <Upload className="h-4 w-4" /> Import
+                  </Button>
+                  <Button onClick={() => navigate("/channels/new")}>
+                    <Plus className="h-4 w-4" /> Create Channel
+                  </Button>
+                </>
+              }
+            />
+          )
         }
       />
 

@@ -2,6 +2,14 @@
 export type EntityStatus = "draft" | "active" | "archived"
 export type SortOrder = "asc" | "desc"
 
+/**
+ * The lifecycle values a list filter accepts. A filter reads its values from
+ * here rather than from the `<option>`s beside it, so a URL carrying a spelling
+ * the server never had — a stale link, a typo — reads as unset instead of
+ * silently selecting nothing.
+ */
+export const ENTITY_STATUSES = ["draft", "active", "archived"] as const satisfies readonly EntityStatus[]
+
 export type JsonLogicValue =
   | string
   | number
@@ -87,6 +95,9 @@ export type ChannelType = "sync" | "async"
 // clock, registers no route and no topic, and is not reachable at
 // `data/{name}` or by `channel_call`. A cron channel must be `async`.
 export type ChannelProtocol = "rest" | "http" | "kafka" | "cron"
+
+export const CHANNEL_TYPES = ["sync", "async"] as const satisfies readonly ChannelType[]
+export const CHANNEL_PROTOCOLS = ["rest", "http", "kafka", "cron"] as const satisfies readonly ChannelProtocol[]
 
 // Trace storage mode (global default + per-channel override via config.tracing)
 export type TraceStorageMode = "sync" | "async" | "batch" | "off"
@@ -784,6 +795,16 @@ export interface ImportResult {
 // Connector types. `smtp` is the sixth type, added in 1.1.
 export type ConnectorType = "http" | "kafka" | "db" | "cache" | "storage" | "es" | "smtp"
 
+export const CONNECTOR_TYPES = [
+  "http",
+  "kafka",
+  "db",
+  "cache",
+  "storage",
+  "es",
+  "smtp",
+] as const satisfies readonly ConnectorType[]
+
 /**
  * Per-operation gates. All default true server-side except
  * `aggregate_write_stages`, which is the one deliberate default-deny.
@@ -1279,6 +1300,13 @@ export interface HealthResponse {
 
 // Trace types
 export type TraceStatus = "pending" | "running" | "completed" | "failed"
+
+export const TRACE_STATUSES = [
+  "pending",
+  "running",
+  "completed",
+  "failed",
+] as const satisfies readonly TraceStatus[]
 
 /**
  * One row of the trace list. Since 1.0 the list is a payload-free projection:

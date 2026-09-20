@@ -9,24 +9,27 @@ import { listTableFeatures } from "@/lib/table"
 import { useListState } from "@/lib/use-list-state"
 import { countLeafSteps } from "@/lib/workflow-steps"
 import type { Channel, Workflow, EntityStatus } from "@/api/types"
+import { ENTITY_STATUSES } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
 import { PAGE_SIZE, REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { WorkflowImportWizard } from "@/components/shared/workflow-import-wizard"
-import { EmptyState } from "@/components/shared/empty-state"
+import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { EntityTable } from "@/components/shared/entity-table"
-import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
+import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter-bar"
 import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
 import { Download, GitBranch, Plus, Upload } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, Workflow>()
 
 const FILTER_KEYS = ["status", "tag"] as const
+
+/** What the status dropdown accepts; anything else in the URL reads as unset. */
+const FILTER_VALUES = { status: ENTITY_STATUSES }
 
 /** Column id → the server's `sort_by` field. */
 const SORT_FIELDS: Record<string, string> = {
@@ -118,7 +121,11 @@ function buildColumns(runsOn: ReadonlyMap<string, Channel[]>) {
 
 export function WorkflowsPage() {
   const navigate = useNavigate()
-  const { filters, update, sortQuery, sort, offset, prev, next } = useListState(FILTER_KEYS, SORT_FIELDS)
+  const { filters, update, clear, hasFilters, sortQuery, sort, offset, prev, next } = useListState(
+    FILTER_KEYS,
+    SORT_FIELDS,
+    { values: FILTER_VALUES },
+  )
   const statusFilter = filters.status as EntityStatus | ""
   const [showImport, setShowImport] = useState(false)
 
@@ -179,12 +186,12 @@ export function WorkflowsPage() {
           <option value="active">Active</option>
           <option value="archived">Archived</option>
         </Select>
-        <Input
-          placeholder="Filter by tag..."
+        <FilterTextInput
           value={filters.tag}
-          onChange={(e) => update({ tag: e.target.value })}
-          className={FILTER_W}
-          aria-label="Filter by tag"
+          onChange={(tag) => update({ tag })}
+          placeholder="Exact tag..."
+          ariaLabel="Filter by tag"
+          title="Matches one whole tag, not part of one"
         />
       </FilterBar>
 
@@ -194,23 +201,27 @@ export function WorkflowsPage() {
         sort={sort}
         onOpen={(workflow) => navigate(`/workflows/${workflow.workflow_id}`)}
         empty={
-          <EmptyState
-            icon={GitBranch}
-            title="No workflows yet"
-            description="Workflows are task pipelines, often AI-generated and imported here for review, validation, dry-run, and safe rollout."
-            action={
-              <div className="flex items-center gap-2">
-                <Button variant="outline" onClick={() => setShowImport(true)}>
-                  <Upload className="h-4 w-4" /> Import workflow
-                </Button>
-                <Button asChild>
-                  <Link to="/workflows/new">
-                    <Plus className="h-4 w-4" /> Create workflow
-                  </Link>
-                </Button>
-              </div>
-            }
-          />
+          hasFilters ? (
+            <NoMatches noun="workflows" onClear={clear} />
+          ) : (
+            <EmptyState
+              icon={GitBranch}
+              title="No workflows yet"
+              description="Workflows are task pipelines, often AI-generated and imported here for review, validation, dry-run, and safe rollout."
+              action={
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" onClick={() => setShowImport(true)}>
+                    <Upload className="h-4 w-4" /> Import workflow
+                  </Button>
+                  <Button asChild>
+                    <Link to="/workflows/new">
+                      <Plus className="h-4 w-4" /> Create workflow
+                    </Link>
+                  </Button>
+                </div>
+              }
+            />
+          )
         }
       />
 

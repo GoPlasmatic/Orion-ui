@@ -13,17 +13,17 @@ import { listTableFeatures } from "@/lib/table"
 import { useListState } from "@/lib/use-list-state"
 import { breakerRows } from "@/lib/breakers"
 import type { ConnectorListItem, ConnectorType, CreateConnectorRequest } from "@/api/types"
+import { CONNECTOR_TYPES } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
 import { connectorsApi } from "@/api/connectors"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
 import { PAGE_SIZE } from "@/lib/use-pagination"
-import { EmptyState } from "@/components/shared/empty-state"
+import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { EntityTable } from "@/components/shared/entity-table"
-import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
+import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter-bar"
 import { enabledBadgeClass, disabledBadgeClass, breakerStateBadgeClass } from "@/lib/status"
 import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
 import { Download, Plug, Plus, RefreshCw, Upload } from "lucide-react"
@@ -31,6 +31,9 @@ import { Download, Plug, Plus, RefreshCw, Upload } from "lucide-react"
 const columnHelper = createColumnHelper<typeof listTableFeatures, ConnectorListItem>()
 
 const FILTER_KEYS = ["type", "tag"] as const
+
+/** What the type dropdown accepts; anything else in the URL reads as unset. */
+const FILTER_VALUES = { type: CONNECTOR_TYPES }
 
 /** Column id → the server's `sort_by` field. */
 const SORT_FIELDS: Record<string, string> = {
@@ -123,7 +126,11 @@ function buildColumns(breakerByConnector: ReadonlyMap<string, string>) {
 
 export function ConnectorsPage() {
   const navigate = useNavigate()
-  const { filters, update, sortQuery, sort, offset, prev, next } = useListState(FILTER_KEYS, SORT_FIELDS)
+  const { filters, update, clear, hasFilters, sortQuery, sort, offset, prev, next } = useListState(
+    FILTER_KEYS,
+    SORT_FIELDS,
+    { values: FILTER_VALUES },
+  )
   const typeFilter = filters.type as ConnectorType | ""
   const [showImport, setShowImport] = useState(false)
 
@@ -219,12 +226,12 @@ export function ConnectorsPage() {
           <option value="es">Elasticsearch</option>
           <option value="smtp">SMTP</option>
         </Select>
-        <Input
+        <FilterTextInput
           value={filters.tag}
-          onChange={(e) => update({ tag: e.target.value })}
-          placeholder="Filter by tag..."
-          className={FILTER_W}
-          aria-label="Filter by tag"
+          onChange={(tag) => update({ tag })}
+          placeholder="Exact tag..."
+          ariaLabel="Filter by tag"
+          title="Matches one whole tag, not part of one"
         />
       </FilterBar>
 
@@ -234,21 +241,25 @@ export function ConnectorsPage() {
         sort={sort}
         onOpen={(connector) => navigate(`/connectors/${connector.id}`)}
         empty={
-          <EmptyState
-            icon={Plug}
-            title={typeFilter ? "No connectors of this type" : "No connectors yet"}
-            description="Connectors link workflows to external systems — HTTP services, databases, Kafka, caches, storage and mail. Create one or import existing definitions."
-            action={
-              <>
-                <Button variant="outline" onClick={() => setShowImport(true)}>
-                  <Upload className="h-4 w-4" /> Import
-                </Button>
-                <Button onClick={() => navigate("/connectors/new")}>
-                  <Plus className="h-4 w-4" /> Create Connector
-                </Button>
-              </>
-            }
-          />
+          hasFilters ? (
+            <NoMatches noun="connectors" onClear={clear} />
+          ) : (
+            <EmptyState
+              icon={Plug}
+              title="No connectors yet"
+              description="Connectors link workflows to external systems — HTTP services, databases, Kafka, caches, storage and mail. Create one or import existing definitions."
+              action={
+                <>
+                  <Button variant="outline" onClick={() => setShowImport(true)}>
+                    <Upload className="h-4 w-4" /> Import
+                  </Button>
+                  <Button onClick={() => navigate("/connectors/new")}>
+                    <Plus className="h-4 w-4" /> Create Connector
+                  </Button>
+                </>
+              }
+            />
+          )
         }
       />
 

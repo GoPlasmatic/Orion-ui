@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
-import type { LucideIcon } from "lucide-react"
+import { SearchX, type LucideIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 interface EmptyStateProps {
   icon: LucideIcon
@@ -26,5 +27,27 @@ export function EmptyState({ icon: Icon, title, description, action }: EmptyStat
       </div>
       {action && <div className="mt-1 flex items-center gap-2">{action}</div>}
     </div>
+  )
+}
+
+/**
+ * The empty state of a *filtered* list, which is a different fact from an
+ * empty one: the registry holds rows, these filters select none of them. A
+ * list that answers a narrowed filter with its first-run pitch ("No channels
+ * yet — create your first one") tells an operator the system is empty when it
+ * is not, so every list page picks between the two on `hasFilters`.
+ */
+export function NoMatches({ noun, onClear }: { noun: string; onClear: () => void }) {
+  return (
+    <EmptyState
+      icon={SearchX}
+      title={`No ${noun} match these filters`}
+      description="The list is not empty — the filters above select nothing in it."
+      action={
+        <Button variant="outline" onClick={onClear}>
+          Clear filters
+        </Button>
+      }
+    />
   )
 }

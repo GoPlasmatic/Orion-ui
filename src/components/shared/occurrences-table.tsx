@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { Link, useNavigate } from "react-router"
 import type { CronOccurrenceSummary } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
@@ -30,6 +31,7 @@ export function OccurrencesTable({
   onRetry,
   retryPending,
   emptyDescription,
+  empty,
 }: {
   rows: CronOccurrenceSummary[]
   isLoading: boolean
@@ -37,6 +39,8 @@ export function OccurrencesTable({
   onRetry?: (id: string) => void
   retryPending?: boolean
   emptyDescription?: string
+  /** Replaces the whole empty state — a filtered ledger is empty for a different reason. */
+  empty?: ReactNode
 }) {
   const navigate = useNavigate()
   const columns = 6 + (showChannel ? 1 : 0) + (onRetry ? 1 : 0)
@@ -70,14 +74,16 @@ export function OccurrencesTable({
           ) : rows.length === 0 ? (
             <TableRow>
               <TableCell colSpan={columns} className="p-0">
-                <EmptyState
-                  icon={CalendarClock}
-                  title="No occurrences"
-                  description={
-                    emptyDescription ??
-                    "Every scheduled instant of an active cron channel becomes a row here, written before the work starts and kept after it finishes."
-                  }
-                />
+                {empty ?? (
+                  <EmptyState
+                    icon={CalendarClock}
+                    title="No occurrences"
+                    description={
+                      emptyDescription ??
+                      "Every scheduled instant of an active cron channel becomes a row here, written before the work starts and kept after it finishes."
+                    }
+                  />
+                )}
               </TableCell>
             </TableRow>
           ) : (

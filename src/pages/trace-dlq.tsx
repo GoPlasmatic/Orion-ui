@@ -34,9 +34,9 @@ import {
 } from "@/components/ui/dialog"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
-import { EmptyState } from "@/components/shared/empty-state"
+import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { JsonViewer } from "@/components/shared/json-viewer"
-import { FilterBar } from "@/components/shared/filter-bar"
+import { FilterBar, FilterTextInput } from "@/components/shared/filter-bar"
 import { RetrySafetyWarning } from "@/components/shared/retry-safety-warning"
 import { PAGE_SIZE, REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { useListState } from "@/lib/use-list-state"
@@ -48,11 +48,18 @@ const isExhausted = (retryCount: number, maxRetries: number) => retryCount >= ma
 
 const FILTER_KEYS = ["channel", "exhausted"] as const
 
+/** The retry-state dropdown is a tri-state; anything else in the URL reads as unset. */
+const FILTER_VALUES = { exhausted: ["true", "false"] }
+
 /** Distinct channels named in a bulk requeue whose retry guard is shown; the rest are counted. */
 const GUARDS_SHOWN = 3
 
 export function TraceDlqPage() {
-  const { filters, update, offset, prev, next } = useListState(FILTER_KEYS)
+  const { filters, update, clear, hasFilters, offset, prev, next } = useListState(
+    FILTER_KEYS,
+    {},
+    { values: FILTER_VALUES },
+  )
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showPurge, setShowPurge] = useState(false)
   const [showBulk, setShowBulk] = useState(false)
@@ -91,12 +98,13 @@ export function TraceDlqPage() {
       </PageHeader>
 
       <FilterBar>
-        <Input
+        <FilterTextInput
           value={filters.channel}
-          onChange={(e) => update({ channel: e.target.value })}
-          placeholder="Filter by channel"
+          onChange={(channel) => update({ channel })}
+          placeholder="Exact channel name"
+          ariaLabel="Filter by channel"
           className="w-56"
-          aria-label="Filter by channel"
+          title="Matches the channel name exactly"
         />
         <Select
           value={filters.exhausted}
@@ -136,11 +144,15 @@ export function TraceDlqPage() {
             ) : rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="p-0">
-                  <EmptyState
-                    icon={Inbox}
-                    title="Nothing in the dead-letter queue"
-                    description="Only /async submissions reach this queue — a sync request carries its failure straight back to the caller, with nothing left to retry."
-                  />
+                  {hasFilters ? (
+                    <NoMatches noun="entries" onClear={clear} />
+                  ) : (
+                    <EmptyState
+                      icon={Inbox}
+                      title="Nothing in the dead-letter queue"
+                      description="Only /async submissions reach this queue — a sync request carries its failure straight back to the caller, with nothing left to retry."
+                    />
+                  )}
                 </TableCell>
               </TableRow>
             ) : (

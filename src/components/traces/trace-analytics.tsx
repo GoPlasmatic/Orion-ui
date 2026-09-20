@@ -52,6 +52,7 @@ export function TraceAnalytics() {
           value={String(window)}
           onChange={(e) => setWindow(Number(e.target.value))}
           className="w-36"
+          aria-label="Traces aggregated"
         >
           <option value="100">Last 100</option>
           <option value="200">Last 200</option>

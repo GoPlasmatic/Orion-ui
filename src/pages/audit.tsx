@@ -15,18 +15,66 @@ import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
-import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
+import { FilterBar, FilterTextInput, UnknownOption, FILTER_W } from "@/components/shared/filter-bar"
+import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { PAGE_SIZE } from "@/lib/use-pagination"
 import { formatDate, formatRelative, parseJson, toRfc3339, downloadJson, downloadText } from "@/lib/utils"
 import { useTimeZone } from "@/lib/use-time-zone"
 import { auditResourceRoute } from "@/lib/audit-routes"
-import { ChevronDown, ChevronRight, Download } from "lucide-react"
+import { ChevronDown, ChevronRight, Download, ScrollText } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, AuditLog>()
 
 /** Every filter in the URL: an audit search is the thing most worth pasting into an incident thread. */
 const FILTER_KEYS = ["action", "resource_type", "resource_id", "principal", "start", "end"] as const
+
+/**
+ * The server's own action vocabulary (docs/operate/audit-logs.md). A status
+ * change is named for the status requested — there is no `status_draft`,
+ * because a transition *to* draft is refused before anything is written. The
+ * wire value is an open string, so one this build does not list still filters:
+ * `UnknownOption` keeps it visible in the dropdown.
+ */
+const AUDIT_ACTIONS = [
+  { value: "create", label: "Create" },
+  { value: "update", label: "Update" },
+  { value: "delete", label: "Delete" },
+  { value: "create_version", label: "Create version" },
+  { value: "status_active", label: "Activate" },
+  { value: "status_archived", label: "Archive" },
+  { value: "update_rollout", label: "Update rollout" },
+  { value: "admit", label: "Admit (model)" },
+  { value: "import", label: "Import" },
+  { value: "test", label: "Test" },
+  { value: "trigger", label: "Trigger (cron)" },
+  { value: "retry", label: "Retry (occurrence)" },
+  { value: "reload", label: "Reload" },
+  { value: "reset", label: "Reset breaker" },
+  { value: "requeue", label: "Requeue (DLQ)" },
+  { value: "purge", label: "Purge (DLQ)" },
+  { value: "package_staged", label: "Package staged" },
+  { value: "package_applied", label: "Package applied" },
+] as const
+
+/** The resource types the server records. Kept beside `lib/audit-routes.ts`. */
+const AUDIT_RESOURCE_TYPES = [
+  { value: "channel", label: "Channel" },
+  { value: "workflow", label: "Workflow" },
+  { value: "connector", label: "Connector" },
+  { value: "plugin", label: "Plugin" },
+  { value: "model", label: "Model" },
+  { value: "cron_occurrence", label: "Cron occurrence" },
+  { value: "engine", label: "Engine" },
+  { value: "circuit_breaker", label: "Circuit breaker" },
+  { value: "trace_dlq", label: "Trace DLQ" },
+  { value: "package", label: "Package" },
+  { value: "backup", label: "Backup" },
+] as const
+
+/** The values in each dropdown, for the unlisted-value fallback. */
+const ACTION_VALUES = AUDIT_ACTIONS.map((a) => a.value)
+const RESOURCE_VALUES = AUDIT_RESOURCE_TYPES.map((r) => r.value)
 
 /** The server clamps `limit` to 1000; an export takes the most recent thousand under the filter. */
 const EXPORT_LIMIT = 1000
@@ -118,7 +166,7 @@ function csvCell(value: unknown): string {
 }
 
 export function AuditPage() {
-  const { filters, update, offset, prev, next } = useListState(FILTER_KEYS)
+  const { filters, update, clear, hasFilters, offset, prev, next } = useListState(FILTER_KEYS)
   // Rows whose `details` are open. The column is what the server recorded
   // about the change — the request that made it, the change context — and it
   // was never rendered.
@@ -194,29 +242,13 @@ export function AuditPage() {
           aria-label="Filter by action"
           className={FILTER_W}
         >
-          {/* The server's own vocabulary (docs/operate/audit-logs.md). A status
-              change is named for the status requested — there is no
-              `status_draft`, because a transition *to* draft is refused
-              before anything is written. */}
           <option value="">All actions</option>
-          <option value="create">Create</option>
-          <option value="update">Update</option>
-          <option value="delete">Delete</option>
-          <option value="create_version">Create version</option>
-          <option value="status_active">Activate</option>
-          <option value="status_archived">Archive</option>
-          <option value="update_rollout">Update rollout</option>
-          <option value="admit">Admit (model)</option>
-          <option value="import">Import</option>
-          <option value="test">Test</option>
-          <option value="trigger">Trigger (cron)</option>
-          <option value="retry">Retry (occurrence)</option>
-          <option value="reload">Reload</option>
-          <option value="reset">Reset breaker</option>
-          <option value="requeue">Requeue (DLQ)</option>
-          <option value="purge">Purge (DLQ)</option>
-          <option value="package_staged">Package staged</option>
-          <option value="package_applied">Package applied</option>
+          <UnknownOption value={filters.action} options={ACTION_VALUES} />
+          {AUDIT_ACTIONS.map((a) => (
+            <option key={a.value} value={a.value}>
+              {a.label}
+            </option>
+          ))}
         </Select>
         <Select
           value={filters.resource_type}
@@ -225,31 +257,28 @@ export function AuditPage() {
           className={FILTER_W}
         >
           <option value="">All resources</option>
-          <option value="channel">Channel</option>
-          <option value="workflow">Workflow</option>
-          <option value="connector">Connector</option>
-          <option value="plugin">Plugin</option>
-          <option value="model">Model</option>
-          <option value="cron_occurrence">Cron occurrence</option>
-          <option value="engine">Engine</option>
-          <option value="circuit_breaker">Circuit breaker</option>
-          <option value="trace_dlq">Trace DLQ</option>
-          <option value="package">Package</option>
-          <option value="backup">Backup</option>
+          <UnknownOption value={filters.resource_type} options={RESOURCE_VALUES} />
+          {AUDIT_RESOURCE_TYPES.map((r) => (
+            <option key={r.value} value={r.value}>
+              {r.label}
+            </option>
+          ))}
         </Select>
-        <Input
+        <FilterTextInput
           value={filters.resource_id}
-          onChange={(e) => update({ resource_id: e.target.value })}
+          onChange={(resource_id) => update({ resource_id })}
           placeholder="Resource ID"
+          ariaLabel="Filter by resource ID"
           className="w-44"
-          aria-label="Filter by resource ID"
+          title="Matches the id exactly"
         />
-        <Input
+        <FilterTextInput
           value={filters.principal}
-          onChange={(e) => update({ principal: e.target.value })}
+          onChange={(principal) => update({ principal })}
           placeholder="Principal"
+          ariaLabel="Filter by principal"
           className="w-40"
-          aria-label="Filter by principal"
+          title="Matches the principal exactly"
         />
         <Input
           type="datetime-local"
@@ -294,8 +323,16 @@ export function AuditPage() {
               ))
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={columns.length} className="text-center text-muted-foreground py-8">
-                  No audit logs found
+                <TableCell colSpan={columns.length} className="p-0">
+                  {hasFilters ? (
+                    <NoMatches noun="audit rows" onClear={clear} />
+                  ) : (
+                    <EmptyState
+                      icon={ScrollText}
+                      title="No audit rows yet"
+                      description="Every administrative write — a create, a status change, a reload — is recorded here as it happens."
+                    />
+                  )}
                 </TableCell>
               </TableRow>
             ) : (

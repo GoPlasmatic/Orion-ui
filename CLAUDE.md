@@ -312,9 +312,11 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 - **Audit vocabulary** gained `resource_type: plugin` and `cron_occurrence` (1.6), `model`
   (1.8), and actions `trigger` (channel), `retry` (cron_occurrence) and `admit` (model). Status
   changes are named for the status requested (`status_active`, `status_archived`); there is no
-  `activate` action. The filter dropdowns in `pages/audit.tsx` are that vocabulary written out by
-  hand — a new resource type or action has to be added there *and* to `lib/audit-routes.ts`, or
-  the rows arrive unfilterable.
+  `activate` action. `AUDIT_ACTIONS` and `AUDIT_RESOURCE_TYPES` in `pages/audit.tsx` are that
+  vocabulary written out by hand — a new resource type or action has to be added there *and* to
+  `lib/audit-routes.ts`, or the rows arrive unfilterable. Both are open strings on the wire, so
+  the dropdowns keep an unlisted value from the URL visible (`UnknownOption`) rather than
+  filtering by something they do not show.
 - **`response.cookies` (1.5)** is its own switch — a shaped channel's workflow may then set
   cookies declaratively through `data._orion.response.cookies`. A response that sets a cookie is
   never stored in the response cache. `cache.key_logic` is the general form of
@@ -440,7 +442,7 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   Input/Textarea/Select — change it there, not per field. `Select` renders a wrapper div so it can
   overlay a themed chevron: `className` sizes the *control* (as callers already expected),
   `selectClassName` reaches the `<select>` itself.
-- **`src/components/shared/`** — Shared composed components: `StatusBadge`, `LifecycleActions` (incl. the activation pre-flight), `VersionHistory`, `JsonViewer`, `PageHeader`, `ConfirmDialog`, `PaginationFooter`, `ValidationResults`, `ImportDialog`/`ImportSummary`, `ChannelAuthEditor`, `ConnectorTestDialog`, `WorkflowDependencies`, `FilterBar`, `EmptyState`, `ErrorState` (the one
+- **`src/components/shared/`** — Shared composed components: `StatusBadge`, `LifecycleActions` (incl. the activation pre-flight), `VersionHistory`, `JsonViewer`, `PageHeader`, `ConfirmDialog`, `PaginationFooter`, `ValidationResults`, `ImportDialog`/`ImportSummary`, `ChannelAuthEditor`, `ConnectorTestDialog`, `WorkflowDependencies`, `FilterBar` (with `FilterTextInput` and `UnknownOption`), `EmptyState`/`NoMatches`, `ErrorState` (the one
   way a page reports a failed load — reads status, code, field details and request id off
   `ApiError`, with Retry) and `ErrorBoundary`.
 - **`src/components/layout/`** — `AppLayout`, `Sidebar`, `Header`. `AppLayout` owns the two
@@ -500,9 +502,19 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   history entry and changes several keys in one navigation — two calls in a row each start from
   the last render's params and the second undoes the first (react-router's functional updater
   reads the render's params). The map, the dashboard and the console use it directly.
-  `useListState(keys, sortFields?)` is a list page's whole view — its filters, `sort`/`order`
-  and `offset` — as URL keys: `update(patch)` re-anchors to the first page, `prev`/`next` page,
-  `sortQuery` is the request's `sort_by`/`sort_order`, and `sort` feeds `EntityTable`. Every
+  `useListState(keys, sortFields?, options?)` is a list page's whole view — its filters,
+  `sort`/`order` and `offset` — as URL keys: `update(patch)` re-anchors to the first page,
+  `prev`/`next` page, `sortQuery` is the request's `sort_by`/`sort_order`, and `sort` feeds
+  `EntityTable`. `options.values` declares what a **closed-enum** filter accepts
+  (`ENTITY_STATUSES`, `CHANNEL_PROTOCOLS`, `CHANNEL_TYPES`, `CONNECTOR_TYPES`, `TRACE_STATUSES` —
+  all in `api/types.ts` beside their type alias): a URL carrying anything else reads as unset, so
+  the control, the request and the rows agree, where an unchecked value used to leave the
+  dropdown reading "All statuses" over a list the server had filtered to nothing. The URL keeps
+  what it was handed — rewriting it would mean navigating during a render — but nothing
+  downstream sees it. An **open** vocabulary (a trace `mode`, an admission verdict, an audit
+  action, an occurrence status) is not validated: it is shown instead, through `UnknownOption`.
+  `hasFilters` is whether anything is narrowing the list — what tells `NoMatches` from a page's
+  first-run state — and `clear()` drops every filter, keeping the sort. Every
   list page (Channels, Workflows, Connectors, Plugins, Traces, Audit, DLQ, the Schedules ledger)
   keeps its state this way, so a filtered, sorted, paged list is a link. `nextSort` cycles
   unsorted → asc → desc → unsorted; the sort fields are the server's own `sort_by` values
@@ -757,7 +769,13 @@ Server-side offset/limit pagination via `usePagination()` + `PaginationFooter`. 
 - **Form captions:** use `Label`, never a bare `<label>`, so weight/spacing and the `required`
   marker stay consistent. Wrapping labels around a control (checkbox rows) stay plain `<label>`.
 - **List filters:** wrap the filter row in `FilterBar` and size each control with `FILTER_W`. A bare
-  `Select` is `w-full`; without a width two dropdowns stretch across the whole page.
+  `Select` is `w-full`; without a width two dropdowns stretch across the whole page. A free-text
+  filter is a `FilterTextInput`, never a bare `Input`: every commit is a URL navigation *and* a
+  list request, so what is typed stays local until the typing pauses (Enter and blur commit at
+  once). These filters are **exact** matches server-side — case-insensitive, untrimmed, no prefix
+  — which is why they are placeheld "Exact tag…" rather than dressed as a search. A dropdown over
+  a closed enum declares its values to `useListState`; one over an open vocabulary carries an
+  `UnknownOption`.
 - **Focus rings:** `focus-visible:ring-2 focus-visible:ring-ring/60` plus an offset in the
   surrounding surface colour. A 1px ring is invisible against a filled control.
 - **Icons:** `lucide-react` exclusively.
@@ -779,6 +797,11 @@ Server-side offset/limit pagination via `usePagination()` + `PaginationFooter`. 
   from `lib/batch.ts`: one request per item, reported as "n done, m refused".
 - **Load failures:** a page that cannot load its entity renders `ErrorState` (with `refetch` as
   `onRetry` and a `backTo`), never a bare "Failed to load" line.
+- **Empty lists are two different facts:** an empty registry gets the teaching `EmptyState` (what
+  the primitive is, and the button that creates one); a list its filters narrowed to nothing gets
+  `NoMatches` with a "Clear filters" action, off `hasFilters`. Answering a filtered list with the
+  first-run pitch tells an operator the system is empty when it is not — `pages/list-empty-states.test.tsx`
+  holds every page to the distinction.
 - **Times:** `formatWhen()` for list cells (relative under a day, absolute beyond) and
   `formatRelative()` for anything a person watches live (trace and audit lists, the dashboard),
   both with the absolute `formatDate()` in the element's `title`. Every absolute time goes

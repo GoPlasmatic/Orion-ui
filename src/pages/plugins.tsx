@@ -5,22 +5,22 @@ import { useHealth } from "@/hooks/use-health"
 import { useExport } from "@/hooks/use-export"
 import { pluginsApi } from "@/api/plugins"
 import type { CreatePluginRequest, EntityStatus, Plugin } from "@/api/types"
+import { ENTITY_STATUSES } from "@/api/types"
 import { useTable, createColumnHelper } from "@tanstack/react-table"
 import { listTableFeatures } from "@/lib/table"
 import { useListState } from "@/lib/use-list-state"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
-import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { ImportDialog } from "@/components/shared/import-dialog"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
 import { StatusBadge } from "@/components/shared/status-badge"
-import { EmptyState } from "@/components/shared/empty-state"
+import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { EntityTable } from "@/components/shared/entity-table"
 import { ErrorState } from "@/components/shared/error-state"
-import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
+import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter-bar"
 import { PAGE_SIZE } from "@/lib/use-pagination"
 import { pluginHealthBadgeClass } from "@/lib/status"
 import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
@@ -31,6 +31,9 @@ const columnHelper = createColumnHelper<typeof listTableFeatures, Plugin>()
 const FUNCTIONS_SHOWN = 3
 
 const FILTER_KEYS = ["status", "tag"] as const
+
+/** What the status dropdown accepts; anything else in the URL reads as unset. */
+const FILTER_VALUES = { status: ENTITY_STATUSES }
 
 /** Column id → the server's `sort_by` field. */
 const SORT_FIELDS: Record<string, string> = {
@@ -125,7 +128,11 @@ function buildColumns(loads: ReadonlyMap<string, NodeLoad>) {
  */
 export function PluginsPage() {
   const navigate = useNavigate()
-  const { filters, update, sortQuery, sort, offset, prev, next } = useListState(FILTER_KEYS, SORT_FIELDS)
+  const { filters, update, clear, hasFilters, sortQuery, sort, offset, prev, next } = useListState(
+    FILTER_KEYS,
+    SORT_FIELDS,
+    { values: FILTER_VALUES },
+  )
   const statusFilter = filters.status as EntityStatus | ""
   const [showImport, setShowImport] = useState(false)
   const { data: health } = useHealth()
@@ -234,12 +241,12 @@ export function PluginsPage() {
           <option value="active">Active</option>
           <option value="archived">Archived</option>
         </Select>
-        <Input
+        <FilterTextInput
           value={filters.tag}
-          onChange={(e) => update({ tag: e.target.value })}
-          placeholder="Filter by tag..."
-          className={FILTER_W}
-          aria-label="Filter by tag"
+          onChange={(tag) => update({ tag })}
+          placeholder="Exact tag..."
+          ariaLabel="Filter by tag"
+          title="Matches one whole tag, not part of one"
         />
       </FilterBar>
 
@@ -252,21 +259,25 @@ export function PluginsPage() {
           sort={sort}
           onOpen={(plugin) => navigate(`/plugins/${encodeURIComponent(plugin.plugin_id)}`)}
           empty={
-            <EmptyState
-              icon={Blocks}
-              title="No plugins yet"
-              description="A plugin adds task functions a workflow can name — pure JSON → JSON transformations that run in a WebAssembly sandbox with no clock, network, connectors or secrets. Upload a manifest and its component to start."
-              action={
-                <>
-                  <Button variant="outline" onClick={() => setShowImport(true)}>
-                    <Upload className="h-4 w-4" /> Import
-                  </Button>
-                  <Button onClick={() => navigate("/plugins/new")}>
-                    <Plus className="h-4 w-4" /> Upload Plugin
-                  </Button>
-                </>
-              }
-            />
+            hasFilters ? (
+              <NoMatches noun="plugins" onClear={clear} />
+            ) : (
+              <EmptyState
+                icon={Blocks}
+                title="No plugins yet"
+                description="A plugin adds task functions a workflow can name — pure JSON → JSON transformations that run in a WebAssembly sandbox with no clock, network, connectors or secrets. Upload a manifest and its component to start."
+                action={
+                  <>
+                    <Button variant="outline" onClick={() => setShowImport(true)}>
+                      <Upload className="h-4 w-4" /> Import
+                    </Button>
+                    <Button onClick={() => navigate("/plugins/new")}>
+                      <Plus className="h-4 w-4" /> Upload Plugin
+                    </Button>
+                  </>
+                }
+              />
+            )
           }
         />
       )}

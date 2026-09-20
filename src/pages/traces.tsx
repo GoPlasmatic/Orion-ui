@@ -5,19 +5,18 @@ import { useTable, createColumnHelper } from "@tanstack/react-table"
 import { listTableFeatures } from "@/lib/table"
 import { useListState } from "@/lib/use-list-state"
 import type { Trace, TraceMode, TraceSortBy, SortOrder } from "@/api/types"
-import { TRACE_MODES } from "@/api/types"
+import { TRACE_MODES, TRACE_STATUSES } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
 import { PAGE_SIZE } from "@/lib/use-pagination"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { TraceAnalytics } from "@/components/traces/trace-analytics"
-import { EmptyState } from "@/components/shared/empty-state"
+import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { EntityTable } from "@/components/shared/entity-table"
-import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
+import { FilterBar, FilterTextInput, UnknownOption, FILTER_W } from "@/components/shared/filter-bar"
 import { formatDate, formatDuration, formatRelative } from "@/lib/utils"
 import { traceStatusBadgeClass } from "@/lib/status"
 import { Activity, Pause, Play } from "lucide-react"
@@ -95,11 +94,13 @@ const DEFAULT_ORDER: SortOrder = "desc"
 
 export function TracesPage() {
   const navigate = useNavigate()
-  const { filters, update, sortBy, sortOrder, sort, offset, prev, next } = useListState(
-    FILTER_KEYS,
-    SORT_FIELDS,
-    [DEFAULT_SORT],
-  )
+  const { filters, update, clear, hasFilters, sortBy, sortOrder, sort, offset, prev, next } =
+    useListState(FILTER_KEYS, SORT_FIELDS, {
+      newestFirst: [DEFAULT_SORT],
+      // `mode` is an open string on the wire, so it is shown rather than
+      // validated — see the dropdown below.
+      values: { status: TRACE_STATUSES },
+    })
   // Off by default: a list that reorders itself under the pointer is the wrong
   // default for reading, and the right one for watching an incident unfold.
   const [live, setLive] = useState(false)
@@ -169,12 +170,13 @@ export function TracesPage() {
               <option value="completed">Completed</option>
               <option value="failed">Failed</option>
             </Select>
-            <Input
-              placeholder="Filter by channel..."
+            <FilterTextInput
               value={filters.channel}
-              onChange={(e) => update({ channel: e.target.value })}
+              onChange={(channel) => update({ channel })}
+              placeholder="Exact channel name..."
+              ariaLabel="Filter by channel"
               className="w-48"
-              aria-label="Filter by channel"
+              title="Matches the channel name exactly"
             />
             {/* `kafka` (1.4) and `cron` (1.6) are open-string additions: a consumed
                 record and a scheduled occurrence each write a trace row too. */}
@@ -185,6 +187,7 @@ export function TracesPage() {
               aria-label="Filter by mode"
             >
               <option value="">All modes</option>
+              <UnknownOption value={filters.mode} options={TRACE_MODES} />
               {TRACE_MODES.map((m) => (
                 <option key={m} value={m}>
                   {m.charAt(0).toUpperCase() + m.slice(1)}
@@ -207,16 +210,20 @@ export function TracesPage() {
               })
             }
             empty={
-              <EmptyState
-                icon={Activity}
-                title="No traces found"
-                description="Traces are captured as requests flow through channels. Adjust the filters above, or send a request from the Data Console to generate one."
-                action={
-                  <Button variant="outline" onClick={() => navigate("/console")}>
-                    Open Data Console
-                  </Button>
-                }
-              />
+              hasFilters ? (
+                <NoMatches noun="traces" onClear={clear} />
+              ) : (
+                <EmptyState
+                  icon={Activity}
+                  title="No traces found"
+                  description="Traces are captured as requests flow through channels. Send a request from the Data Console to generate one."
+                  action={
+                    <Button variant="outline" onClick={() => navigate("/console")}>
+                      Open Data Console
+                    </Button>
+                  }
+                />
+              )
             }
           />
 

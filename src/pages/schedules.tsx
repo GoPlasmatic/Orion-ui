@@ -18,8 +18,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
-import { EmptyState } from "@/components/shared/empty-state"
-import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
+import { EmptyState, NoMatches } from "@/components/shared/empty-state"
+import { FilterBar, UnknownOption, FILTER_W } from "@/components/shared/filter-bar"
 import { OccurrencesTable } from "@/components/shared/occurrences-table"
 import { PAGE_SIZE } from "@/lib/use-pagination"
 import { useListState } from "@/lib/use-list-state"
@@ -45,7 +45,7 @@ const LEDGER_KEYS = ["channel_id", "status", "since", "until"] as const
  */
 export function SchedulesPage() {
   const navigate = useNavigate()
-  const { filters, update, offset, prev, next } = useListState(LEDGER_KEYS)
+  const { filters, update, clear, hasFilters, offset, prev, next } = useListState(LEDGER_KEYS)
   const now = useNow()
 
   const { data: status, isLoading: statusLoading, error: statusError, refetch: refetchStatus } = useCronStatus()
@@ -325,6 +325,7 @@ export function SchedulesPage() {
             aria-label="Filter by status"
           >
             <option value="">All statuses</option>
+            <UnknownOption value={filters.status} options={CRON_OCCURRENCE_STATUSES} />
             {CRON_OCCURRENCE_STATUSES.map((s) => (
               <option key={s} value={s}>
                 {occurrenceStatusLabel(s)}
@@ -355,6 +356,7 @@ export function SchedulesPage() {
           isLoading={occurrencesLoading}
           onRetry={(id) => retry.mutate(id)}
           retryPending={retry.isPending}
+          empty={hasFilters ? <NoMatches noun="occurrences" onClear={clear} /> : undefined}
         />
 
         <PaginationFooter

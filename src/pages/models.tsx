@@ -4,7 +4,7 @@ import { useModels, useImportModels } from "@/hooks/use-models"
 import { useHealth } from "@/hooks/use-health"
 import { useExport } from "@/hooks/use-export"
 import { modelsApi } from "@/api/models"
-import { ADMISSION_STATES } from "@/api/types"
+import { ADMISSION_STATES, ENTITY_STATUSES } from "@/api/types"
 import type { AdmissionState, CreateModelRequest, EntityStatus, Model } from "@/api/types"
 import { useTable, createColumnHelper } from "@tanstack/react-table"
 import { listTableFeatures } from "@/lib/table"
@@ -12,16 +12,15 @@ import { useListState } from "@/lib/use-list-state"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
-import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { ImportDialog } from "@/components/shared/import-dialog"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
 import { StatusBadge } from "@/components/shared/status-badge"
-import { EmptyState } from "@/components/shared/empty-state"
+import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { EntityTable } from "@/components/shared/entity-table"
 import { ErrorState } from "@/components/shared/error-state"
-import { FilterBar, FILTER_W } from "@/components/shared/filter-bar"
+import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter-bar"
 import { PAGE_SIZE } from "@/lib/use-pagination"
 import { admissionStateBadgeClass, modelHealthBadgeClass } from "@/lib/status"
 import { admissionFailure } from "@/lib/model-manifest"
@@ -31,6 +30,12 @@ import { Boxes, Download, Plus, Upload } from "lucide-react"
 const columnHelper = createColumnHelper<typeof listTableFeatures, Model>()
 
 const FILTER_KEYS = ["status", "admission", "tag"] as const
+
+/** What each dropdown accepts; anything else in the URL reads as unset. */
+const FILTER_VALUES = {
+  status: ENTITY_STATUSES,
+  admission: ADMISSION_STATES.map((s) => s.value),
+}
 
 /** Column id → the server's `sort_by` field. */
 const SORT_FIELDS: Record<string, string> = {
@@ -171,9 +176,10 @@ function buildColumns(residency: ReadonlyMap<string, string>) {
  */
 export function ModelsPage() {
   const navigate = useNavigate()
-  const { filters, update, sortQuery, sort, offset, prev, next } = useListState(
+  const { filters, update, clear, hasFilters, sortQuery, sort, offset, prev, next } = useListState(
     FILTER_KEYS,
     SORT_FIELDS,
+    { values: FILTER_VALUES },
   )
   const statusFilter = filters.status as EntityStatus | ""
   const admissionFilter = filters.admission as AdmissionState | ""
@@ -291,12 +297,12 @@ export function ModelsPage() {
             </option>
           ))}
         </Select>
-        <Input
+        <FilterTextInput
           value={filters.tag}
-          onChange={(e) => update({ tag: e.target.value })}
-          placeholder="Filter by tag..."
-          className={FILTER_W}
-          aria-label="Filter by tag"
+          onChange={(tag) => update({ tag })}
+          placeholder="Exact tag..."
+          ariaLabel="Filter by tag"
+          title="Matches one whole tag, not part of one"
         />
       </FilterBar>
 
@@ -309,21 +315,25 @@ export function ModelsPage() {
           sort={sort}
           onOpen={(model) => navigate(`/models/${encodeURIComponent(model.model_id)}`)}
           empty={
-            <EmptyState
-              icon={Boxes}
-              title="No models yet"
-              description="A model is an ONNX graph on the hot path — a fraud score, a routing decision, a classifier over a fixed feature vector. Orion never holds the bytes: you register a manifest and a reference to an object in a storage bucket, and the node fetches, verifies and probes it before it will serve."
-              action={
-                <>
-                  <Button variant="outline" onClick={() => setShowImport(true)}>
-                    <Upload className="h-4 w-4" /> Import
-                  </Button>
-                  <Button onClick={() => navigate("/models/new")}>
-                    <Plus className="h-4 w-4" /> Register Model
-                  </Button>
-                </>
-              }
-            />
+            hasFilters ? (
+              <NoMatches noun="models" onClear={clear} />
+            ) : (
+              <EmptyState
+                icon={Boxes}
+                title="No models yet"
+                description="A model is an ONNX graph on the hot path — a fraud score, a routing decision, a classifier over a fixed feature vector. Orion never holds the bytes: you register a manifest and a reference to an object in a storage bucket, and the node fetches, verifies and probes it before it will serve."
+                action={
+                  <>
+                    <Button variant="outline" onClick={() => setShowImport(true)}>
+                      <Upload className="h-4 w-4" /> Import
+                    </Button>
+                    <Button onClick={() => navigate("/models/new")}>
+                      <Plus className="h-4 w-4" /> Register Model
+                    </Button>
+                  </>
+                }
+              />
+            )
           }
         />
       )}
