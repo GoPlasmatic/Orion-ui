@@ -14,7 +14,7 @@ import { OccurrencesTable } from "@/components/shared/occurrences-table"
 import { ErrorState } from "@/components/shared/error-state"
 import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { ChannelRecentTraces, ChannelTrafficCard } from "@/components/shared/channel-traffic"
-import { cronTransport, MISFIRE_POLICIES } from "@/lib/cron"
+import { concurrencySlots, cronTransport, MISFIRE_POLICIES } from "@/lib/cron"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -220,9 +220,18 @@ export function ChannelDetailPage() {
                     <dd className="mt-0.5">
                       {schedule.concurrency?.policy ?? "allow"}
                       {schedule.concurrency?.policy === "forbid" && (
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {" "}· {schedule.concurrency.key ?? channel.channel_id}
-                        </span>
+                        <>
+                          <span
+                            className="text-muted-foreground"
+                            title="How many runs of the key are admitted at once. Each holds its slot for the whole attempt and reads it as metadata.trigger.singleton_slot."
+                          >
+                            {" "}· {concurrencySlots(schedule)} slot
+                            {concurrencySlots(schedule) === 1 ? "" : "s"}
+                          </span>
+                          <span className="block font-mono text-xs text-muted-foreground">
+                            {schedule.concurrency.key ?? channel.channel_id}
+                          </span>
+                        </>
                       )}
                     </dd>
                   </div>

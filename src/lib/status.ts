@@ -142,12 +142,17 @@ export function modelHealthBadgeClass(state: string | null | undefined): string 
 
 // A `/health` component state. `disabled` is a state, not a fault — a node
 // without the plugin sandbox, or with `models.enabled` off, serves everything
-// else — so it is neutral.
+// else — so it is neutral. `applying` and `failed` are the `packages`
+// component's own two states (1.9): a node working through its `[packages]
+// apply` list at startup is making progress rather than failing, but it is not
+// in rotation until it finishes, which is why it is not neutral either.
 export const componentStateClass: Record<string, string> = {
   ok: GOOD,
   degraded: WARN,
   error: BAD,
   disabled: NEUTRAL,
+  applying: INFO,
+  failed: BAD,
 }
 
 export function componentStateBadgeClass(state: string | null | undefined): string {

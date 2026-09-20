@@ -1,8 +1,13 @@
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { Link, useLocation } from "react-router"
-import { loadedModelKey, type HealthResponse } from "@/api/types"
+import {
+  bootPackageServing,
+  loadedModelKey,
+  type EngineLoadIssues,
+  type HealthResponse,
+} from "@/api/types"
 import { Badge } from "@/components/ui/badge"
-import { Callout } from "@/components/ui/callout"
+import { LoadIssuesReport } from "@/components/shared/load-issues"
 import { componentStateBadgeClass, isComponentFault } from "@/lib/status"
 import { componentRoute } from "@/lib/health"
 import { cn, formatBytes, formatDate, shortDigest } from "@/lib/utils"
@@ -11,46 +16,6 @@ import { cn, formatBytes, formatDate, shortDigest } from "@/lib/utils"
 function formatCronInstant(value: number | string | null | undefined): string {
   if (value == null) return "never"
   return formatDate(typeof value === "number" ? value * 1000 : value)
-}
-
-/**
- * The versions of one entity kind this node could not serve.
- *
- * A plugin that did not load and a model the generation could not carry are
- * the same report — a count, then a line per version naming the stage that
- * refused it — and both quarantine the workflows that use them. One renderer
- * so the two cannot drift apart in wording or severity.
- */
-function LoadIssues({
-  noun,
-  route,
-  issues,
-  footnote,
-}: {
-  noun: string
-  route: string
-  issues: { id: string; version: number; stage: string; reason: string }[]
-  footnote?: string
-}) {
-  if (issues.length === 0) return null
-  return (
-    <Callout variant="destructive">
-      <p className="font-medium">
-        {issues.length} {noun} version{issues.length === 1 ? "" : "s"} not serving on this node
-      </p>
-      <ul className="mt-1 space-y-1 text-xs">
-        {issues.map((issue) => (
-          <li key={`${issue.id}-${issue.version}`}>
-            <Link to={`${route}/${encodeURIComponent(issue.id)}`} className="font-mono">
-              {issue.id} v{issue.version}
-            </Link>{" "}
-            · <span className="font-mono">{issue.stage}</span> — {issue.reason}
-          </li>
-        ))}
-      </ul>
-      {footnote && <p className="mt-2 text-xs">{footnote}</p>}
-    </Callout>
-  )
 }
 
 /**
@@ -76,6 +41,8 @@ const COMPONENT_HINTS: Record<string, string> = {
   config_propagation:
     "Cluster mode. Degraded when this node committed a change and failed to tell its peers; they are stale, this node is not.",
   cluster_redis: "The shared guard backend in cluster mode.",
+  packages:
+    "Present only when [packages] apply names artifacts (1.9). `applying` while this node applies its own packages at startup — /readyz answers 503 meanwhile — then `ok` for good, because readiness is a startup condition here. `failed` means one did not apply and the process is exiting.",
 }
 
 /**
@@ -83,8 +50,21 @@ const COMPONENT_HINTS: Record<string, string> = {
  * behind it — background tasks, plugin and model load failures, the model
  * cache, the scheduler's own health — where an operator can read what a
  * coarse `degraded` is about.
+ *
+ * `loadIssues` is the same four lists read from `GET admin/engine/status`
+ * (1.9), and takes precedence when the caller has them: `/health`'s copy is
+ * served only to a caller the server recognises as an admin, so on an instance
+ * with `admin_auth` on and no key reaching `/health` the coarse components
+ * arrive with no detail at all, while the admin plane answers in full. Passing
+ * `null` or leaving it out falls back to whatever `/health` carried.
  */
-export function HealthComponents({ health }: { health: HealthResponse | undefined }) {
+export function HealthComponents({
+  health,
+  loadIssues: reported,
+}: {
+  health: HealthResponse | undefined
+  loadIssues?: EngineLoadIssues | null
+}) {
   // `/engine#component-<name>` is where the dashboard sends a degraded
   // component that has no page of its own. Client-side navigation does not
   // scroll to a hash by itself, and the rows only exist once health arrives.
@@ -94,17 +74,32 @@ export function HealthComponents({ health }: { health: HealthResponse | undefine
     document.getElementById(hash.slice(1))?.scrollIntoView({ block: "center" })
   }, [hash, health])
 
+  // The four lists `/health` serves an admin caller are exactly what
+  // `GET admin/engine/status` carries as `load_issues` (1.9) — one collector
+  // on the server — so they render through one component. Built here rather
+  // than read off `/health` as a whole, because this body nests them under
+  // four different keys for historical reasons.
+  const loadIssues = useMemo(
+    () =>
+      reported ?? {
+        channels: health?.channels?.quarantined ?? [],
+        connectors: health?.connectors?.failed_to_load ?? [],
+        plugins: health?.plugins?.failed_to_load ?? [],
+        models: health?.models?.failed_to_load ?? [],
+      },
+    [health, reported]
+  )
+
   if (!health) return <p className="text-sm text-muted-foreground">Loading…</p>
 
   const components = Object.entries(health.components ?? {})
   const tasks = health.background_tasks ?? []
   const restarted = tasks.filter((t) => t.restarts > 0 || t.state !== "running")
-  const pluginIssues = health.plugins?.failed_to_load ?? []
   const loadedPlugins = health.plugins?.loaded ?? []
   const models = health.models
-  const modelIssues = models?.failed_to_load ?? []
   const loadedModels = models?.loaded ?? []
   const cron = health.cron
+  const packages = health.packages ?? []
 
   return (
     <div className="space-y-4">
@@ -138,17 +133,41 @@ export function HealthComponents({ health }: { health: HealthResponse | undefine
         ))}
       </ul>
 
-      <LoadIssues
-        noun="plugin"
-        route="/plugins"
-        issues={pluginIssues.map((i) => ({ ...i, id: i.plugin }))}
-      />
-      <LoadIssues
-        noun="model"
-        route="/models"
-        issues={modelIssues.map((i) => ({ ...i, id: i.model }))}
-        footnote="Every workflow naming one of these by literal id is quarantined here, and its channels answer 503."
-      />
+      <LoadIssuesReport issues={loadIssues} />
+
+      {packages.length > 0 && (
+        <div className="rounded-md border p-3 text-sm">
+          <p className="mb-2 font-medium">Packages applied at startup</p>
+          <ul className="space-y-1 text-xs">
+            {packages.map((pkg) => (
+              <li key={pkg.file} className="flex flex-wrap items-center gap-2">
+                <span className="font-mono" title={pkg.file}>
+                  {pkg.name || pkg.file}
+                  {pkg.version && ` ${pkg.version}`}
+                </span>
+                <Badge
+                  variant="outline"
+                  className={componentStateBadgeClass(
+                    pkg.state === "failed" ? "error" : bootPackageServing(pkg.state) ? "ok" : "degraded"
+                  )}
+                >
+                  {pkg.state}
+                </Badge>
+                {pkg.error && <span className="text-destructive">{pkg.error}</span>}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted-foreground">
+            This node applies these itself at startup, through its own admin routes, before{" "}
+            <code className="font-mono">/readyz</code> reports it ready. A restart is a no-op; a
+            failure exits the process. Their receipts are on the{" "}
+            <Link to="/packages" className="underline underline-offset-2">
+              Packages
+            </Link>{" "}
+            page.
+          </p>
+        </div>
+      )}
 
       {cron && (
         <div className="rounded-md border p-3 text-sm">

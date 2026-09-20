@@ -1,6 +1,7 @@
 import { useState } from "react"
 import type { ConcurrencyPolicy, CronTransportConfig, MisfirePolicy } from "@/api/types"
-import { CONCURRENCY_POLICIES, MISFIRE_POLICIES, lintCronExpression } from "@/lib/cron"
+import { CRON_SLOTS_MAX, CRON_SLOTS_MIN } from "@/api/types"
+import { CONCURRENCY_POLICIES, MISFIRE_POLICIES, lintCronExpression, lintSlots } from "@/lib/cron"
 import { ConfigSection, NumberField, SelectField, TextField } from "@/components/shared/config-field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -36,10 +37,13 @@ export function CronTransportEditor({
     onChange(next)
   }
 
-  const setConcurrency = (field: "policy" | "key", v: string | undefined) => {
+  const setConcurrency = (field: "policy" | "key" | "slots", v: string | number | undefined) => {
     const sub: Record<string, unknown> = { ...(value.concurrency ?? {}) }
     if (v === undefined || v === "") delete sub[field]
     else sub[field] = v
+    // `slots` is `forbid`-only: sending it with `allow` is a 400, not a
+    // no-op, so leaving the last value behind would make the form unsaveable.
+    if (field === "policy" && v !== "forbid") delete sub.slots
     set("concurrency", Object.keys(sub).length ? (sub as CronTransportConfig["concurrency"]) : undefined)
   }
 
@@ -68,6 +72,7 @@ export function CronTransportEditor({
   const misfireHint = MISFIRE_POLICIES.find((p) => p.value === misfire)?.hint
   const concurrency = value.concurrency?.policy ?? "allow"
   const concurrencyHint = CONCURRENCY_POLICIES.find((p) => p.value === concurrency)?.hint
+  const slotsIssue = lintSlots(value.concurrency?.slots)
 
   return (
     <ConfigSection
@@ -174,12 +179,45 @@ export function CronTransportEditor({
       {concurrencyHint && <p className="-mt-2 text-xs text-muted-foreground">{concurrencyHint}</p>}
 
       {concurrency === "forbid" && (
-        <Callout variant="muted" className="text-xs">
-          Non-overlap is not exactly-once: a worker that loses its lease cancels, but cannot prove a
-          connector call it already made did not land. Work that must not be applied twice needs an
-          idempotent destination — <code className="font-mono">metadata.trigger.scheduled_for</code>{" "}
-          is the key two attempts at one occurrence agree on.
-        </Callout>
+        <>
+          <div className="grid grid-cols-2 gap-4">
+            <NumberField
+              label="Slots"
+              value={value.concurrency?.slots}
+              onChange={(v) => setConcurrency("slots", v)}
+              min={CRON_SLOTS_MIN}
+              max={CRON_SLOTS_MAX}
+              placeholder={`1 (default), up to ${CRON_SLOTS_MAX}`}
+            />
+          </div>
+          {slotsIssue ? (
+            <p className="-mt-2 text-xs text-destructive">{slotsIssue}</p>
+          ) : (
+            <p className="-mt-2 text-xs text-muted-foreground">
+              How many runs of the key are admitted at once. A run takes the lowest free slot,
+              holds it for the whole attempt and reads it as{" "}
+              <code className="font-mono">metadata.trigger.singleton_slot</code> — so one channel
+              with four slots replaces four cloned "lane" channels. On SQLite the bound is per
+              node; nodes sharing PostgreSQL or MySQL share it.
+            </p>
+          )}
+          {!slotsIssue && (value.concurrency?.slots ?? 1) > 1 && (
+            <Callout variant="warning" className="text-xs">
+              Every node must be on Orion 1.9 before this channel is activated. An older one
+              refuses the unknown <code className="font-mono">slots</code> key and quarantines the
+              channel, and any occurrence it claims fails as{" "}
+              <code className="font-mono">channel_unavailable</code>. To roll back, remove slots
+              first.
+            </Callout>
+          )}
+          <Callout variant="muted" className="text-xs">
+            Non-overlap is not exactly-once: a worker that loses its lease cancels, but cannot
+            prove a connector call it already made did not land. Work that must not be applied
+            twice needs an idempotent destination —{" "}
+            <code className="font-mono">metadata.trigger.scheduled_for</code> is the key two
+            attempts at one occurrence agree on.
+          </Callout>
+        </>
       )}
     </ConfigSection>
   )

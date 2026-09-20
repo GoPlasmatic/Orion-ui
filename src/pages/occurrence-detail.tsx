@@ -98,10 +98,10 @@ export function OccurrenceDetailPage() {
           )}
           {occ.status === "skipped_singleton" && (
             <Callout variant="warning">
-              Its <code className="font-mono">concurrency.key</code> was held by a running
-              occurrence under <code className="font-mono">policy: "forbid"</code>. That is the
-              policy working — a sustained rate of these means the schedule fires faster than the
-              work takes.
+              Every slot of its <code className="font-mono">concurrency.key</code> was held by a
+              running occurrence under <code className="font-mono">policy: "forbid"</code>. That is
+              the policy working — a sustained rate of these means the schedule fires faster than
+              the work takes, so the answer is more slots or a slower schedule, not a retry.
             </Callout>
           )}
 
@@ -135,6 +135,17 @@ export function OccurrenceDetailPage() {
               }
             />
             <Meta label="Singleton key" value={occ.singleton_key ?? "—"} mono />
+            {occ.singleton_slot != null && (
+              <Meta
+                label="Slot"
+                value={
+                  <span title="Which of the key's concurrency.slots this attempt holds, from 0. A run takes the lowest free one and holds it for the whole attempt; the workflow reads it at metadata.trigger.singleton_slot.">
+                    {occ.singleton_slot}
+                  </span>
+                }
+                mono
+              />
+            )}
             {(inFlight || occ.claimed_by) && (
               <>
                 <Meta label="Claimed by" value={occ.claimed_by ?? "—"} mono />
@@ -142,7 +153,15 @@ export function OccurrenceDetailPage() {
               </>
             )}
             {occ.fencing_token != null && (
-              <Meta label="Fencing token" value={String(occ.fencing_token)} mono />
+              <Meta
+                label="Fencing token"
+                value={
+                  <span title="The acquisition generation this attempt holds its key under. Two occurrences of one key can share a token when they hold different slots, so it is the key-and-slot pair that names a hold.">
+                    {occ.fencing_token}
+                  </span>
+                }
+                mono
+              />
             )}
             <Meta label="Created" value={formatDate(occ.created_at)} />
             <Meta label="Updated" value={formatDate(occ.updated_at)} />

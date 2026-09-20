@@ -4,7 +4,7 @@ import { useCronStatus, useCronOccurrences, useRetryOccurrence } from "@/hooks/u
 import { useTriggerChannel } from "@/hooks/use-channels"
 import { useHealth } from "@/hooks/use-health"
 import { useCronMetrics } from "@/hooks/use-metrics"
-import type { CronOccurrenceStatus } from "@/api/types"
+import type { CronOccurrenceStatus, CronScheduleStatus } from "@/api/types"
 import { CRON_OCCURRENCE_STATUSES } from "@/api/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -27,7 +27,7 @@ import { useNow } from "@/lib/use-now"
 import { KpiCard } from "@/components/shared/kpi-card"
 import { ErrorState } from "@/components/shared/error-state"
 import { occurrenceStatusBadgeClass, statusChartColor } from "@/lib/status"
-import { occurrenceStatusLabel } from "@/lib/cron"
+import { occurrenceStatusLabel, slotUsage } from "@/lib/cron"
 import { formatDate, formatRelative, serverTime, toRfc3339, cn } from "@/lib/utils"
 import { useTimeZone } from "@/lib/use-time-zone"
 import { CalendarClock, Play, Plus, History } from "lucide-react"
@@ -84,6 +84,8 @@ export function SchedulesPage() {
           return dir * a.channel_name.localeCompare(b.channel_name)
         case "pending":
           return dir * (a.pending - b.pending)
+        case "slots":
+          return dir * ((a.slots_held ?? -1) - (b.slots_held ?? -1))
         case "last":
           return (
             dir *
@@ -209,6 +211,9 @@ export function SchedulesPage() {
                   <SortableHead field="last" sort={tableSort.sort} order={tableSort.order} onSort={() => sortOn("last", true)}>
                     Last run
                   </SortableHead>
+                  <SortableHead field="slots" sort={tableSort.sort} order={tableSort.order} onSort={() => sortOn("slots", true)} className="text-right">
+                    Slots
+                  </SortableHead>
                   <SortableHead field="pending" sort={tableSort.sort} order={tableSort.order} onSort={() => sortOn("pending", true)} className="text-right">
                     Pending
                   </SortableHead>
@@ -255,6 +260,7 @@ export function SchedulesPage() {
                         <span className="text-xs text-muted-foreground">never</span>
                       )}
                     </TableCell>
+                    <SlotsCell row={s} />
                     <TableCell className={cn("text-right tabular-nums", s.pending > 0 && "text-warning")}>
                       {s.pending}
                     </TableCell>
@@ -360,5 +366,44 @@ export function SchedulesPage() {
         />
       </div>
     </div>
+  )
+}
+
+/**
+ * The lock a schedule takes, as "held/slots" (Orion 1.9).
+ *
+ * `slots_held` counts live leases on the key across *every* channel sharing
+ * it, so it can exceed this channel's own bound — when a peer channel declares
+ * more, or just after `slots` was lowered while a run still holds a higher
+ * slot. That reading is expected, not a fault, so it is noted rather than
+ * coloured as an error. A channel under `allow` takes no lock at all and shows
+ * a dash; a pre-1.9 server sends no policy and shows the same.
+ */
+function SlotsCell({ row }: { row: CronScheduleStatus }) {
+  const usage = slotUsage(row)
+  if (!usage) {
+    return (
+      <TableCell
+        className="text-right text-xs text-muted-foreground"
+        title={
+          row.concurrency_policy === "allow"
+            ? "policy: allow — occurrences may overlap and no lock is taken"
+            : "This server does not report the lock (Orion 1.9 and later do)"
+        }
+      >
+        —
+      </TableCell>
+    )
+  }
+  return (
+    <TableCell className="text-right tabular-nums">
+      <span
+        className={cn(usage.held >= usage.slots && "text-warning")}
+        title={`${row.singleton_key ?? row.channel_id} · ${usage.held} live lease${usage.held === 1 ? "" : "s"} on the key, across every channel sharing it, of ${usage.slots} this channel admits${usage.over ? " — more than this channel's bound, which happens when a peer channel declares more slots or slots was just lowered" : ""}`}
+      >
+        {usage.held}/{usage.slots}
+        {usage.over && <span className="ml-1 text-warning">*</span>}
+      </span>
+    </TableCell>
   )
 }

@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest"
 import type { Channel, ChannelConfig } from "@/api/types"
 import {
+  concurrencySlots,
   cronTransport,
   describeSchedule,
   isRetryable,
   lintCronExpression,
+  lintSlots,
+  slotUsage,
   stripCronRefusedConfig,
   CRON_REFUSED_CONFIG_KEYS,
 } from "@/lib/cron"
@@ -87,5 +90,55 @@ describe("cron channels (Orion 1.6)", () => {
     expect(isRetryable("completed")).toBe(false)
     expect(isRetryable("running")).toBe(false)
     expect(isRetryable(null)).toBe(false)
+  })
+})
+
+/**
+ * `concurrency.slots` (Orion 1.9): `forbid` admits up to N runs of a key,
+ * where it admitted exactly one before. A `forbid` channel that never set it
+ * still means one, which is what it always meant.
+ */
+describe("concurrency slots (Orion 1.9)", () => {
+  it("reads a forbid channel's bound, defaulting to one", () => {
+    expect(concurrencySlots({ concurrency: { policy: "forbid" } })).toBe(1)
+    expect(concurrencySlots({ concurrency: { policy: "forbid", slots: 4 } })).toBe(4)
+    // `allow` takes no lock at all, so it has no bound to report — not zero.
+    expect(concurrencySlots({ concurrency: { policy: "allow", slots: 4 } })).toBeNull()
+    expect(concurrencySlots({})).toBeNull()
+    expect(concurrencySlots(undefined)).toBeNull()
+  })
+
+  it("bounds slots the way the server does", () => {
+    expect(lintSlots(undefined)).toBeNull()
+    expect(lintSlots(1)).toBeNull()
+    expect(lintSlots(64)).toBeNull()
+    expect(lintSlots(0)).toMatch(/1–64/)
+    expect(lintSlots(65)).toMatch(/1–64/)
+    expect(lintSlots(2.5)).toMatch(/whole number/)
+  })
+
+  it("reads a status row's lock, and tolerates holding more than the bound", () => {
+    expect(slotUsage({ concurrency_policy: "allow" })).toBeNull()
+    // A pre-1.9 server sends no policy: nothing to report, rather than a
+    // fabricated "0/1".
+    expect(slotUsage({})).toBeNull()
+    expect(slotUsage({ concurrency_policy: "forbid", slots: 4, slots_held: 2 })).toEqual({
+      held: 2,
+      slots: 4,
+      over: false,
+    })
+    // `slots_held` counts leases across every channel sharing the key, so it
+    // can legitimately exceed this channel's own bound.
+    expect(slotUsage({ concurrency_policy: "forbid", slots: 1, slots_held: 3 })).toEqual({
+      held: 3,
+      slots: 1,
+      over: true,
+    })
+    // Under `forbid` an omitted bound is one, as the server reads it.
+    expect(slotUsage({ concurrency_policy: "forbid" })).toEqual({
+      held: 0,
+      slots: 1,
+      over: false,
+    })
   })
 })

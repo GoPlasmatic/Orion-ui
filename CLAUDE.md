@@ -71,7 +71,7 @@ Orion UI is a React 19 dashboard for the Orion workflow engine. It uses Vite 8, 
 
 ### Core Domain
 
-Targets the Orion **v1.8.1** API (dataflow-rs 3.13 / datalogic-rs 5.5). Five primitives with a
+Targets the Orion **v1.9.0** API (dataflow-rs 3.13 / datalogic-rs 5.5). Five primitives with a
 Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 
 - **Channels** — Service endpoints (sync/async, REST/HTTP/Kafka/**cron**). Config covers `auth`
@@ -133,14 +133,78 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 - **Trace DLQ** — Operator view of the async dead-letter queue (`/trace-dlq`): inspect, requeue,
   purge.
 - **Packages** — Read-only promotion receipts (`/packages`). `PUT admin/packages/{name}` is
-  deliberately **not** exposed; recording receipts is CI's job.
+  deliberately **not** exposed; recording receipts is CI's job. Since 1.9 a receipt may carry an
+  **`inventory`** — the ids of every entity that version carried, by kind — which is what
+  `package apply --prune` reads to find what a new version dropped. The plain listing leaves it
+  out; the package detail and `?current=true` carry it, so an absent inventory in a list row says
+  nothing.
 - **Health** — `/engine` (named Settings until 2026-09-05; `/settings` redirects) renders the
   whole `/health` report (`health-components.tsx`): every
   component with what its state means, plus the admin-only detail — background tasks, plugin
-  loads and failures, the scheduler's own numbers. The Operations dashboard shows only the faults.
+  loads and failures, the scheduler's own numbers, and since 1.9 the `[packages] apply` progress.
+  It also carries the **running generation** from `GET admin/engine/status`: its id, this node's
+  capabilities, and what that generation could not load. The Operations dashboard shows only the
+  faults.
 
 ### v1.x wire contracts worth remembering
 
+- **A reload's 200 is not proof that anything is serving (1.9).** A reload never fails because
+  one entity did not load: the entity is quarantined and everything else serves. `POST
+  admin/engine/reload` and `GET admin/engine/status` both answer with `generation` and
+  `load_issues` — `{channels, connectors, plugins, models}`, built by *one* collector on the
+  server, which is why `/health`'s four admin-only lists have the same shape. **`load_issues`
+  absent is the skew signal**: a pre-1.9 server cannot tell you, which is not the same as nothing
+  being quarantined — `countLoadIssues`/`noLoadIssues` in `types.ts` keep the two apart.
+  `shared/load-issues.tsx` is the one renderer; `HealthComponents` takes the engine's copy as a
+  prop and falls back to `/health`'s. Prefer the engine's: `/health`'s detail is served only to a
+  caller the server recognises as an admin, so on an instance with `admin_auth` on it can be
+  missing there and present on the admin plane. Both answers describe **the node that answered** —
+  a peer reloading on the same epoch bump may refuse differently.
+- **`engine/status.capabilities` (1.9)** is `{cron, plugins, models}` — the three runtimes that are
+  off by default. A cron channel on a node with `cron.enabled = false` is not a broken channel; it
+  is a schedule that would never fire, and the node quarantines it saying so. Reading the
+  capability is how that is knowable *before* a reload discovers it, which is why `off` renders
+  neutral rather than as a fault.
+- **`/health` gained `components.packages` (1.9)**, present only when `[packages] apply` names
+  artifacts: `applying` (and `/readyz` answers 503) until every configured package is applied and
+  serving, then `ok` for good — readiness is a startup condition here — or `failed`, with the node
+  on its way out. Admin detail adds `packages[]`: file, name, version, content hash, state
+  (`pending` | `applying` | `applied` | `already_applied` | `superseded` | `failed`) and error.
+  `bootPackageServing` is which states count as serving.
+- **`/health`'s `connectors.failed_to_load` is a list of objects, not names.** `{connector,
+  connector_id, stage, reason}` — `stage` is `env_substitution`, `json_parse`, `var_reference`,
+  `secret_resolution`, `deserialize` or `endpoint` (the last two are 1.9). Reading it as `string[]`
+  renders `[object Object]` and matches no connector, which is what `lib/faults.ts` and
+  `use-attention.ts` used to do. `channels.quarantined` likewise gained `channel_id` and
+  `workflow_id` in 1.9, so a quarantine links straight to its channel without the channel list.
+- **`concurrency.slots` (1.9)** on a cron channel: `forbid` admits up to N runs of a key at once
+  (1–64, default 1) where it admitted exactly one. **`forbid` only** — sending it with `allow` is a
+  400, not a no-op, so a policy switch must drop it. A run takes the lowest free slot, holds it for
+  the whole attempt and reads it as `metadata.trigger.singleton_slot`; one channel with four slots
+  replaces four cloned "lane" channels. The scope is the *database*: per node on SQLite, shared
+  across the cluster on PostgreSQL/MySQL. `GET admin/cron/status` gained `concurrency_policy`,
+  `singleton_key`, `slots` and `slots_held` — and **`slots_held` counts leases across every channel
+  sharing the key**, so it can exceed this channel's own bound when a peer declares more or `slots`
+  was just lowered. `lib/cron.ts::concurrencySlots`/`slotUsage`/`lintSlots` are the readers.
+  **Every node must be on 1.9 before a channel setting it is activated** — an older one refuses the
+  unknown key and quarantines the channel.
+- **`auth.scheme` is a scheme *name*, not a byte prefix (1.8.2).** The header is parsed as RFC 9110
+  §11.1 defines it: scheme, one or more spaces, credential. The scheme matches case-insensitively,
+  so `"Bearer"` and the old spelling `"Bearer "` are the same scheme and `Bearer<key>` with no
+  space is refused. An empty value means no scheme — the bare credential. A value that is not an
+  RFC 9110 token, like `"Key="`, is a **400** at create, update, validate and import, and
+  quarantines a channel already stored with one. `lib/channel-auth.ts::lintAuthScheme` mirrors the
+  server's `scheme_name`. The same applies to `jwt`'s `source.scheme`.
+- **A connector config reference may stand in any field (1.9)**, not only a string one —
+  `{"url": "env://PEER_API_URL", "allow_private_urls": "env://PEER_API_PRIVATE"}`. An `env://` or
+  `vault://` reference always resolves to text, so in a boolean field it must read `true` or
+  `false`; a `var://` one keeps its `[vars]` type. A reference is only a reference when it is the
+  **whole value** — inside a longer string it is sent literally, which `POST /connectors/validate`
+  warns about as `env.embedded_reference` (already rendered by `ValidationResults`).
+- **`DELETE` on a channel, workflow, plugin or model takes `?reload=defer` (1.9)**, like the status
+  routes — how `package apply --prune=delete` removes entities inside one reload. The console does
+  single deletes and wants the default `now`; a connector delete never rebuilds the engine and
+  takes no parameter.
 - **A model manifest's shape dimension is a count *or* a name (1.8.1).** `"shape": ["N", 3]`
   describes a graph exported with a dynamic axis. A name **binds on its first occurrence in a
   call** and every later occurrence — in another input, or in an output — must equal that
@@ -193,14 +257,17 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   where a request body would be. `lib/cron.ts::cronTransport` is the one reader. Unknown keys are
   refused. `payload` is recorded verbatim as every occurrence's trace input, so secrets and
   `env://`-style references are refused in it. `metadata.trigger` is what the workflow gets:
-  `type` (`cron` | `manual`), `occurrence_id`, `scheduled_for`, `started_at`, `attempt`.
+  `type` (`cron` | `manual`), `occurrence_id`, `scheduled_for`, `started_at`, `attempt`,
+  `singleton_key` and `singleton_slot` (1.9).
 - **Occurrences outlive names.** `admin/cron/occurrences?channel_id=` filters by the stable id —
   an occurrence keeps the channel *name* it was materialised under, so renaming does not rewrite
   history. Statuses (`pending`, `claimed`, `running`, `completed`, `failed`, `skipped_misfire`,
   `skipped_singleton`) are an open string. A misfire run is **one** row with the count and range
   in `error_message`, not one per missed instant. A retry keeps the id and `scheduled_for` and
-  increments `attempt`; only `failed` / `skipped_*` accept it (409 otherwise). Re-running finished
-  work is a *trigger*, which mints a new occurrence. Failed occurrences never enter the trace DLQ.
+  increments `attempt`; only `failed` / `skipped_*` accept it (409 otherwise). An occurrence
+  records `singleton_slot` beside `singleton_key` (1.9): two runs of one key can share a
+  `fencing_token` when they hold different slots, so it is the **pair** that names a hold.
+  Re-running finished work is a *trigger*, which mints a new occurrence. Failed occurrences never enter the trace DLQ.
   Cron runs **do** count in `orion_messages_total{channel}`, unlike `channel_call` targets.
 - **`/health` components (1.4–1.8):** always `database`, `engine` (constant ok), `connectors`,
   `channels`, `background_tasks`, `engine_reload` (the last reload failed — serving the previous
@@ -208,8 +275,8 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   it; a *state*, not a fault — `lib/status.ts::isComponentFault` keeps both off the dashboard;
   `models` degrades when the generation could not carry an active model, which quarantines the
   workflows naming it, or when the admission worker is down); conditionally
-  `kafka`, `cron` (on, or off while an active cron channel is quarantined), `config_propagation`
-  and `cluster_redis`. `degraded` on `engine_reload`/`config_propagation`/`cron` does not fail
+  `kafka`, `cron` (on, or off while an active cron channel is quarantined), `config_propagation`,
+  `cluster_redis` and `packages` (1.9, only under `[packages] apply`). `degraded` on `engine_reload`/`config_propagation`/`cron` does not fail
   `/readyz`. Admin-only detail adds `plugins.{loaded,failed_to_load}` (a failed load quarantines
   every workflow naming the plugin's functions — surfaced as an alert like a failed connector),
   `cron` (reconcile age, oldest pending, lease renewal failures) and `background_tasks[]`.
@@ -562,6 +629,10 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   labels.
 - **`src/lib/health.ts`** — `componentRoute`: which page acts on a degraded `/health` component,
   or null when only the health report explains it (callers fall back to `/engine#component-…`).
+- **`src/lib/channel-auth.ts`** — `lintAuthScheme` / `isLegacySchemePrefix`: reading `auth.scheme`
+  as the RFC 9110 scheme name it became in 1.8.2, mirroring the server's `scheme_name`.
+- **`src/components/shared/load-issues.tsx`** — `LoadIssuesReport`: the four lists a generation
+  refused, from `engine/status.load_issues` or `/health`, rendered once so the two cannot drift.
 - **`src/api/plugins.ts`, `src/api/cron.ts`** — the 1.6 entity and the ledger;
   `channelsApi.trigger` is the manual cron run. Hooks in `use-plugins.ts` / `use-cron.ts`; a
   plugin status change invalidates `["functions"]` and `["workflows"]` because the vocabulary

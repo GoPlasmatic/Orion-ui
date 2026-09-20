@@ -1033,7 +1033,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Detailed health report. Always reachable, but when `admin_auth.enabled` is true the topology detail (`git_hash`, `build_timestamp`, `workflows_loaded`, the circuit-breaker map, connector load failures and quarantined channels — names and failure reasons) is included only for requests presenting a valid admin credential; anonymous callers get status, version, uptime and coarse per-component states. Probes should use `/healthz` and `/readyz`. */
+        /** @description Detailed health report. Always reachable, but when `admin_auth.enabled` is true the topology detail (`git_hash`, `build_timestamp`, `workflows_loaded`, the circuit-breaker map, connector load failures and quarantined channels — names and failure reasons, and each `[packages] apply` entry by name, version and state) is included only for requests presenting a valid admin credential; anonymous callers get status, version, uptime and coarse per-component states. Probes should use `/healthz` and `/readyz`. */
         get: operations["health_check"];
         put?: never;
         post?: never;
@@ -1095,7 +1095,7 @@ export interface paths {
          * Readiness probe
          * @description Readiness probe. Reports `ready` only when the database responds, startup has completed, every background task the node cannot work without is still running, — in cluster mode — the shared Redis answers `PING`, and — with Kafka enabled — the ingest consumer is not degraded. The `components.engine` field is a constant `"ok"` kept for response-shape stability: the engine snapshot is lock-free and cannot be unavailable once the process serves. Both conditional checks matter because those degradations are otherwise silent: without Redis, deduplication fails open, the shared response cache misses, and cluster rate limiting stops enforcing; with the consumer down, no message is ingested — all while the data plane keeps returning 200s.
          *
-         *     The `components.background_tasks` is `error` when a required task — the trace dispatcher, the persistence workers, the audit writer, the DLQ retry consumer, the cluster epoch watcher — has stopped for good; each of those fails silently otherwise, dropping traces or audit rows while the data plane keeps answering 200s. The `components.cluster_redis` field is present only in cluster mode, and `components.kafka` only when `kafka.enabled` is true. Unauthenticated, so probes work without provisioning an admin key.
+         *     The `components.background_tasks` is `error` when a required task — the trace dispatcher, the persistence workers, the audit writer, the DLQ retry consumer, the cluster epoch watcher — has stopped for good; each of those fails silently otherwise, dropping traces or audit rows while the data plane keeps answering 200s. The `components.cluster_redis` field is present only in cluster mode, and `components.kafka` only when `kafka.enabled` is true. `components.packages` is present only when `[packages] apply` names artifacts: `applying` (not ready) until every one is applied and serving, then `ok`; `failed` while a node whose package failed to apply shuts down. Unauthenticated, so probes work without provisioning an admin key.
          */
         get: operations["readiness_probe"];
         put?: never;
@@ -1164,6 +1164,16 @@ export interface components {
             modified_at: string;
             /** Format: int64 */
             size_bytes: number;
+        };
+        /** @description A channel a generation refused to serve. */
+        ChannelLoadIssueResponse: {
+            /** @description The channel's name — what the quarantine is keyed by. */
+            channel: string;
+            /** @description The channel's id. Empty from a server that predates it. */
+            channel_id: string;
+            reason: string;
+            /** @description The workflow the channel is bound to, when it names one. */
+            workflow_id?: string | null;
         };
         /** @enum {string} */
         ChannelProtocol: "rest" | "http" | "kafka" | "cron";
@@ -1312,6 +1322,18 @@ export interface components {
             /** @description Selection labels (K6); filter the list with `?tag=`. */
             tags: string[];
             updated_at: string;
+        };
+        /** @description An enabled connector the registry could not load. */
+        ConnectorLoadIssueResponse: {
+            /** @description The connector's name — what workflows reference it by. */
+            connector: string;
+            connector_id: string;
+            reason: string;
+            /**
+             * @description `env_substitution`, `json_parse`, `var_reference`,
+             *     `secret_resolution`, `deserialize` or `endpoint`.
+             */
+            stage: string;
         };
         /**
          * @description A connector as the admin API shows it.
@@ -1523,6 +1545,14 @@ export interface components {
             id: string;
             scheduled_for: string;
             singleton_key?: string | null;
+            /**
+             * Format: int64
+             * @description Which of the key's `concurrency.slots` this attempt holds, from `0`.
+             *     Two occurrences of one key can share a fencing token when they hold
+             *     different slots, so the pair is what names a hold. `null` under
+             *     `allow`.
+             */
+            singleton_slot?: number | null;
             /** Format: date-time */
             started_at?: string | null;
             status: string;
@@ -1584,6 +1614,8 @@ export interface components {
         CronScheduleStatusResponse: {
             channel_id: string;
             channel_name: string;
+            /** @description `allow` or `forbid`. */
+            concurrency_policy?: string;
             /** Format: date-time */
             last_completed_at?: string | null;
             /** Format: date-time */
@@ -1617,6 +1649,21 @@ export interface components {
              *     "what is scheduled?" without a second request.
              */
             schedule: string;
+            /** @description The lock this channel's runs take. Present under `forbid`. */
+            singleton_key?: string | null;
+            /**
+             * Format: int32
+             * @description How many runs of `singleton_key` this channel admits at once. Present
+             *     under `forbid`.
+             */
+            slots?: number | null;
+            /**
+             * Format: int32
+             * @description Live leases on `singleton_key` right now, across every channel that
+             *     shares the key — so it can exceed this channel's `slots` when another
+             *     channel declares more, or just after `slots` was lowered.
+             */
+            slots_held?: number | null;
             timezone: string;
         };
         /**
@@ -1847,6 +1894,14 @@ export interface components {
                 id: string;
                 scheduled_for: string;
                 singleton_key?: string | null;
+                /**
+                 * Format: int64
+                 * @description Which of the key's `concurrency.slots` this attempt holds, from `0`.
+                 *     Two occurrences of one key can share a fencing token when they hold
+                 *     different slots, so the pair is what names a hold. `null` under
+                 *     `allow`.
+                 */
+                singleton_slot?: number | null;
                 /** Format: date-time */
                 started_at?: string | null;
                 status: string;
@@ -1893,9 +1948,16 @@ export interface components {
          *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
          *     of the 48 2xx responses had no `content` block at all.
          */
-        DataEnvelope_EngineReloaded: {
+        DataEnvelope_EngineReloadedResponse: {
             /** @description `POST /api/v1/admin/engine/reload`. */
             data: {
+                /**
+                 * Format: int64
+                 * @description The id of the generation this reload published. `0` from a server
+                 *     that predates it.
+                 */
+                generation: number;
+                load_issues?: null | components["schemas"]["EngineLoadIssues"];
                 reloaded: boolean;
                 /** Format: int64 */
                 workflows_count: number;
@@ -1909,13 +1971,20 @@ export interface components {
          *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
          *     of the 48 2xx responses had no `content` block at all.
          */
-        DataEnvelope_EngineStatus: {
+        DataEnvelope_EngineStatusResponse: {
             /** @description `GET /api/v1/admin/engine/status`. */
             data: {
                 /** Format: int64 */
                 active_workflows: number;
+                capabilities?: null | components["schemas"]["EngineCapabilities"];
                 /** @description Distinct channel names across the loaded workflows. */
                 channels: string[];
+                /**
+                 * Format: int64
+                 * @description The id of the generation this node serves.
+                 */
+                generation: number;
+                load_issues?: null | components["schemas"]["EngineLoadIssues"];
                 /** Format: int64 */
                 uptime_seconds: number;
                 version: string;
@@ -2094,6 +2163,7 @@ export interface components {
                  */
                 content_hash: string;
                 created_at: string;
+                inventory?: null | components["schemas"]["PackageInventory"];
                 name: string;
                 /** @description Who recorded this receipt (admin key id, or `anonymous`). */
                 principal: string;
@@ -2343,6 +2413,8 @@ export interface components {
             data: {
                 channel_id: string;
                 channel_name: string;
+                /** @description `allow` or `forbid`. */
+                concurrency_policy?: string;
                 /** Format: date-time */
                 last_completed_at?: string | null;
                 /** Format: date-time */
@@ -2376,6 +2448,21 @@ export interface components {
                  *     "what is scheduled?" without a second request.
                  */
                 schedule: string;
+                /** @description The lock this channel's runs take. Present under `forbid`. */
+                singleton_key?: string | null;
+                /**
+                 * Format: int32
+                 * @description How many runs of `singleton_key` this channel admits at once. Present
+                 *     under `forbid`.
+                 */
+                slots?: number | null;
+                /**
+                 * Format: int32
+                 * @description Live leases on `singleton_key` right now, across every channel that
+                 *     shares the key — so it can exceed this channel's `slots` when another
+                 *     channel declares more, or just after `slots` was lowered.
+                 */
+                slots_held?: number | null;
                 timezone: string;
             }[];
         };
@@ -2687,18 +2774,48 @@ export interface components {
              */
             purged: number;
         };
+        /** @description Node capabilities a plan can predict quarantines from. */
+        EngineCapabilities: {
+            /** @description `cron.enabled`: whether this node schedules cron channels. */
+            cron: boolean;
+            /** @description `models.enabled`: whether this node carries the model runtime. */
+            models: boolean;
+            /** @description `plugins.enabled`: whether this node runs the plugin sandbox. */
+            plugins: boolean;
+        };
+        /** @description What a runtime generation could not load, on the node that answered. */
+        EngineLoadIssues: {
+            channels: components["schemas"]["ChannelLoadIssueResponse"][];
+            connectors: components["schemas"]["ConnectorLoadIssueResponse"][];
+            models: components["schemas"]["ModelLoadIssueResponse"][];
+            plugins: components["schemas"]["PluginLoadIssueResponse"][];
+        };
         /** @description `POST /api/v1/admin/engine/reload`. */
-        EngineReloaded: {
+        EngineReloadedResponse: {
+            /**
+             * Format: int64
+             * @description The id of the generation this reload published. `0` from a server
+             *     that predates it.
+             */
+            generation: number;
+            load_issues?: null | components["schemas"]["EngineLoadIssues"];
             reloaded: boolean;
             /** Format: int64 */
             workflows_count: number;
         };
         /** @description `GET /api/v1/admin/engine/status`. */
-        EngineStatus: {
+        EngineStatusResponse: {
             /** Format: int64 */
             active_workflows: number;
+            capabilities?: null | components["schemas"]["EngineCapabilities"];
             /** @description Distinct channel names across the loaded workflows. */
             channels: string[];
+            /**
+             * Format: int64
+             * @description The id of the generation this node serves.
+             */
+            generation: number;
+            load_issues?: null | components["schemas"]["EngineLoadIssues"];
             /** Format: int64 */
             uptime_seconds: number;
             version: string;
@@ -2789,8 +2906,8 @@ export interface components {
         HealthStatus: {
             /**
              * @description Per-subsystem state: `database`, `engine`, `connectors`, `channels`,
-             *     plus `kafka` when `kafka.enabled` (O10) and `cluster_redis` in
-             *     cluster mode.
+             *     plus `kafka` when `kafka.enabled` (O10), `cluster_redis` in
+             *     cluster mode, and `packages` when `[packages] apply` names artifacts.
              */
             components: unknown;
             /** @description Build provenance and detail, served only to an admin caller (O9). */
@@ -2961,6 +3078,16 @@ export interface components {
              */
             state?: string;
         };
+        /** @description A model version a generation could not carry. */
+        ModelLoadIssueResponse: {
+            digest: string;
+            model: string;
+            reason: string;
+            /** @description `disabled`, `admission`, `manifest`, `artifact` or `adapter`. */
+            stage: string;
+            /** Format: int64 */
+            version: number;
+        };
         /**
          * @description One version of a model, as every model endpoint returns it.
          *
@@ -3114,6 +3241,19 @@ export interface components {
             /** @description Every receipt for this package, newest first. */
             versions: components["schemas"]["PackageReceiptResponse"][];
         };
+        /**
+         * @description The entities one package version carried, by the key each kind is
+         *     matched on: `plugin_id`, `model_id`, the connector's `name`,
+         *     `workflow_id`, `channel_id`. Each list is sorted and free of
+         *     duplicates, so two applies of one artifact record identical JSON.
+         */
+        PackageInventory: {
+            channels?: string[];
+            connectors?: string[];
+            models?: string[];
+            plugins?: string[];
+            workflows?: string[];
+        };
         /** @description A package receipt as the admin API shows it (K14). */
         PackageReceiptResponse: {
             /**
@@ -3122,6 +3262,7 @@ export interface components {
              */
             content_hash: string;
             created_at: string;
+            inventory?: null | components["schemas"]["PackageInventory"];
             name: string;
             /** @description Who recorded this receipt (admin key id, or `anonymous`). */
             principal: string;
@@ -3355,6 +3496,7 @@ export interface components {
                  */
                 content_hash: string;
                 created_at: string;
+                inventory?: null | components["schemas"]["PackageInventory"];
                 name: string;
                 /** @description Who recorded this receipt (admin key id, or `anonymous`). */
                 principal: string;
@@ -3528,6 +3670,19 @@ export interface components {
              */
             state?: string;
         };
+        /** @description A plugin version a generation could not load. */
+        PluginLoadIssueResponse: {
+            digest: string;
+            plugin: string;
+            reason: string;
+            /**
+             * @description `disabled`, `manifest`, `signature`, `artifact`, `compile`, `link`,
+             *     `size` or `self_test`.
+             */
+            stage: string;
+            /** Format: int64 */
+            version: number;
+        };
         /**
          * @description One version of a plugin, as every plugin endpoint returns it.
          *
@@ -3664,6 +3819,7 @@ export interface components {
              *     equality against later PUTs of the same version; never parsed.
              */
             content_hash: string;
+            inventory?: null | components["schemas"]["PackageInventory"];
             /** @description `staged` before the artifact's entities are activated, `applied` after. */
             state: components["schemas"]["PackageState"];
             /** @description Package version this receipt records, e.g. `1.4.0`. */
@@ -4552,7 +4708,14 @@ export interface operations {
     };
     delete_channel: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description `now` (default) reloads the engine as part of this request; `defer`
+                 *     commits the row and leaves the reload to a later
+                 *     `POST /engine/reload` (K4).
+                 */
+                reload?: components["schemas"]["ReloadMode"];
+            };
             header?: never;
             path: {
                 /** @description Channel ID */
@@ -4562,7 +4725,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Channel deleted */
+            /** @description Channel deleted. With `?reload=defer` the engine keeps serving it until `POST /engine/reload` */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -5707,13 +5870,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Engine reloaded */
+            /** @description Engine reloaded. `generation` is the id of the generation this reload published and `load_issues` is what *that* generation could not load — an entity quarantined by it is not serving, though the reload succeeded. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_EngineReloaded"];
+                    "application/json": components["schemas"]["DataEnvelope_EngineReloadedResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -5754,13 +5917,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Engine status */
+            /** @description Engine status: the generation this node serves, what it could not load (`load_issues` — the same lists `/health` shows an admin), and what this node is configured to run (`capabilities`). Describes the node that answered; peers reload on their own and may differ. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_EngineStatus"];
+                    "application/json": components["schemas"]["DataEnvelope_EngineStatusResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -6016,7 +6179,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Import results with counts (or would-be results when ?dry_run=true). Each item is handled independently and carries a manifest and an artifact reference, never bytes — what an export produces. Every item written is queued for admission on this node. `?on_conflict=new_version` upserts: an existing draft is replaced, an active model whose content differs gets a new draft version, identical content is reported `unchanged`. */
+            /** @description Import results with counts (or would-be results when ?dry_run=true). Each item is handled independently and carries a manifest and an artifact reference, never bytes — what an export produces. Every item written is queued for admission on this node. `?on_conflict=new_version` upserts: an existing draft is replaced, an active model whose content differs gets a new draft version, identical content is reported `unchanged`. A `signature` is not content, but an item whose signature differs from the stored one is not `unchanged`: it is written, so a signature attached at deploy time reaches the row. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6229,7 +6392,14 @@ export interface operations {
     };
     delete_model: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description `now` (default) reloads the engine as part of this request; `defer`
+                 *     commits the row and leaves the reload to a later
+                 *     `POST /engine/reload` (K4).
+                 */
+                reload?: components["schemas"]["ReloadMode"];
+            };
             header?: never;
             path: {
                 /** @description Model ID */
@@ -6239,7 +6409,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Model deleted (all versions). The cached artifact, if any, stays in this node's cache until swept */
+            /** @description Model deleted (all versions). The cached artifact, if any, stays in this node's cache until swept. With `?reload=defer` the engine keeps serving it until `POST /engine/reload` */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -6641,6 +6811,12 @@ export interface operations {
                 limit?: number;
                 /** @description Pagination offset (default 0). */
                 offset?: number;
+                /**
+                 * @description When true, one row per package — its `current` receipt, the newest
+                 *     applied one — with the `inventory` it recorded. A package whose
+                 *     receipts are all staged is left out.
+                 */
+                current?: boolean;
             };
             header?: never;
             path?: never;
@@ -6648,7 +6824,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Paginated receipt rows, ordered by package name, newest first within a package. */
+            /** @description Paginated receipt rows, ordered by package name, newest first within a package, without their `inventory`. With `?current=true`, each package's current receipt with its `inventory`. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6752,7 +6928,7 @@ export interface operations {
                     "application/json": components["schemas"]["DataEnvelope_PackageReceiptResponse"];
                 };
             };
-            /** @description Invalid name, version, content hash, or state */
+            /** @description Invalid name, version, content hash, state, or inventory (more than 1000 ids in one list, or an empty or over-long id) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6994,7 +7170,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Import results with counts (or would-be results when ?dry_run=true). Each item is handled independently. An item may carry its component inline (base64) or name a digest this instance already holds — what an export produces with and without `?include_artifacts=true`. `?on_conflict=new_version` upserts: an existing draft is replaced, an active plugin whose content differs gets a new draft version, identical content is reported `unchanged`. */
+            /** @description Import results with counts (or would-be results when ?dry_run=true). Each item is handled independently. An item may carry its component inline (base64) or name a digest this instance already holds — what an export produces with and without `?include_artifacts=true`. `?on_conflict=new_version` upserts: an existing draft is replaced, an active plugin whose content differs gets a new draft version, identical content is reported `unchanged`. A `signature` is not content, but an item whose signature differs from the stored one is not `unchanged`: it is written, so a signature attached at deploy time reaches the row. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7207,7 +7383,14 @@ export interface operations {
     };
     delete_plugin: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description `now` (default) reloads the engine as part of this request; `defer`
+                 *     commits the row and leaves the reload to a later
+                 *     `POST /engine/reload` (K4).
+                 */
+                reload?: components["schemas"]["ReloadMode"];
+            };
             header?: never;
             path: {
                 /** @description Plugin ID */
@@ -7217,7 +7400,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Plugin deleted (all versions), and any component nothing names any more */
+            /** @description Plugin deleted (all versions), and any component nothing names any more. With `?reload=defer` the engine keeps serving it until `POST /engine/reload` */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -8294,7 +8477,14 @@ export interface operations {
     };
     delete_workflow: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description `now` (default) reloads the engine as part of this request; `defer`
+                 *     commits the row and leaves the reload to a later
+                 *     `POST /engine/reload` (K4).
+                 */
+                reload?: components["schemas"]["ReloadMode"];
+            };
             header?: never;
             path: {
                 /** @description Workflow ID */
@@ -8304,7 +8494,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Workflow deleted */
+            /** @description Workflow deleted. With `?reload=defer` the engine keeps serving it until `POST /engine/reload` */
             204: {
                 headers: {
                     [name: string]: unknown;

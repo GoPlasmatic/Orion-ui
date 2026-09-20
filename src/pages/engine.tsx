@@ -14,8 +14,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { PageHeader } from "@/components/shared/page-header"
 import { HealthComponents } from "@/components/shared/health-components"
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
-import { traceStatusBadgeClass } from "@/lib/status"
+import { componentStateBadgeClass, traceStatusBadgeClass } from "@/lib/status"
 import { formatBytes, formatDate, formatUptime } from "@/lib/utils"
+import { countLoadIssues } from "@/api/types"
+import type { EngineCapabilities } from "@/api/types"
 import { RefreshCw, Archive, Database, HeartPulse, Monitor, Plug } from "lucide-react"
 
 /**
@@ -37,6 +39,10 @@ export function EnginePage() {
   const { data: health } = useHealth()
   const { theme, setTheme } = useTheme()
   const { zone, setZone, label: zoneLabel, localName } = useTimeZone()
+  // `load_issues` absent means "this server cannot tell you" (pre-1.9), which
+  // is not the same as "nothing quarantined" — so it counts as zero and says
+  // nothing, rather than claiming a clean generation.
+  const quarantined = countLoadIssues(engine?.load_issues)
 
   return (
     <div className="space-y-6">
@@ -69,7 +75,11 @@ export function EnginePage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <HealthComponents health={health} />
+          {/* `/engine/status` is the authority for what the running generation
+              could not load: `/health` serves the same four lists, but only to
+              a caller it recognises as an admin, so on an instance with
+              `admin_auth` on they can be missing there and present here. */}
+          <HealthComponents health={health} loadIssues={engine?.load_issues} />
         </CardContent>
       </Card>
 
@@ -128,14 +138,24 @@ export function EnginePage() {
               {engine
                 ? `Version ${engine.version} | Uptime: ${formatUptime(engine.uptime_seconds)}`
                 : "Loading..."}
+              {engine?.generation ? ` | Generation ${engine.generation}` : ""}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {engine?.capabilities && <Capabilities capabilities={engine.capabilities} />}
             <p className="text-sm text-muted-foreground">
               Reload the engine to pick up configuration changes to channels and workflows. It
               rebuilds the running generation and bumps the cluster config epoch once, which is
               also what finishes a batch of deferred status changes.
             </p>
+            {quarantined > 0 && (
+              <p className="text-sm text-warning">
+                This generation quarantined {quarantined}{" "}
+                {quarantined === 1 ? "entity" : "entities"} — the health report above names{" "}
+                {quarantined === 1 ? "it" : "them"}. A reload never fails over one entity: it is
+                refused, and everything else serves.
+              </p>
+            )}
             <Button
               onClick={() => setConfirmReload(true)}
               disabled={reload.isPending}
@@ -270,6 +290,38 @@ export function EnginePage() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  )
+}
+
+/**
+ * What this node is configured to run (Orion 1.9).
+ *
+ * The three runtimes that are off by default. A cron channel on a node with
+ * `cron.enabled = false` is not a broken channel — it is a schedule that would
+ * never fire, and the node quarantines it saying so. Reading the capability
+ * here is how that answer is available before a reload discovers it, and why
+ * `off` reads as neutral rather than as a fault.
+ */
+function Capabilities({ capabilities }: { capabilities: EngineCapabilities }) {
+  const rows: { key: keyof EngineCapabilities; label: string; setting: string }[] = [
+    { key: "cron", label: "Cron", setting: "cron.enabled" },
+    { key: "plugins", label: "Plugins", setting: "plugins.enabled" },
+    { key: "models", label: "Models", setting: "models.enabled" },
+  ]
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-xs text-muted-foreground">This node runs</span>
+      {rows.map(({ key, label, setting }) => (
+        <Badge
+          key={key}
+          variant="outline"
+          className={componentStateBadgeClass(capabilities[key] ? "ok" : "disabled")}
+          title={`${setting} = ${capabilities[key]} — a node without it quarantines what needs it rather than refusing to start`}
+        >
+          {label} {capabilities[key] ? "on" : "off"}
+        </Badge>
+      ))}
     </div>
   )
 }

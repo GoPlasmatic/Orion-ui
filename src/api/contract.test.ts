@@ -245,6 +245,10 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
   },
   packagesApi: {
     list: () => packagesApi.list({ limit: 10, offset: 0 }),
+    // 1.9: one row per package, its current receipt, carrying the inventory.
+    // Not a module function — an extra invocation, so the query param the
+    // `current` flag turns into is checked against the spec like any other.
+    "list?current": () => packagesApi.list({ limit: 10, offset: 0, current: true }),
     get: () => packagesApi.get("payments"),
   },
   pluginsApi: {

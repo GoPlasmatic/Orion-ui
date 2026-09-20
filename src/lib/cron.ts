@@ -1,4 +1,5 @@
-import type { Channel, ChannelConfig, CronTransportConfig } from "@/api/types"
+import type { Channel, ChannelConfig, CronScheduleStatus, CronTransportConfig } from "@/api/types"
+import { CRON_SLOTS_MAX, CRON_SLOTS_MIN } from "@/api/types"
 
 /**
  * Reading a cron channel (Orion 1.6).
@@ -76,9 +77,53 @@ export const CONCURRENCY_POLICIES = [
   {
     value: "forbid",
     label: "Forbid",
-    hint: "At most one occurrence per key at a time, cluster-wide; a contender is recorded skipped_singleton.",
+    hint: "At most `slots` occurrences per key at a time (one by default); a contender is recorded skipped_singleton.",
   },
 ] as const
+
+/**
+ * How many runs of the key this schedule admits at once (Orion 1.9).
+ *
+ * `slots` is `forbid`-only and defaults to 1, so a `forbid` channel that never
+ * set it reads as one — which is exactly what it meant before 1.9.
+ */
+export function concurrencySlots(
+  tc: Pick<CronTransportConfig, "concurrency"> | null | undefined,
+): number | null {
+  if (tc?.concurrency?.policy !== "forbid") return null
+  return tc.concurrency.slots ?? 1
+}
+
+/**
+ * Client-side bounds check for `concurrency.slots`, while typing. The server
+ * refuses it outright with `policy: "allow"` rather than ignoring it, so the
+ * editor only offers it under `forbid` and this covers the range.
+ */
+export function lintSlots(slots: number | undefined): string | null {
+  if (slots == null) return null
+  if (!Number.isInteger(slots)) return "Slots is a whole number"
+  if (slots < CRON_SLOTS_MIN || slots > CRON_SLOTS_MAX) {
+    return `Slots is ${CRON_SLOTS_MIN}–${CRON_SLOTS_MAX}`
+  }
+  return null
+}
+
+/**
+ * A status row's lock as "held/slots", or null when the channel takes none.
+ *
+ * `slots_held` counts live leases across *every* channel sharing the key, so
+ * it can legitimately exceed this channel's own `slots` — when a peer channel
+ * declares more, or just after `slots` was lowered and a run still holds a
+ * higher one. `over` is what says the reading is that case rather than a fault.
+ */
+export function slotUsage(
+  row: Pick<CronScheduleStatus, "concurrency_policy" | "slots" | "slots_held">,
+): { held: number; slots: number; over: boolean } | null {
+  if (row.concurrency_policy !== "forbid") return null
+  const slots = row.slots ?? 1
+  const held = row.slots_held ?? 0
+  return { held, slots, over: held > slots }
+}
 
 /** The six-field schedule and its zone, the way the status endpoint echoes it. */
 export function describeSchedule(tc: Pick<CronTransportConfig, "schedule" | "timezone">): string {
@@ -123,7 +168,7 @@ export const OCCURRENCE_STATUS_LABELS: Record<string, string> = {
   completed: "Completed",
   failed: "Failed",
   skipped_misfire: "Skipped (misfire)",
-  skipped_singleton: "Skipped (singleton held)",
+  skipped_singleton: "Skipped (every slot held)",
 }
 
 export function occurrenceStatusLabel(status: string | null | undefined): string {

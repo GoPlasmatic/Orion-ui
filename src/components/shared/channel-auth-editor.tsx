@@ -1,4 +1,5 @@
 import { useTheme } from "@/lib/use-theme"
+import { isLegacySchemePrefix, lintAuthScheme } from "@/lib/channel-auth"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
 import {
@@ -134,12 +135,13 @@ export function ChannelAuthEditor({
               placeholder="Authorization"
             />
             <TextField
-              label="Scheme prefix"
+              label="Scheme"
               value={auth.scheme}
               onChange={(v) => set("scheme", v)}
-              placeholder="Bearer "
+              placeholder="Bearer"
             />
           </div>
+          <SchemeHint scheme={auth.scheme} header={auth.header} />
         </>
       )}
 
@@ -448,5 +450,45 @@ function JwtFields({
         />
       </div>
     </>
+  )
+}
+
+/**
+ * What `scheme` means, and whether this one can ever match (Orion 1.8.2+).
+ *
+ * The field names an HTTP authentication scheme, so the header is parsed as
+ * RFC 9110 §11.1 defines it — scheme, spaces, credential — rather than matched
+ * as a byte prefix. Two consequences are worth saying out loud: a value that
+ * is not a token, like `Key=`, can never match and is refused at save; and an
+ * empty value means the bare credential, which is the default on a custom
+ * header such as `X-API-Key`.
+ */
+function SchemeHint({ scheme, header }: { scheme?: string; header?: string }) {
+  const issue = lintAuthScheme(scheme)
+  if (issue) return <p className="-mt-2 text-xs text-destructive">{issue}</p>
+
+  const trimmed = scheme?.trim() ?? ""
+  const onAuthorization = !header || header.toLowerCase() === "authorization"
+  return (
+    <p className="-mt-2 text-xs text-muted-foreground">
+      {trimmed === "" ? (
+        <>
+          Defaults to <code className="font-mono">Bearer</code>{" "}
+          {onAuthorization
+            ? "on Authorization; leave it empty on a custom header to accept the bare key."
+            : "only on Authorization — on this header the bare key is accepted."}
+        </>
+      ) : (
+        <>
+          Matched case-insensitively, then one or more spaces, then the key:{" "}
+          <code className="font-mono">
+            {header || "Authorization"}: {trimmed} &lt;key&gt;
+          </code>
+          . A value with no space after the scheme is refused.
+          {isLegacySchemePrefix(scheme) &&
+            " The trailing space is not part of the name and is ignored — this is the same scheme without it."}
+        </>
+      )}
+    </p>
   )
 }

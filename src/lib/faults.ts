@@ -20,7 +20,8 @@ export interface BreakerFault {
 }
 
 export interface MapFaults {
-  failedConnectors: Set<string>
+  /** Connector name → the stage that refused it, for the node that draws it. */
+  failedConnectors: Map<string, string>
   /** Channel name → the engine's reason. */
   quarantined: Map<string, string>
   /** Channel name → the breakers open or half-open on its connectors. */
@@ -39,7 +40,12 @@ export function buildFaults(
   health: HealthResponse | undefined,
   breakers: CircuitBreakerStatus | undefined,
 ): MapFaults {
-  const failedConnectors = new Set(health?.connectors?.failed_to_load ?? [])
+  // `failed_to_load` is a list of objects, not names — keyed here by the name
+  // a workflow references the connector by, which is what a map node carries.
+  const failedConnectors = new Map<string, string>()
+  for (const c of health?.connectors?.failed_to_load ?? []) {
+    failedConnectors.set(c.connector, c.stage ? `${c.stage} — ${c.reason}` : (c.reason ?? ""))
+  }
   const quarantined = new Map<string, string>()
   for (const q of health?.channels?.quarantined ?? []) quarantined.set(q.channel, q.reason ?? "")
   const byChannel = new Map<string, BreakerFault[]>()
@@ -61,11 +67,12 @@ export function faultsFor(node: SystemNode, faults: MapFaults): NodeFault[] {
     })
   }
   for (const connector of node.connectors) {
-    if (faults.failedConnectors.has(connector)) {
+    const why = faults.failedConnectors.get(connector)
+    if (why !== undefined) {
       out.push({
         kind: "connector",
         tone: "destructive",
-        detail: `Connector ${connector} failed to load — every task using it is failing`,
+        detail: `Connector ${connector} failed to load — every task using it is failing${why ? ` · ${why}` : ""}`,
       })
     }
   }

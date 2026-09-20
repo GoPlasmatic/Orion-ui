@@ -32,6 +32,17 @@ function isMaskedSecret(v: unknown): v is string {
 const isSecretKey = (key: string) => SECRET_KEY_RE.test(key)
 
 /**
+ * A value held by reference rather than written here: `env://VAR`,
+ * `vault://path#key` or `var://name`. Since 1.9 one may stand in *any* field
+ * of a connector's config, not only a string one — an `http` connector whose
+ * peer and its address class differ per deployment reads both from the
+ * environment. A reference is only a reference when it is the whole value;
+ * inside a longer string it is text, which server-side Validate warns about.
+ */
+const REFERENCE_RE = /^(env|vault|var):\/\//
+const isReference = (v: unknown): v is string => typeof v === "string" && REFERENCE_RE.test(v)
+
+/**
  * Per-operation gates, rendered as dedicated toggles instead of the generic
  * nested-JSON control. Which gates apply depends on the connector type
  * (CONNECTOR_GATES); `http` gates by method allow-list rather than by boolean,
@@ -196,7 +207,40 @@ function ConfigRow({
   if (isMaskedSecret(value)) {
     control = <SecretField masked={value} onReplace={onChange} />
   } else if (typeof value === "boolean") {
-    control = <Switch checked={value} onCheckedChange={onChange} aria-label={name} />
+    control = (
+      <div className="flex items-center gap-3">
+        <Switch checked={value} onCheckedChange={onChange} aria-label={name} />
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          className="text-muted-foreground"
+          onClick={() => onChange("env://")}
+          title="Read this field from the environment instead. The text must resolve to true or false, in any case; anything else is a load issue that names the field and never the value."
+        >
+          Use a reference
+        </Button>
+      </div>
+    )
+  } else if (isReference(value)) {
+    control = (
+      <div className="space-y-1">
+        <Input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="font-mono"
+          aria-label={name}
+        />
+        <p className="text-xs text-muted-foreground">
+          Resolved on the node that loads the connector, so it is not checked here. An{" "}
+          <code className="font-mono">env://</code> or <code className="font-mono">vault://</code>{" "}
+          reference always resolves to text — in a boolean field it must read{" "}
+          <code className="font-mono">true</code> or <code className="font-mono">false</code>; a{" "}
+          <code className="font-mono">var://</code> one keeps the type its{" "}
+          <code className="font-mono">[vars]</code> entry declared.
+        </p>
+      </div>
+    )
   } else if (typeof value === "number") {
     control = (
       <Input

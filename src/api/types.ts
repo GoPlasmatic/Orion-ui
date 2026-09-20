@@ -101,15 +101,32 @@ export type TraceStorageMode = "sync" | "async" | "batch" | "off"
 // `skip` records the misses; `latest` (default) runs the newest one; `catch_up`
 // replays them oldest-first, bounded by `max_catch_up`.
 export type MisfirePolicy = "skip" | "latest" | "catch_up"
-// `forbid` admits at most one occurrence per key at a time, cluster-wide; a
-// contender is recorded `skipped_singleton` rather than dropped.
+// `forbid` admits at most `slots` occurrences per key at a time; a contender is
+// recorded `skipped_singleton` rather than dropped.
 export type ConcurrencyPolicy = "allow" | "forbid"
+
+/** The lowest and highest `concurrency.slots` the server accepts (1.9). */
+export const CRON_SLOTS_MIN = 1
+export const CRON_SLOTS_MAX = 64
 
 export interface CronConcurrencyConfig {
   policy?: ConcurrencyPolicy
   // Literal lock name, `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}`; defaults to the
-  // channel's `channel_id`. Two channels naming one key serialise together.
+  // channel's `channel_id`. Two channels naming one key share its slots.
   key?: string
+  /**
+   * How many occurrences of `key` may run at once (1.9), 1–64, default 1.
+   * `forbid` only — sending it with `allow` is refused. A run takes the lowest
+   * free slot and reads it as `metadata.trigger.singleton_slot`, so a workflow
+   * can partition its queue by it instead of cloning a channel per lane.
+   *
+   * The scope is the database: on SQLite each node has its own slots; nodes
+   * sharing PostgreSQL or MySQL share them. Lowering it affects new runs only.
+   *
+   * An older node refuses the unknown key and quarantines the channel, so
+   * every node must be on 1.9 before a channel setting it is activated.
+   */
+  slots?: number
 }
 
 export interface CronTransportConfig {
@@ -910,22 +927,115 @@ export interface CircuitBreakerStatus {
 }
 
 // Engine types
+
+/**
+ * A channel a generation refused to serve — the shape `/health`'s
+ * `channels.quarantined` and `/engine/status`'s `load_issues.channels` share,
+ * because since 1.9 both are built by one collector on the server.
+ */
+export interface ChannelLoadIssue {
+  // The channel's *name*, which is what the quarantine is keyed by.
+  channel: string
+  // The channel's id (1.9), so a quarantine can link straight to its page.
+  // Empty from a server that predates the field.
+  channel_id?: string
+  // The workflow it is bound to, when it names one (1.9).
+  workflow_id?: string | null
+  reason: string
+}
+
+/**
+ * An enabled connector the registry could not load. `stage` is
+ * `env_substitution`, `json_parse`, `var_reference`, `secret_resolution`,
+ * `deserialize` or `endpoint` (the last two added in 1.9, for a `var://`
+ * reference that does not resolve and for a URL arriving by reference whose
+ * scheme is neither `http` nor `https`).
+ *
+ * Note this is an *object*, not a bare name — every task using the connector
+ * is failing, and the stage is what says why.
+ */
+export interface ConnectorLoadIssue {
+  // The connector's name — what workflows reference it by.
+  connector: string
+  connector_id?: string
+  stage: string
+  reason: string
+}
+
+/**
+ * What a runtime generation could not load, on the node that answered (1.9).
+ *
+ * The same four lists `/health` serves an admin caller, from one collector, so
+ * the two surfaces cannot disagree. An *empty* `EngineLoadIssues` means
+ * nothing is quarantined; the field being absent means the server predates it
+ * and cannot say — which is why every reader must distinguish the two.
+ */
+export interface EngineLoadIssues {
+  channels: ChannelLoadIssue[]
+  plugins: PluginLoadIssue[]
+  models: ModelLoadIssue[]
+  connectors: ConnectorLoadIssue[]
+}
+
+/** Nothing quarantined. Absent issues are "unknown" and are not this. */
+export function noLoadIssues(issues: EngineLoadIssues | null | undefined): boolean {
+  if (!issues) return false
+  return (
+    (issues.channels?.length ?? 0) === 0 &&
+    (issues.plugins?.length ?? 0) === 0 &&
+    (issues.models?.length ?? 0) === 0 &&
+    (issues.connectors?.length ?? 0) === 0
+  )
+}
+
+/** Total quarantined entities across the four kinds. */
+export function countLoadIssues(issues: EngineLoadIssues | null | undefined): number {
+  if (!issues) return 0
+  return (
+    (issues.channels?.length ?? 0) +
+    (issues.plugins?.length ?? 0) +
+    (issues.models?.length ?? 0) +
+    (issues.connectors?.length ?? 0)
+  )
+}
+
+/**
+ * What this node is configured to run (1.9) — the three runtimes that are off
+ * by default and quarantine what needs them when they are. A cron channel on a
+ * node with `cron.enabled = false` is not a broken channel; it is a schedule
+ * that would never fire, which is why a plan can predict the quarantine from
+ * this rather than discover it from a reload.
+ */
+export interface EngineCapabilities {
+  cron: boolean
+  plugins: boolean
+  models: boolean
+}
+
 export interface EngineStatus {
   workflows_count: number
   active_workflows: number
   channels: string[]
   uptime_seconds: number
   version: string
+  // The generation this node serves (1.9); `0` from a server that predates it.
+  generation?: number
+  // Absent from a pre-1.9 server — "cannot tell you", not "nothing wrong".
+  load_issues?: EngineLoadIssues | null
+  capabilities?: EngineCapabilities | null
 }
 
+/**
+ * What a reload answered. A reload does not fail because one entity did not
+ * load — the entity is quarantined and everything else serves — so a 200 here
+ * is not proof that what was activated is serving. Since 1.9 the answer says
+ * which generation it published and what that generation refused.
+ */
 export interface EngineReloaded {
   reloaded: boolean
   workflows_count: number
-}
-
-export interface ChannelLoadIssue {
-  channel: string
-  reason: string
+  generation?: number
+  load_issues?: EngineLoadIssues | null
 }
 
 /** One plugin version this node loaded, from the admin-only `/health` detail. */
@@ -1001,6 +1111,32 @@ export interface ModelLoadIssue {
   reason: string
 }
 
+/**
+ * One `[packages] apply` entry's progress at startup (1.9), from the
+ * admin-only `/health` detail.
+ *
+ * `pending` (not reached), `applying` (being read, applied or verified),
+ * `applied` (by this node, and serving), `already_applied` (this version was
+ * already current — an earlier boot, or a peer), `superseded` (a later version
+ * is current; what this one still holds is serving) or `failed` (refused or
+ * not serving; the process exits). The first four all count as serving.
+ */
+export interface BootPackageStatus {
+  // The `[packages] apply` entry — a path on the node, not a package name.
+  file: string
+  // From the artifact once read; empty before that.
+  name: string
+  version: string
+  content_hash: string
+  state: string
+  error?: string | null
+}
+
+/** Whether a configured package counts as serving for readiness. */
+export function bootPackageServing(state: string | null | undefined): boolean {
+  return state === "applied" || state === "already_applied" || state === "superseded"
+}
+
 /** A supervised background task, from the admin-only `/health` detail (1.4). */
 export interface BackgroundTaskReport {
   name: string
@@ -1034,11 +1170,19 @@ export interface HealthResponse {
    *
    * `degraded` on `engine_reload`, `config_propagation` and `cron` does not
    * fail `/readyz`: the node still serves every request correctly.
+   *
+   * `packages` (1.9) appears only when `[packages] apply` names artifacts: it
+   * is `applying` — and `/readyz` answers 503 — until every configured package
+   * is applied and serving, then `ok` for good, because readiness is a startup
+   * condition here. `failed` means one did not apply and the node is on its
+   * way out with a non-zero exit.
    */
   components: Record<string, ComponentState>
   /**
    * Connector health. `failed_to_load` names connectors the engine could not
-   * bring up, so every task using one is failing right now.
+   * bring up, so every task using one is failing right now. Each entry is a
+   * `ConnectorLoadIssue` **object**, not a bare name — reading it as a string
+   * renders `[object Object]` and matches no connector.
    *
    * The spec's `HealthStatus` schema declares only status/version/
    * uptime_seconds/components — the rest of this body is served but
@@ -1048,7 +1192,7 @@ export interface HealthResponse {
   connectors: {
     circuit_breaker_scope?: string
     circuit_breakers?: Record<string, string>
-    failed_to_load?: string[]
+    failed_to_load?: ConnectorLoadIssue[]
     [key: string]: unknown
   }
   /**
@@ -1062,6 +1206,9 @@ export interface HealthResponse {
      * `{ channel, reason }` per refused channel — not bare names. Since 1.3 a
      * workflow reading a secret where it would be recorded, or naming one the
      * instance does not declare, quarantines its channel with that reason.
+     * Since 1.9 each entry also carries `channel_id` and `workflow_id`, and
+     * the list is the same one `/engine/status` serves under
+     * `load_issues.channels`.
      */
     quarantined?: ChannelLoadIssue[]
     [key: string]: unknown
@@ -1114,6 +1261,12 @@ export interface HealthResponse {
     scheduled_channels?: number
     [key: string]: unknown
   }
+  /**
+   * The `[packages] apply` progress behind `components.packages` (1.9),
+   * admin-only detail. Present only when this node is configured to apply its
+   * own packages at startup.
+   */
+  packages?: BootPackageStatus[]
   // Per-task breakdown behind `components.background_tasks` (1.4), admin-only.
   background_tasks?: BackgroundTaskReport[]
   workflows_loaded: number
@@ -1476,6 +1629,38 @@ export interface DlqPurgeResult {
 
 export type PackageState = "staged" | "applied"
 
+/**
+ * What one package version carried (1.9), keyed the way each kind is matched:
+ * `plugin_id`, `model_id`, the connector's `name`, `workflow_id`,
+ * `channel_id`. Each list is sorted and free of duplicates, so two applies of
+ * one artifact record identical JSON.
+ *
+ * This is what `package apply --prune` reads to find what a new version
+ * dropped — the receipt is the only record of what the previous version owned.
+ */
+export interface PackageInventory {
+  plugins?: string[]
+  connectors?: string[]
+  models?: string[]
+  workflows?: string[]
+  channels?: string[]
+}
+
+/** The five inventory kinds, in the order an apply activates them. */
+export const PACKAGE_INVENTORY_KINDS = [
+  "plugins",
+  "connectors",
+  "models",
+  "workflows",
+  "channels",
+] as const satisfies readonly (keyof PackageInventory)[]
+
+/** How many entities an inventory names, across every kind. */
+export function inventorySize(inv: PackageInventory | null | undefined): number {
+  if (!inv) return 0
+  return PACKAGE_INVENTORY_KINDS.reduce((n, kind) => n + (inv[kind]?.length ?? 0), 0)
+}
+
 export interface PackageReceipt {
   name: string
   version: string
@@ -1485,6 +1670,12 @@ export interface PackageReceipt {
   principal: string
   created_at: string
   updated_at: string
+  /**
+   * What this version carried (1.9). Absent from a receipt written before
+   * receipts recorded one, and from the plain `GET /packages` listing — the
+   * package detail and `?current=true` are what carry it.
+   */
+  inventory?: PackageInventory | null
 }
 
 export interface PackageDetail {
@@ -1498,6 +1689,12 @@ export interface PackageDetail {
 export interface ListPackagesParams {
   limit?: number
   offset?: number
+  /**
+   * List each package's *current* receipt instead of every receipt (1.9), with
+   * its `inventory`. One row per package, which is what "what is running
+   * here?" actually asks.
+   */
+  current?: boolean
 }
 
 // --- Cron occurrences (1.6) --------------------------------------------------
@@ -1576,6 +1773,13 @@ export interface CronOccurrence extends CronOccurrenceSummary {
   trace_id?: string | null
   error_message?: string | null
   singleton_key?: string | null
+  /**
+   * Which of the key's `concurrency.slots` this attempt holds, from `0` (1.9).
+   * Two occurrences of one key can share a `fencing_token` when they hold
+   * different slots, so it is the *pair* that names a hold. `null` under
+   * `allow`, and from a pre-1.9 server.
+   */
+  singleton_slot?: number | null
   // The acquisition generation this attempt holds its key under. Diagnostic.
   fencing_token?: number | null
   updated_at: string
@@ -1604,6 +1808,18 @@ export interface CronScheduleStatus {
   // Occurrences waiting for a worker. A number that only grows means the
   // schedule produces work faster than the instance runs it.
   pending: number
+  // `allow` or `forbid` (1.9); absent from a pre-1.9 server.
+  concurrency_policy?: string
+  // The lock this channel's runs take. Present under `forbid`.
+  singleton_key?: string | null
+  // How many runs of `singleton_key` this channel admits at once.
+  slots?: number | null
+  /**
+   * Live leases on `singleton_key` right now, **across every channel sharing
+   * the key** — so it can exceed this channel's `slots` when another declares
+   * more, or just after `slots` was lowered. Not a bug in the reading.
+   */
+  slots_held?: number | null
 }
 
 export interface ListCronOccurrencesParams {

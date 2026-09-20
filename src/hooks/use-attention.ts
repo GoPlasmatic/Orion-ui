@@ -69,6 +69,7 @@ const FAILED_OCCURRENCE_WINDOW_MS = 24 * 60 * 60 * 1000
 /** What a degraded component means, in a sentence; the health report for the rest. */
 const COMPONENT_DETAIL: Record<string, string> = {
   cron: "Declared schedules are not running — every liveness signal is green",
+  packages: "A package this node applies at startup is still applying, or did not apply",
   engine_reload: "The last reload failed; this node serves the previous generation",
   config_propagation: "A change committed here has not reached the peers",
 }
@@ -170,26 +171,34 @@ export function useAttentionItems(
 
     const list: AttentionItem[] = [
       ...quarantined.map(
-        ({ channel, reason }): AttentionItem => ({
+        ({ channel, channel_id, reason }): AttentionItem => ({
           key: `quarantine-${channel}`,
           severity: 0,
           tone: "destructive",
           kind: "quarantine",
           label: `Quarantined: ${channel}`,
           detail: reason || "Refused at load — the route is not being served",
-          to: channelPath(channel),
+          // Since 1.9 the quarantine carries the channel's own id, so the link
+          // works before the channel list has loaded — and still works for a
+          // channel the list's first page does not reach.
+          to: channel_id ? `/channels/${channel_id}` : channelPath(channel),
           channel,
         }),
       ),
-      ...failedConnectors.map((connector): AttentionItem => {
-        const id = connectorIdByName.get(connector)
+      // An entry is an object, not a name: `stage` says which step refused it,
+      // and `connector_id` is the row's own id, so the link lands on the
+      // connector even when the registry list has not arrived yet.
+      ...failedConnectors.map((issue): AttentionItem => {
+        const id = issue.connector_id || connectorIdByName.get(issue.connector)
         return {
-          key: `conn-${connector}`,
+          key: `conn-${issue.connector}`,
           severity: 1,
           tone: "destructive",
           kind: "connector",
-          label: `Connector failed to load: ${connector}`,
-          detail: "Every task using it is failing",
+          label: `Connector failed to load: ${issue.connector}`,
+          detail: issue.reason
+            ? `${issue.stage}: ${issue.reason}`
+            : "Every task using it is failing",
           to: id ? `/connectors/${id}?test=1` : "/connectors",
         }
       }),

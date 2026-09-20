@@ -19,7 +19,8 @@ import { usePagination, PAGE_SIZE } from "@/lib/use-pagination"
 import { enabledBadgeClass } from "@/lib/status"
 import { formatDate } from "@/lib/utils"
 import { Package } from "lucide-react"
-import type { PackageState } from "@/api/types"
+import type { PackageInventory, PackageState } from "@/api/types"
+import { PACKAGE_INVENTORY_KINDS, inventorySize } from "@/api/types"
 
 const stateClass = (state: PackageState) =>
   state === "applied" ? enabledBadgeClass : "border-warning/40 bg-warning/10 text-warning"
@@ -148,12 +149,15 @@ function PackageDetailPanel({ name }: { name: string }) {
             <div>
               <p className="text-xs text-muted-foreground">Current</p>
               {data.current ? (
-                <p className="font-mono text-sm">
-                  {data.current.version}
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    applied {formatDate(data.current.updated_at)}
-                  </span>
-                </p>
+                <>
+                  <p className="font-mono text-sm">
+                    {data.current.version}
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      applied {formatDate(data.current.updated_at)}
+                    </span>
+                  </p>
+                  <Inventory inventory={data.current.inventory} />
+                </>
               ) : (
                 <p className="text-sm text-muted-foreground">
                   Nothing applied — every receipt is still staged.
@@ -200,5 +204,60 @@ function PackageDetailPanel({ name }: { name: string }) {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+const KIND_LABELS: Record<(typeof PACKAGE_INVENTORY_KINDS)[number], string> = {
+  plugins: "Plugins",
+  connectors: "Connectors",
+  models: "Models",
+  workflows: "Workflows",
+  channels: "Channels",
+}
+
+/**
+ * What a package version carried (Orion 1.9).
+ *
+ * Recorded on the receipt because the receipt is the only record of what the
+ * previous version owned: `package apply --prune` reads it to find what a new
+ * version dropped, and without it a channel removed from the definitions would
+ * keep serving on the target forever. Kinds are listed in the order an apply
+ * activates them.
+ *
+ * Absent from a receipt written before receipts recorded one, and from the
+ * plain `/packages` listing — so "no inventory" here is not "carried nothing".
+ */
+function Inventory({ inventory }: { inventory: PackageInventory | null | undefined }) {
+  const total = inventorySize(inventory)
+  if (!inventory || total === 0) {
+    return (
+      <p
+        className="mt-1 text-xs text-muted-foreground"
+        title="Receipts have recorded an inventory since Orion 1.9. One written before that gains it on its next re-apply."
+      >
+        No inventory recorded.
+      </p>
+    )
+  }
+  return (
+    <div className="mt-2 space-y-1">
+      <p className="text-xs text-muted-foreground">
+        Carried {total} {total === 1 ? "entity" : "entities"}
+      </p>
+      <dl className="space-y-1 text-xs">
+        {PACKAGE_INVENTORY_KINDS.map((kind) => {
+          const ids = inventory[kind] ?? []
+          if (ids.length === 0) return null
+          return (
+            <div key={kind} className="flex gap-2">
+              <dt className="w-24 shrink-0 text-muted-foreground">
+                {KIND_LABELS[kind]} ({ids.length})
+              </dt>
+              <dd className="min-w-0 break-words font-mono text-[11px]">{ids.join(", ")}</dd>
+            </div>
+          )
+        })}
+      </dl>
+    </div>
   )
 }

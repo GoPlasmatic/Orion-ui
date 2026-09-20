@@ -22,10 +22,18 @@ import type {
  * state from a UI would desync it from the artifact that owns it.
  */
 export const packagesApi = {
-  // Ordered by package name, newest first within a package.
-  list: (params: ListPackagesParams = {}) =>
+  /**
+   * Ordered by package name, newest first within a package.
+   *
+   * `current: true` (1.9) lists each package's current receipt instead — one
+   * row per package, carrying its `inventory`. The plain listing leaves
+   * inventories out, so a row's absent `inventory` there says nothing about
+   * whether the receipt has one. `false` is not sent: the server's default is
+   * the full history and a literal `current=false` only adds noise to the URL.
+   */
+  list: ({ current, ...rest }: ListPackagesParams = {}) =>
     api.get<PaginatedResponse<PackageReceipt>>(
-      `admin/packages${buildQuery(params as Record<string, number | undefined>)}`
+      `admin/packages${buildQuery({ ...rest, current: current ? true : undefined })}`
     ),
 
   // `current` names the newest applied version, or null if nothing is applied.
