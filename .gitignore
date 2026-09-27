@@ -55,3 +55,6 @@ orion.db-wal
 
 # Planning docs (kept out of the public repo)
 improvements.md
+.impeccable
+PRODUCT.md
+DESIGN.md
