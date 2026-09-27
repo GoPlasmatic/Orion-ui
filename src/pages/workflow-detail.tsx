@@ -18,7 +18,7 @@ import { toVisualizerWorkflow } from "@/lib/workflow-mapper"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { DetailHeader, DetailSkeleton } from "@/components/shared/detail-header"
 import { Slider } from "@/components/ui/slider"
 import { JsonEditor } from "@/components/shared/json-editor"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
@@ -31,7 +31,6 @@ import { JsonViewer } from "@/components/shared/json-viewer"
 import { NeighbourhoodMap } from "@/components/graph/neighbourhood-map"
 import { WorkflowDependencies } from "@/components/shared/workflow-dependencies"
 import { ErrorState } from "@/components/shared/error-state"
-import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { stepResultBadgeClass } from "@/lib/status"
 import { ChevronDown, ChevronUp, CircleStop, History, Layers, OctagonX, Pencil, Percent, Play, Radio } from "lucide-react"
 import { countGroups, countHaltOnFailure, countLeafSteps, countTerminal } from "@/lib/workflow-steps"
@@ -76,12 +75,7 @@ export function WorkflowDetailPage() {
   const [diagramHidden, setDiagramHidden] = useState(() => readStorage(DIAGRAM_KEY) === "hidden")
 
   if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-96 w-full" />
-      </div>
-    )
+    return <DetailSkeleton />
   }
 
   if (error || !workflow) {
@@ -142,95 +136,100 @@ export function WorkflowDetailPage() {
 
   return (
     <div className="space-y-6">
-      <Breadcrumbs items={[{ label: "Workflows", to: "/workflows" }, { label: workflow.name }]} />
-
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="min-w-0 break-words text-2xl font-bold">{workflow.name}</h1>
+      <DetailHeader
+        breadcrumbs={[{ label: "Workflows", to: "/workflows" }, { label: workflow.name }]}
+        title={workflow.name}
+        badges={
+          <>
             <StatusBadge status={workflow.status} />
             <Badge variant="outline">v{workflow.version}</Badge>
-          </div>
-          <div className="mt-2 flex items-center gap-3">
-            {workflow.tags?.length > 0 && (
-              <div className="flex gap-1">
-                {workflow.tags.map((tag) => (
-                  <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
-                ))}
-              </div>
-            )}
-            <span className="text-sm text-muted-foreground">
-              {taskCount} {taskCount === 1 ? "task" : "tasks"}
-            </span>
-            {groupCount > 0 && (
-              <Badge variant="outline" className="text-xs" title="Guard clauses — one condition gating a contiguous run of tasks">
-                <Layers className="mr-1 h-3 w-3" />
-                {groupCount} {groupCount === 1 ? "group" : "groups"}
-              </Badge>
-            )}
-            {terminalCount > 0 && (
-              <Badge variant="outline" className="text-xs" title="Steps that end the workflow once they have run">
-                <CircleStop className="mr-1 h-3 w-3" />
-                {terminalCount} terminal
-              </Badge>
-            )}
-            {haltCount > 0 && (
-              <Badge variant="outline" className="text-xs" title="Tasks that end the workflow when they fail (halt_on: failure)">
-                <OctagonX className="mr-1 h-3 w-3" />
-                {haltCount} halt on failure
-              </Badge>
-            )}
-            {workflow.status === "active" && (
-              <Badge variant="outline" className="text-xs">
-                <Percent className="mr-1 h-3 w-3" />
-                {workflow.rollout_percentage ?? 100}% rollout
-              </Badge>
-            )}
-          </div>
-          {channelList && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-sm">
-              <Radio className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">Runs on</span>
-              {runsOn.length === 0 ? (
-                <span className={workflow.status === "active" ? "text-warning" : "text-muted-foreground"}>
-                  no channel{workflow.status === "active" ? " — nothing reaches this workflow" : " yet"}
-                </span>
-              ) : (
-                runsOn.map((c) => (
-                  <Link key={c.channel_id} to={`/channels/${c.channel_id}`}>
-                    <Badge variant="outline" className="transition-colors hover:bg-accent">
-                      {c.name}
-                      {c.status !== "active" && <span className="text-muted-foreground"> · {c.status}</span>}
-                    </Badge>
-                  </Link>
-                ))
+          </>
+        }
+        meta={
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-3">
+              {workflow.tags?.length > 0 && (
+                <div className="flex gap-1">
+                  {workflow.tags.map((tag) => (
+                    <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                  ))}
+                </div>
+              )}
+              <span className="text-sm text-muted-foreground">
+                {taskCount} {taskCount === 1 ? "task" : "tasks"}
+              </span>
+              {groupCount > 0 && (
+                <Badge variant="outline" className="text-xs" title="Guard clauses — one condition gating a contiguous run of tasks">
+                  <Layers className="mr-1 h-3 w-3" />
+                  {groupCount} {groupCount === 1 ? "group" : "groups"}
+                </Badge>
+              )}
+              {terminalCount > 0 && (
+                <Badge variant="outline" className="text-xs" title="Steps that end the workflow once they have run">
+                  <CircleStop className="mr-1 h-3 w-3" />
+                  {terminalCount} terminal
+                </Badge>
+              )}
+              {haltCount > 0 && (
+                <Badge variant="outline" className="text-xs" title="Tasks that end the workflow when they fail (halt_on: failure)">
+                  <OctagonX className="mr-1 h-3 w-3" />
+                  {haltCount} halt on failure
+                </Badge>
+              )}
+              {workflow.status === "active" && (
+                <Badge variant="outline" className="text-xs">
+                  <Percent className="mr-1 h-3 w-3" />
+                  {workflow.rollout_percentage ?? 100}% rollout
+                </Badge>
               )}
             </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {workflow.status === "draft" && (
-            <Button size="sm" variant="outline" asChild>
-              <Link to={`/workflows/${workflow.workflow_id}/edit`}>
-                <Pencil className="h-3.5 w-3.5" /> Edit
-              </Link>
-            </Button>
-          )}
-          <LifecycleActions
-            onPreflight={() =>
-              statusDryRun.mutate({ id: workflow.workflow_id, req: { status: "active" } })
-            }
-            preflight={statusDryRun.data ?? null}
-            preflightPending={statusDryRun.isPending}
-            status={workflow.status}
-            isPending={isPending}
-            onActivate={() => changeStatus.mutate({ id: workflow.workflow_id, req: { status: "active" } })}
-            onArchive={() => changeStatus.mutate({ id: workflow.workflow_id, req: { status: "archived" } })}
-            onNewVersion={() => createVersion.mutate(workflow.workflow_id)}
-            onDelete={() => deleteWorkflow.mutate(workflow.workflow_id, { onSuccess: () => navigate("/workflows") })}
-          />
-        </div>
-      </div>
+            {channelList && (
+              <div className="flex flex-wrap items-center gap-1.5 text-sm">
+                <Radio className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground">Runs on</span>
+                {runsOn.length === 0 ? (
+                  <span className={workflow.status === "active" ? "text-warning" : "text-muted-foreground"}>
+                    no channel{workflow.status === "active" ? " — nothing reaches this workflow" : " yet"}
+                  </span>
+                ) : (
+                  runsOn.map((c) => (
+                    <Link key={c.channel_id} to={`/channels/${c.channel_id}`}>
+                      <Badge variant="outline" className="transition-colors hover:bg-accent">
+                        {c.name}
+                        {c.status !== "active" && <span className="text-muted-foreground"> · {c.status}</span>}
+                      </Badge>
+                    </Link>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        }
+        actions={
+          <>
+            {workflow.status === "draft" && (
+              <Button size="sm" variant="outline" asChild>
+                <Link to={`/workflows/${workflow.workflow_id}/edit`}>
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </Link>
+              </Button>
+            )}
+            <LifecycleActions
+              onPreflight={() =>
+                statusDryRun.mutate({ id: workflow.workflow_id, req: { status: "active" } })
+              }
+              preflight={statusDryRun.data ?? null}
+              preflightPending={statusDryRun.isPending}
+              status={workflow.status}
+              isPending={isPending}
+              onActivate={() => changeStatus.mutate({ id: workflow.workflow_id, req: { status: "active" } })}
+              onArchive={() => changeStatus.mutate({ id: workflow.workflow_id, req: { status: "archived" } })}
+              onNewVersion={() => createVersion.mutate(workflow.workflow_id)}
+              onDelete={() => deleteWorkflow.mutate(workflow.workflow_id, { onSuccess: () => navigate("/workflows") })}
+            />
+          </>
+        }
+      />
 
       {workflow.status === "active" && (
         <Card>

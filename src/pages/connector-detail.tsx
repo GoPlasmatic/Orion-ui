@@ -8,12 +8,11 @@ import {
 import { useEntityIndex } from "@/hooks/use-entity-index"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
+import { DetailHeader, DetailSkeleton } from "@/components/shared/detail-header"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { NeighbourhoodMap } from "@/components/graph/neighbourhood-map"
-import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
 import { ConnectorTestDialog } from "@/components/shared/connector-test-dialog"
 import { ErrorState } from "@/components/shared/error-state"
@@ -43,12 +42,7 @@ export function ConnectorDetailPage() {
   const [showTest, setShowTest] = useState(() => params.get("test") === "1")
 
   if (isLoading) {
-    return (
-      <div className="space-y-4">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-48 w-full" />
-      </div>
-    )
+    return <DetailSkeleton />
   }
 
   if (error || !connector) {
@@ -71,45 +65,44 @@ export function ConnectorDetailPage() {
 
   return (
     <div className="space-y-6">
-      <Breadcrumbs items={[{ label: "Connectors", to: "/connectors" }, { label: connector.name }]} />
-
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-3">
-          <h1 className="min-w-0 break-words text-2xl font-bold">{connector.name}</h1>
-          <Badge variant="outline" className="uppercase">{connector.connector_type}</Badge>
-          <Badge
-            variant="outline"
-            className={connector.enabled ? enabledBadgeClass : disabledBadgeClass}
-          >
-            {connector.enabled ? "Enabled" : "Disabled"}
-          </Badge>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowTest(true)}
-          >
-            <Activity className="h-3.5 w-3.5" />
-            Test
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link to={`/connectors/${connector.id}/edit`}>
-              <Pencil className="h-3.5 w-3.5" />
-              Edit
-            </Link>
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setShowDeleteConfirm(true)}
-            disabled={deleteConnector.isPending}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            Delete
-          </Button>
-        </div>
-      </div>
+      <DetailHeader
+        breadcrumbs={[{ label: "Connectors", to: "/connectors" }, { label: connector.name }]}
+        title={connector.name}
+        badges={
+          <>
+            <Badge variant="outline" className="uppercase">{connector.connector_type}</Badge>
+            <Badge
+              variant="outline"
+              className={connector.enabled ? enabledBadgeClass : disabledBadgeClass}
+            >
+              {connector.enabled ? "Enabled" : "Disabled"}
+            </Badge>
+          </>
+        }
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setShowTest(true)}>
+              <Activity className="h-3.5 w-3.5" />
+              Test
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/connectors/${connector.id}/edit`}>
+                <Pencil className="h-3.5 w-3.5" />
+                Edit
+              </Link>
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={deleteConnector.isPending}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
+            </Button>
+          </>
+        }
+      />
 
       <div className="text-sm text-muted-foreground">
         <span>Created: {formatDate(connector.created_at)}</span>

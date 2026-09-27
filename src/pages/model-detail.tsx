@@ -15,7 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
-import { Skeleton } from "@/components/ui/skeleton"
+import { DetailHeader, DetailSkeleton } from "@/components/shared/detail-header"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { StatusBadge } from "@/components/shared/status-badge"
@@ -24,7 +24,6 @@ import { VersionHistory } from "@/components/shared/version-history"
 import { VersionCompare } from "@/components/shared/version-compare"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { ErrorState } from "@/components/shared/error-state"
-import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { BAD, WARN, admissionStateBadgeClass, modelHealthBadgeClass } from "@/lib/status"
 import { admissionFailure, admissionStage, formatTensorType } from "@/lib/model-manifest"
 import { copyText } from "@/lib/clipboard"
@@ -181,12 +180,7 @@ export function ModelDetailPage() {
   const metrics = useModelMetrics(modelId)
 
   if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-    )
+    return <DetailSkeleton />
   }
 
   if (error || !model) {
@@ -230,16 +224,18 @@ export function ModelDetailPage() {
 
   return (
     <div className="space-y-6">
-      <Breadcrumbs items={[{ label: "Models", to: "/models" }, { label: model.model_id }]} />
-
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="font-mono text-2xl font-bold">{model.model_id}</h1>
+      <DetailHeader
+        breadcrumbs={[{ label: "Models", to: "/models" }, { label: model.model_id }]}
+        title={model.model_id}
+        titleClassName="font-mono"
+        badges={
+          <>
             <StatusBadge status={model.status} />
             <Badge variant="outline">v{model.version}</Badge>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          </>
+        }
+        meta={
+          <div className="flex flex-wrap items-center gap-2">
             <Badge
               variant="secondary"
               className="text-xs"
@@ -290,33 +286,35 @@ export function ModelDetailPage() {
               </Badge>
             ))}
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {model.status === "draft" && (
-            <Button variant="outline" size="sm" asChild>
-              <Link to={`/models/${encodeURIComponent(model.model_id)}/edit`}>
-                <Pencil className="h-3.5 w-3.5" /> Edit
-              </Link>
-            </Button>
-          )}
-          <LifecycleActions
-            onPreflight={() => statusDryRun.mutate({ id: model.model_id, req: { status: "active" } })}
-            preflight={statusDryRun.data ?? null}
-            preflightPending={statusDryRun.isPending}
-            activateRefusedReason={activateRefusedReason}
-            status={model.status}
-            isPending={isPending}
-            onActivate={() => changeStatus.mutate({ id: model.model_id, req: { status: "active" } })}
-            onArchive={() =>
-              changeStatus.mutate({ id: model.model_id, req: { status: "archived" } })
-            }
-            onNewVersion={() => createVersion.mutate(model.model_id)}
-            onDelete={() =>
-              deleteModel.mutate(model.model_id, { onSuccess: () => navigate("/models") })
-            }
-          />
-        </div>
-      </div>
+        }
+        actions={
+          <>
+            {model.status === "draft" && (
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/models/${encodeURIComponent(model.model_id)}/edit`}>
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </Link>
+              </Button>
+            )}
+            <LifecycleActions
+              onPreflight={() => statusDryRun.mutate({ id: model.model_id, req: { status: "active" } })}
+              preflight={statusDryRun.data ?? null}
+              preflightPending={statusDryRun.isPending}
+              activateRefusedReason={activateRefusedReason}
+              status={model.status}
+              isPending={isPending}
+              onActivate={() => changeStatus.mutate({ id: model.model_id, req: { status: "active" } })}
+              onArchive={() =>
+                changeStatus.mutate({ id: model.model_id, req: { status: "archived" } })
+              }
+              onNewVersion={() => createVersion.mutate(model.model_id)}
+              onDelete={() =>
+                deleteModel.mutate(model.model_id, { onSuccess: () => navigate("/models") })
+              }
+            />
+          </>
+        }
+      />
 
       {model.admission.state === "failed" && (
         <Callout variant="destructive">

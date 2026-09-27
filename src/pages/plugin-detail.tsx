@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
-import { Skeleton } from "@/components/ui/skeleton"
+import { DetailHeader, DetailSkeleton } from "@/components/shared/detail-header"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { StatusBadge } from "@/components/shared/status-badge"
@@ -23,7 +23,6 @@ import { VersionHistory } from "@/components/shared/version-history"
 import { VersionCompare } from "@/components/shared/version-compare"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { ErrorState } from "@/components/shared/error-state"
-import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { pluginHealthBadgeClass } from "@/lib/status"
 import { formatDate, formatDuration, shortDigest } from "@/lib/utils"
 import { GitBranch, Pencil, ShieldCheck } from "lucide-react"
@@ -99,12 +98,7 @@ export function PluginDetailPage() {
   const metrics = usePluginMetrics(pluginId)
 
   if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-    )
+    return <DetailSkeleton />
   }
 
   if (error || !plugin) {
@@ -125,16 +119,18 @@ export function PluginDetailPage() {
 
   return (
     <div className="space-y-6">
-      <Breadcrumbs items={[{ label: "Plugins", to: "/plugins" }, { label: plugin.plugin_id }]} />
-
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="font-mono text-2xl font-bold">{plugin.plugin_id}</h1>
+      <DetailHeader
+        breadcrumbs={[{ label: "Plugins", to: "/plugins" }, { label: plugin.plugin_id }]}
+        title={plugin.plugin_id}
+        titleClassName="font-mono"
+        badges={
+          <>
             <StatusBadge status={plugin.status} />
             <Badge variant="outline">v{plugin.version}</Badge>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          </>
+        }
+        meta={
+          <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary" className="text-xs" title="The author's own version string, informational">
               {plugin.plugin_version}
             </Badge>
@@ -159,32 +155,34 @@ export function PluginDetailPage() {
               <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
             ))}
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {plugin.status === "draft" && (
-            <Button variant="outline" size="sm" asChild>
-              <Link to={`/plugins/${encodeURIComponent(plugin.plugin_id)}/edit`}>
-                <Pencil className="h-3.5 w-3.5" /> Edit
-              </Link>
-            </Button>
-          )}
-          <LifecycleActions
-            onPreflight={() =>
-              statusDryRun.mutate({ id: plugin.plugin_id, req: { status: "active" } })
-            }
-            preflight={statusDryRun.data ?? null}
-            preflightPending={statusDryRun.isPending}
-            status={plugin.status}
-            isPending={isPending}
-            onActivate={() => changeStatus.mutate({ id: plugin.plugin_id, req: { status: "active" } })}
-            onArchive={() => changeStatus.mutate({ id: plugin.plugin_id, req: { status: "archived" } })}
-            onNewVersion={() => createVersion.mutate(plugin.plugin_id)}
-            onDelete={() =>
-              deletePlugin.mutate(plugin.plugin_id, { onSuccess: () => navigate("/plugins") })
-            }
-          />
-        </div>
-      </div>
+        }
+        actions={
+          <>
+            {plugin.status === "draft" && (
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/plugins/${encodeURIComponent(plugin.plugin_id)}/edit`}>
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </Link>
+              </Button>
+            )}
+            <LifecycleActions
+              onPreflight={() =>
+                statusDryRun.mutate({ id: plugin.plugin_id, req: { status: "active" } })
+              }
+              preflight={statusDryRun.data ?? null}
+              preflightPending={statusDryRun.isPending}
+              status={plugin.status}
+              isPending={isPending}
+              onActivate={() => changeStatus.mutate({ id: plugin.plugin_id, req: { status: "active" } })}
+              onArchive={() => changeStatus.mutate({ id: plugin.plugin_id, req: { status: "archived" } })}
+              onNewVersion={() => createVersion.mutate(plugin.plugin_id)}
+              onDelete={() =>
+                deletePlugin.mutate(plugin.plugin_id, { onSuccess: () => navigate("/plugins") })
+              }
+            />
+          </>
+        }
+      />
 
       {health?.state === "failed" && (
         <Callout variant="destructive">

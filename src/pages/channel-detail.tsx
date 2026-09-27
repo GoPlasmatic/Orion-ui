@@ -12,13 +12,12 @@ import { useCronOccurrences, useRetryOccurrence } from "@/hooks/use-cron"
 import { useHealth } from "@/hooks/use-health"
 import { OccurrencesTable } from "@/components/shared/occurrences-table"
 import { ErrorState } from "@/components/shared/error-state"
-import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { ChannelRecentTraces, ChannelTrafficCard } from "@/components/shared/channel-traffic"
 import { concurrencySlots, cronTransport, MISFIRE_POLICIES } from "@/lib/cron"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { DetailHeader, DetailSkeleton } from "@/components/shared/detail-header"
 import { Callout } from "@/components/ui/callout"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { StatusBadge } from "@/components/shared/status-badge"
@@ -63,12 +62,7 @@ export function ChannelDetailPage() {
   )
 
   if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-    )
+    return <DetailSkeleton />
   }
 
   if (error || !channel) {
@@ -93,70 +87,73 @@ export function ChannelDetailPage() {
 
   return (
     <div className="space-y-6">
-      <Breadcrumbs items={[{ label: "Channels", to: "/channels" }, { label: channel.name }]} />
-
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-3">
-          <h1 className="min-w-0 break-words text-2xl font-bold">{channel.name}</h1>
-          <StatusBadge status={channel.status} />
-          <Badge variant="outline">v{channel.version}</Badge>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {channel.status === "draft" && (
-            <Button variant="outline" size="sm" asChild>
-              <Link to={`/channels/${channel.channel_id}/edit`}>
-                <Pencil className="h-3.5 w-3.5" />
-                Edit
-              </Link>
-            </Button>
-          )}
-          <Button variant="outline" size="sm" asChild>
-            <Link
-              to={`/system-map?select=${encodeURIComponent(channel.name)}`}
-              title="This channel on the System Map: its callers, callees and live traffic"
-            >
-              <Network className="h-3.5 w-3.5" />
-              Map
-            </Link>
-          </Button>
-          {!schedule && (
+      <DetailHeader
+        breadcrumbs={[{ label: "Channels", to: "/channels" }, { label: channel.name }]}
+        title={channel.name}
+        badges={
+          <>
+            <StatusBadge status={channel.status} />
+            <Badge variant="outline">v{channel.version}</Badge>
+          </>
+        }
+        actions={
+          <>
+            {channel.status === "draft" && (
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/channels/${channel.channel_id}/edit`}>
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit
+                </Link>
+              </Button>
+            )}
             <Button variant="outline" size="sm" asChild>
               <Link
-                to={`/console?channel=${encodeURIComponent(channel.name)}`}
-                title="Open the Data Console with this channel selected"
+                to={`/system-map?select=${encodeURIComponent(channel.name)}`}
+                title="This channel on the System Map: its callers, callees and live traffic"
               >
-                <Send className="h-3.5 w-3.5" />
-                Send test request
+                <Network className="h-3.5 w-3.5" />
+                Map
               </Link>
             </Button>
-          )}
-          {schedule && channel.status === "active" && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={trigger.isPending}
-              onClick={() => trigger.mutate(channel.channel_id)}
-              title="Run now, through the same claim and singleton path a scheduled occurrence takes"
-            >
-              <Play className="h-3.5 w-3.5" />
-              {trigger.isPending ? "Triggering..." : "Trigger now"}
-            </Button>
-          )}
-          <LifecycleActions
-            onPreflight={() =>
-              statusDryRun.mutate({ id: channel.channel_id, req: { status: "active" } })
-            }
-            preflight={statusDryRun.data ?? null}
-            preflightPending={statusDryRun.isPending}
-            status={channel.status}
-            isPending={isPending}
-            onActivate={() => changeStatus.mutate({ id: channel.channel_id, req: { status: "active" } })}
-            onArchive={() => changeStatus.mutate({ id: channel.channel_id, req: { status: "archived" } })}
-            onNewVersion={() => createVersion.mutate(channel.channel_id)}
-            onDelete={() => deleteChannel.mutate(channel.channel_id, { onSuccess: () => navigate("/channels") })}
-          />
-        </div>
-      </div>
+            {!schedule && (
+              <Button variant="outline" size="sm" asChild>
+                <Link
+                  to={`/console?channel=${encodeURIComponent(channel.name)}`}
+                  title="Open the Data Console with this channel selected"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  Send test request
+                </Link>
+              </Button>
+            )}
+            {schedule && channel.status === "active" && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={trigger.isPending}
+                onClick={() => trigger.mutate(channel.channel_id)}
+                title="Run now, through the same claim and singleton path a scheduled occurrence takes"
+              >
+                <Play className="h-3.5 w-3.5" />
+                {trigger.isPending ? "Triggering..." : "Trigger now"}
+              </Button>
+            )}
+            <LifecycleActions
+              onPreflight={() =>
+                statusDryRun.mutate({ id: channel.channel_id, req: { status: "active" } })
+              }
+              preflight={statusDryRun.data ?? null}
+              preflightPending={statusDryRun.isPending}
+              status={channel.status}
+              isPending={isPending}
+              onActivate={() => changeStatus.mutate({ id: channel.channel_id, req: { status: "active" } })}
+              onArchive={() => changeStatus.mutate({ id: channel.channel_id, req: { status: "archived" } })}
+              onNewVersion={() => createVersion.mutate(channel.channel_id)}
+              onDelete={() => deleteChannel.mutate(channel.channel_id, { onSuccess: () => navigate("/channels") })}
+            />
+          </>
+        }
+      />
 
       {quarantine && (
         <Callout variant="destructive">

@@ -6,7 +6,7 @@ import type { ExecutionStep } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import { DetailSkeleton } from "@/components/shared/detail-header"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { ErrorState } from "@/components/shared/error-state"
 import { Breadcrumbs } from "@/components/shared/breadcrumbs"
@@ -157,16 +157,7 @@ export function TraceDetailPage() {
   const [showRaw, setShowRaw] = useState(false)
 
   if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Button variant="ghost" asChild>
-          <Link to="/traces"><ChevronLeft className="mr-2 h-4 w-4" /> Back to Traces</Link>
-        </Button>
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-40 w-full" />
-        <Skeleton className="h-60 w-full" />
-      </div>
-    )
+    return <DetailSkeleton />
   }
 
   if (error || !trace) {

@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
-import { Skeleton } from "@/components/ui/skeleton"
+import { DetailSkeleton } from "@/components/shared/detail-header"
 import { ErrorState } from "@/components/shared/error-state"
 import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { RetrySafetyWarning } from "@/components/shared/retry-safety-warning"
@@ -34,12 +34,7 @@ export function OccurrenceDetailPage() {
   const retry = useRetryOccurrence()
 
   if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-60 w-full" />
-      </div>
-    )
+    return <DetailSkeleton />
   }
 
   if (error || !occ) {
