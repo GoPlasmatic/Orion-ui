@@ -119,6 +119,7 @@ export function OperationsPage() {
   const { data: schedules } = useCronStatus({ enabled: hasCron })
   const cron = useCronMetrics()
   const [recentTab, setRecentTab] = useState("traces")
+  const [refreshing, setRefreshing] = useState(false)
 
   // The call graph, for the coverage line: a channel reached only by
   // `channel_call` has no ingress series and can never "serve a request" as
@@ -259,19 +260,27 @@ export function OperationsPage() {
   const nextRun = upcoming[0]
   const cronPending = cron.pending ?? (schedules ?? []).reduce((n, s) => n + (s.pending ?? 0), 0)
 
-  const handleRefresh = () => {
-    for (const key of [
-      "metrics",
-      "engine",
-      "health",
-      "traces",
-      "connectors",
-      "channels",
-      "cron",
-      "trace-dlq",
-      "audit-logs",
-    ]) {
-      queryClient.invalidateQueries({ queryKey: [key] })
+  const handleRefresh = async () => {
+    // Spin until the refetches settle so the button reports its own work, the
+    // way the connector and engine reload buttons do. invalidateQueries resolves
+    // once the active refetches it triggered have completed.
+    setRefreshing(true)
+    try {
+      await Promise.all(
+        [
+          "metrics",
+          "engine",
+          "health",
+          "traces",
+          "connectors",
+          "channels",
+          "cron",
+          "trace-dlq",
+          "audit-logs",
+        ].map((key) => queryClient.invalidateQueries({ queryKey: [key] })),
+      )
+    } finally {
+      setRefreshing(false)
     }
   }
 
@@ -382,7 +391,16 @@ export function OperationsPage() {
     <div className="space-y-6">
       <PageHeader title="Operations" description="Live engine activity and what needs attention">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            {traffic.available && (
+              <span
+                className="relative flex h-2 w-2 items-center justify-center"
+                aria-hidden="true"
+              >
+                <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-success/60" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-success" />
+              </span>
+            )}
             {traffic.available
               ? `live · updated ${formatRelative(traffic.lastUpdated, now) ?? "—"}`
               : "metrics offline"}
@@ -402,8 +420,8 @@ export function OperationsPage() {
               </option>
             ))}
           </Select>
-          <Button variant="outline" size="sm" onClick={handleRefresh}>
-            <RefreshCw className="h-4 w-4" />
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
             Refresh
           </Button>
         </div>
@@ -462,7 +480,9 @@ export function OperationsPage() {
             unit={traffic.errorPct == null ? undefined : "%"}
             hint={traffic.errorPct == null ? `no traffic ${inBasis}` : basis}
             series={traffic.series.errorPct}
-            colorClass="text-destructive"
+            // The sparkline is chart geometry, so it uses a chart-* fill, not the
+            // destructive ink (that stays on the numeral via valueClass below).
+            colorClass="text-chart-4"
             // The same bands the map paints — a figure past them reads in ink.
             valueClass={
               errorRateLevel === "warning" || errorRateLevel === "critical"
@@ -477,11 +497,13 @@ export function OperationsPage() {
             hint={traffic.meanMs == null ? undefined : basis}
             series={traffic.series.meanMs}
             colorClass="text-chart-3"
+            to="/system-map?colour=latency"
           />
           <KpiCard
             title="Latency p95"
             value={traffic.p95Ms == null ? "—" : formatDuration(traffic.p95Ms)}
             hint={traffic.p95Ms == null ? undefined : basis}
+            to="/system-map?colour=latency"
           />
         </div>
       ) : (

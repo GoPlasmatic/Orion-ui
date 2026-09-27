@@ -67,7 +67,7 @@ export function PackagesPage() {
               </TableHeader>
               <TableBody>
                 {isLoading ? (
-                  Array.from({ length: 5 }).map((_, i) => (
+                  Array.from({ length: PAGE_SIZE }).map((_, i) => (
                     <TableRow key={i}>
                       {Array.from({ length: 5 }).map((_, j) => (
                         <TableCell key={j}>
@@ -90,8 +90,8 @@ export function PackagesPage() {
                   rows.map((r) => (
                     <TableRow
                       key={`${r.name}@${r.version}`}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => setSelected(r.name)}
+                      onActivate={() => setSelected(r.name)}
+                      data-state={r.name === activeName ? "selected" : undefined}
                     >
                       <TableCell className="font-medium">{r.name}</TableCell>
                       <TableCell className="font-mono text-sm">{r.version}</TableCell>
