@@ -3,13 +3,14 @@ import { useQuery } from "@tanstack/react-query"
 import { formatSpan } from "@/lib/utils"
 import { ApiError } from "@/api/client"
 import {
+  deltaSnapshot,
+  family,
   fetchMetrics,
   counterTotal,
   sumByLabel,
   labelValues,
   histogramQuantile,
   histogramMean,
-  type MetricLine,
   type MetricsSnapshot,
 } from "@/api/metrics"
 
@@ -120,8 +121,7 @@ interface MessageSplit {
 
 function messagesSplit(snap: MetricsSnapshot, channel?: string): MessageSplit {
   const out: MessageSplit = { total: 0, success: 0, failed: 0, duplicate: 0 }
-  for (const l of snap.lines) {
-    if (l.name !== MESSAGES) continue
+  for (const l of family(snap, MESSAGES)) {
     if (channel !== undefined && l.labels.channel !== channel) continue
     const status = l.labels.status ?? ""
     out.total += l.value
@@ -144,8 +144,7 @@ function channelSplits(snap: MetricsSnapshot): Map<string, MessageSplit> {
   const hit = splitCache.get(snap)
   if (hit) return hit
   const out = new Map<string, MessageSplit>()
-  for (const l of snap.lines) {
-    if (l.name !== MESSAGES) continue
+  for (const l of family(snap, MESSAGES)) {
     const channel = l.labels.channel
     if (!channel) continue
     const split = out.get(channel) ?? { total: 0, success: 0, failed: 0, duplicate: 0 }
@@ -185,27 +184,9 @@ function pairSeries(fn: (a: MetricsSnapshot, b: MetricsSnapshot, dtSec: number) 
   return out
 }
 
-/**
- * `cur − base`, line by line: a snapshot of what happened *between* the two
- * scrapes. Counters and histogram buckets are monotonic, so the difference is
- * itself a valid counter set and a valid cumulative histogram — which is what
- * lets `histogramQuantile` answer "p95 in the last five minutes" rather than
- * "p95 since the server started". A restart shows up as a negative delta and
- * clamps to zero. Gauges are not meaningful here; nothing reads them off it.
- */
-export function deltaSnapshot(base: MetricsSnapshot, cur: MetricsSnapshot): MetricsSnapshot {
-  const key = (l: MetricLine) =>
-    `${l.name}|${Object.keys(l.labels)
-      .sort()
-      .map((k) => `${k}=${l.labels[k]}`)
-      .join(",")}`
-  const before = new Map<string, number>()
-  for (const l of base.lines) before.set(key(l), l.value)
-  return {
-    t: cur.t,
-    lines: cur.lines.map((l) => ({ ...l, value: Math.max(0, l.value - (before.get(key(l)) ?? 0)) })),
-  }
-}
+// `deltaSnapshot` (memoised per pair) lives beside the family index in
+// `api/metrics.ts`; re-exported for the readers that import it from here.
+export { deltaSnapshot }
 
 /**
  * Consecutive sample pairs inside the window that ends at `cur`. The buffer's
@@ -376,8 +357,7 @@ export interface TrafficWindow {
 
 function statusesByChannel(snap: MetricsSnapshot): Map<string, Map<string, number>> {
   const out = new Map<string, Map<string, number>>()
-  for (const l of snap.lines) {
-    if (l.name !== MESSAGES) continue
+  for (const l of family(snap, MESSAGES)) {
     const channel = l.labels.channel
     if (!channel) continue
     const inner = out.get(channel) ?? new Map<string, number>()
@@ -765,8 +745,7 @@ function cumulative(snap: MetricsSnapshot | null) {
   const outcomeByChannel: OutcomeChannel[] = (() => {
     if (!snap) return []
     const map = new Map<string, Map<string, number>>()
-    for (const l of snap.lines) {
-      if (l.name !== MESSAGES) continue
+    for (const l of family(snap, MESSAGES)) {
       const ch = l.labels.channel ?? ""
       const st = l.labels.status ?? "unknown"
       if (!map.has(ch)) map.set(ch, new Map())
@@ -870,7 +849,7 @@ export function useCronMetrics(): CronMetrics {
         executionP95Ms: new Map(),
       }
     }
-    const pendingLines = snap.lines.filter((l) => l.name === CRON_PENDING)
+    const pendingLines = family(snap, CRON_PENDING)
     const pending = pendingLines.length ? pendingLines.reduce((n, l) => n + l.value, 0) : null
     const byStatus = [...sumByLabel(snap, CRON_OCCURRENCES, "status").entries()]
       .map(([status, value]) => ({ status, value }))

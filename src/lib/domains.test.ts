@@ -14,6 +14,13 @@ describe("domains", () => {
     expect(sharedPrefix(["a-b-c-x", "a-b-d-y"])).toBe("a-b-")
   })
 
+  it("keeps the prefix when one name is just prefix and domain", () => {
+    const idx = buildDomains([...QA, "soma-health"].map((name) => ({ name })))
+    expect(idx.prefix).toBe("soma-")
+    expect(idx.domainOf.get("soma-health")).toBe("health")
+    expect(idx.members.size).toBe(5)
+  })
+
   it("groups by the segment after the prefix, biggest domain first", () => {
     const idx = buildDomains(QA.map((name) => ({ name })))
     expect([...idx.members.keys()]).toEqual(["admin", "clock", "gate", "pub"])

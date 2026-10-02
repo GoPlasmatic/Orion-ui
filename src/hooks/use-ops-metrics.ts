@@ -1,7 +1,9 @@
 import { useMemo } from "react"
 import { ApiError } from "@/api/client"
+import { connectorEdgeKey } from "@/lib/topology"
 import {
   counterTotal,
+  family,
   histogramMean,
   histogramQuantile,
   labelValues,
@@ -61,14 +63,25 @@ function windowedCount(
 
 function gauge(cur: MetricsSnapshot | null, name: string): number | null {
   if (!cur) return null
-  let found = false
+  const lines = family(cur, name)
+  if (lines.length === 0) return null
   let sum = 0
-  for (const l of cur.lines) {
-    if (l.name !== name) continue
-    found = true
-    sum += l.value
-  }
-  return found ? sum : null
+  for (const l of lines) sum += l.value
+  return sum
+}
+
+/** The feed without a window: the current sample and its state. */
+function useFeed() {
+  const query = useMetricsSnapshot()
+  const cur = query.data ?? null
+  const errorStatus = query.error instanceof ApiError ? query.error.status : null
+  const state = metricsState(
+    { available: !!cur && cur.lines.length > 0, hasRate: true },
+    query.isLoading,
+    query.isError,
+    errorStatus,
+  )
+  return { cur, state }
 }
 
 const ms = (sec: number | null) => (sec == null ? null : sec * 1000)
@@ -109,7 +122,8 @@ export interface ConnectorTrafficWindow {
   byEdge: Map<string, ConnectorChannelTraffic>
 }
 
-export const edgeKey = (channel: string, connector: string) => `${channel}|${connector}`
+/** @see connectorEdgeKey — the graph reads `byEdge` with the same key. */
+export const edgeKey = connectorEdgeKey
 
 /**
  * Outbound connector calls by connector and by calling channel. The label
@@ -129,8 +143,7 @@ export function useConnectorTraffic(windowSec: number, paused = false): Connecto
 
     const edges = new Map<string, { connector: string; channel: string; total: number; errors: number; wTotal: number; wErrors: number }>()
     const tally = (snap: MetricsSnapshot, windowed: boolean) => {
-      for (const l of snap.lines) {
-        if (l.name !== CONNECTOR_REQUESTS) continue
+      for (const l of family(snap, CONNECTOR_REQUESTS)) {
         const connector = l.labels.connector ?? ""
         const channel = l.labels.channel ?? ""
         const k = edgeKey(channel, connector)
@@ -233,62 +246,127 @@ export interface WorkflowCost {
  * costs 18.7 ms × 0.79 per run, not 18.7 ms.
  */
 export function useWorkflowCost(workflowId: string | null | undefined): WorkflowCost {
-  const query = useMetricsSnapshot()
-  const cur = query.data ?? null
-  const errorStatus = query.error instanceof ApiError ? query.error.status : null
-  const state = metricsState(
-    { available: !!cur && cur.lines.length > 0, hasRate: true },
-    query.isLoading,
-    query.isError,
-    errorStatus,
-  )
-  return useMemo(() => {
-    const tasks = new Map<string, TaskCost>()
-    const empty: WorkflowCost = {
-      state,
-      workflow: workflowId ?? "",
-      runs: 0,
-      meanMs: null,
-      p95Ms: null,
-      tasks,
-      taskMsPerRun: null,
-      overheadMs: null,
+  const { cur, state } = useFeed()
+  return useMemo(() => workflowCost(cur, workflowId, state), [cur, workflowId, state])
+}
+
+/**
+ * One workflow's cost from one snapshot, in a pass per family. A task id is
+ * one task even when its `function` label changed across versions (two
+ * series): counts, sums and buckets are all summed over every series for the
+ * id, so the mean stays sum ÷ count of the same runs.
+ *
+ * The result is reused while nothing it is made of moved — the figures are
+ * cumulative, so on a quiet workflow most polls change nothing, and a fresh
+ * object would re-render every page reading it.
+ */
+const costCache = new Map<string, { sig: string; value: WorkflowCost }>()
+
+export function workflowCost(cur: MetricsSnapshot | null, workflowId: string | null | undefined, state: MetricsState): WorkflowCost {
+  if (!cur || !workflowId) {
+    return { state, workflow: workflowId ?? "", runs: 0, meanMs: null, p95Ms: null, tasks: new Map(), taskMsPerRun: null, overheadMs: null }
+  }
+  const filter = { workflow: workflowId }
+  const runs = counterTotal(cur, `${WORKFLOW_DURATION}_count`, filter)
+  const runSum = counterTotal(cur, `${WORKFLOW_DURATION}_sum`, filter)
+
+  interface Acc { count: number; sum: number; fnCounts: Map<string, number>; buckets: MetricsSnapshot["lines"] }
+  const acc = new Map<string, Acc>()
+  const get = (task: string) => {
+    let a = acc.get(task)
+    if (!a) {
+      a = { count: 0, sum: 0, fnCounts: new Map(), buckets: [] }
+      acc.set(task, a)
     }
-    if (!cur || !workflowId) return empty
-    const filter = { workflow: workflowId }
-    const runs = counterTotal(cur, `${WORKFLOW_DURATION}_count`, filter)
-    for (const l of cur.lines) {
-      if (l.name !== `${TASK_DURATION}_count` || l.labels.workflow !== workflowId) continue
-      const task = l.labels.task ?? ""
-      const fn = l.labels.function ?? ""
-      const f = { workflow: workflowId, task }
-      const count = l.value
-      const sum = counterTotal(cur, `${TASK_DURATION}_sum`, f)
-      tasks.set(task, {
-        task,
-        function: fn,
-        runs: count,
-        meanMs: count > 0 ? (sum / count) * 1000 : null,
-        p95Ms: ms(histogramQuantile(cur, TASK_DURATION, 0.95, f)),
-      })
-    }
-    const meanMs = ms(histogramMean(null, cur, WORKFLOW_DURATION, filter))
-    let taskMsPerRun: number | null = null
-    if (runs > 0) {
-      taskMsPerRun = 0
-      for (const t of tasks.values()) taskMsPerRun += (t.meanMs ?? 0) * (t.runs / runs)
-    }
-    return {
-      state,
-      workflow: workflowId,
-      runs,
-      meanMs,
-      p95Ms: ms(histogramQuantile(cur, WORKFLOW_DURATION, 0.95, filter)),
-      tasks,
-      taskMsPerRun,
-      overheadMs: meanMs != null && taskMsPerRun != null ? Math.max(0, meanMs - taskMsPerRun) : null,
-    }
-  }, [cur, workflowId, state])
+    return a
+  }
+  for (const l of family(cur, `${TASK_DURATION}_count`)) {
+    if (l.labels.workflow !== workflowId) continue
+    const a = get(l.labels.task ?? "")
+    a.count += l.value
+    const fn = l.labels.function ?? ""
+    a.fnCounts.set(fn, (a.fnCounts.get(fn) ?? 0) + l.value)
+  }
+  for (const l of family(cur, `${TASK_DURATION}_sum`)) {
+    if (l.labels.workflow === workflowId) get(l.labels.task ?? "").sum += l.value
+  }
+  for (const l of family(cur, `${TASK_DURATION}_bucket`)) {
+    if (l.labels.workflow === workflowId) get(l.labels.task ?? "").buckets.push(l)
+  }
+
+  const sig = `${state}|${runs}|${runSum}|${[...acc].map(([t, a]) => `${t}:${a.count}:${a.sum}`).join(",")}`
+  const hit = costCache.get(workflowId)
+  if (hit && hit.sig === sig) return hit.value
+
+  const tasks = new Map<string, TaskCost>()
+  for (const [task, a] of acc) {
+    // The function the task mostly ran as, for a label.
+    const fn = [...a.fnCounts].sort((x, y) => y[1] - x[1])[0]?.[0] ?? ""
+    tasks.set(task, {
+      task,
+      function: fn,
+      runs: a.count,
+      meanMs: a.count > 0 ? (a.sum / a.count) * 1000 : null,
+      p95Ms: ms(histogramQuantile({ t: cur.t, lines: a.buckets }, TASK_DURATION, 0.95)),
+    })
+  }
+  const meanMs = runs > 0 ? (runSum / runs) * 1000 : null
+  let taskMsPerRun: number | null = null
+  if (runs > 0) {
+    taskMsPerRun = 0
+    for (const t of tasks.values()) taskMsPerRun += (t.meanMs ?? 0) * (t.runs / runs)
+  }
+  const value: WorkflowCost = {
+    state,
+    workflow: workflowId,
+    runs,
+    meanMs,
+    p95Ms: ms(histogramQuantile(cur, WORKFLOW_DURATION, 0.95, filter)),
+    tasks,
+    taskMsPerRun,
+    overheadMs: meanMs != null && taskMsPerRun != null ? Math.max(0, meanMs - taskMsPerRun) : null,
+  }
+  if (costCache.size > 200) costCache.clear()
+  costCache.set(workflowId, { sig, value })
+  return value
+}
+
+// ---------------------------------------------------------------------------
+// Response cache, by channel
+// ---------------------------------------------------------------------------
+
+export interface CacheHits {
+  state: MetricsState
+  /** Cumulative since the server started — the exporter labels by channel, not namespace. */
+  byChannel: Map<string, { hits: number; misses: number }>
+}
+
+/**
+ * Response-cache hits and misses per channel. What the Caches page and a
+ * channel's cache card need, without the dozens of passes the full
+ * `useSubsystemMetrics` reduction makes.
+ */
+export function useCacheHitsByChannel(): CacheHits {
+  const { cur, state } = useFeed()
+  return useMemo(() => ({ state, byChannel: cacheByChannel(cur) }), [cur, state])
+}
+
+function cacheByChannel(cur: MetricsSnapshot | null): Map<string, { hits: number; misses: number }> {
+  const out = new Map<string, { hits: number; misses: number }>()
+  if (!cur) return out
+  for (const l of family(cur, "orion_response_cache_hits_total")) {
+    const ch = l.labels.channel ?? ""
+    const e = out.get(ch) ?? { hits: 0, misses: 0 }
+    e.hits += l.value
+    out.set(ch, e)
+  }
+  for (const l of family(cur, "orion_response_cache_misses_total")) {
+    const ch = l.labels.channel ?? ""
+    const e = out.get(ch) ?? { hits: 0, misses: 0 }
+    e.misses += l.value
+    out.set(ch, e)
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -352,13 +430,7 @@ export function useSubsystemMetrics(windowSec: number, paused = false): Subsyste
     const useWindow = hitsW != null && missW != null && hitsW + missW > 0
     const h = useWindow ? hitsW! : hitsC
     const m = useWindow ? missW! : missC
-    const byChannel = new Map<string, { hits: number; misses: number }>()
-    if (cur) {
-      for (const [ch, v] of sumByLabel(cur, "orion_response_cache_hits_total", "channel"))
-        byChannel.set(ch, { hits: v, misses: byChannel.get(ch)?.misses ?? 0 })
-      for (const [ch, v] of sumByLabel(cur, "orion_response_cache_misses_total", "channel"))
-        byChannel.set(ch, { hits: byChannel.get(ch)?.hits ?? 0, misses: v })
-    }
+    const byChannel = cacheByChannel(cur)
 
     const size = gauge(cur, "orion_db_pool_size")
     const idle = gauge(cur, "orion_db_pool_idle")

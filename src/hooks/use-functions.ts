@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
+import { functionIndex, type FunctionIndex } from "@/lib/function-effects"
 import { functionsApi } from "@/api/functions"
 
 export function useFunctions() {
@@ -12,4 +13,10 @@ export function useFunctions() {
     // activation in cluster mode.
     staleTime: 60 * 1000,
   })
+}
+
+/** The catalogue indexed by name and alias — built once per fetched catalogue. */
+export function useFunctionIndex(): FunctionIndex {
+  const { data } = useFunctions()
+  return functionIndex(data)
 }

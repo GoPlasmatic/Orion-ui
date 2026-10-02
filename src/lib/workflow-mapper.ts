@@ -14,6 +14,9 @@ import type {
  *
  *  - Since Orion 1.2 an element may be a **task group**, so the array is a tree
  *    and a shallow cast would misdescribe it.
+ *  - Since 1.9.1 a workflow may carry a `loop` whose `setup` holds steps too,
+ *    and a task a `for_each` fan-out; dataflow-ui 3.15 draws both, so both are
+ *    mapped through.
  *  - `FunctionConfig.input` is required in the visualizer's model (dataflow-rs
  *    reads `{name, input}` with no default, so a task omitting it fails to
  *    load) while the API type leaves it optional. A task that somehow arrives
@@ -46,6 +49,7 @@ function toVisualizerStep(step: Step): DataflowStep {
     terminal: task.terminal,
     // 1.6: the visualizer (dataflow-ui 3.12) draws the halt-on-failure marker.
     halt_on: task.halt_on,
+    for_each: task.for_each,
   } satisfies DataflowTask
 }
 
@@ -58,6 +62,14 @@ export function toVisualizerWorkflow(w: Workflow): DataflowWorkflow {
     condition: w.condition,
     tasks: (Array.isArray(w.tasks) ? w.tasks : []).map(toVisualizerStep),
     continue_on_error: w.continue_on_error,
+    loop: w.loop
+      ? {
+          ...w.loop,
+          setup: Array.isArray(w.loop.setup) ? w.loop.setup.map(toVisualizerStep) : undefined,
+          // The visualizer's type requires `max`; an `over` loop is bounded by its array.
+          max: w.loop.max as number,
+        }
+      : undefined,
   }
 }
 

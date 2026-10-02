@@ -42,9 +42,12 @@ export function sharedPrefix(names: string[]): string {
   const out: string[] = []
   for (let i = 0; ; i++) {
     const seg = split[0][i]
-    // Leave at least one segment after the prefix on every name, plus the
-    // segment the domain is read from, or "prefix" would eat a whole name.
-    if (seg === undefined || split.some((s) => s.length < i + 3 || s[i] !== seg)) break
+    // Every name keeps a domain segment after the prefix, and most keep a
+    // thing after the domain too. One short name (`soma-health` among 147
+    // `soma-<domain>-<thing>`) still belongs under the prefix; a system whose
+    // names are mostly two segments (`orders-create`) has no prefix to strip.
+    if (seg === undefined || split.some((s) => s.length < i + 2 || s[i] !== seg)) break
+    if (split.filter((s) => s.length >= i + 3).length * 2 < split.length) break
     out.push(seg)
   }
   return out.length ? `${out.join("-")}-` : ""

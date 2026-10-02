@@ -7,6 +7,7 @@ import type {
   Workflow,
 } from "@/api/types"
 import { flattenSteps, loopSetupTaskIds, workflowSteps } from "@/lib/workflow-steps"
+import { parseEngineError } from "@/lib/trace-error"
 
 /**
  * A trace's steps as a timeline: where the time went, in what structure, and
@@ -115,23 +116,72 @@ export function parseInstantUs(value: string | null | undefined): number | null 
 
 /** The task id an error names: `"FUNCTION_ERROR: Task bump_work.bump error: …"` → `bump_work.bump`. */
 export function failingTaskId(error: string | null | undefined): string | null {
-  if (!error) return null
-  const m = /\bTask ([^\s:]+) error\b/.exec(error)
-  return m ? m[1] : null
+  return parseEngineError(error).taskId
 }
 
-/** The parsed `task_trace_json`, or null when the trace has none or it is not a trace. */
+const parsedCache = new WeakMap<object, ExecutionTrace | null>()
+
+/**
+ * The parsed `task_trace_json`, or null when the trace has none or it is not a
+ * trace. Accepts the object the API returns, a JSON string, or a bare steps
+ * array (what older rows hold). Parsed once per trace object.
+ */
 export function executionTrace(trace: Pick<TraceDetail, "task_trace_json"> | null | undefined): ExecutionTrace | null {
-  let v: unknown = trace?.task_trace_json
+  if (!trace) return null
+  if (parsedCache.has(trace)) return parsedCache.get(trace) ?? null
+  let v: unknown = trace.task_trace_json
   if (typeof v === "string") {
     try {
       v = JSON.parse(v)
     } catch {
-      return null
+      v = null
     }
   }
-  if (!v || typeof v !== "object" || !Array.isArray((v as ExecutionTrace).steps)) return null
-  return v as ExecutionTrace
+  const out: ExecutionTrace | null = Array.isArray(v)
+    ? { steps: v as ExecutionTrace["steps"] }
+    : v && typeof v === "object" && Array.isArray((v as ExecutionTrace).steps)
+      ? (v as ExecutionTrace)
+      : null
+  parsedCache.set(trace, out)
+  return out
+}
+
+/** Whether a trace kept any steps. */
+export const hasSteps = (trace: Pick<TraceDetail, "task_trace_json"> | null | undefined): boolean =>
+  (executionTrace(trace)?.steps.length ?? 0) > 0
+
+/**
+ * The workflow a trace ran: the id its own steps carry first — the channel
+ * may have been re-pointed since — then the channel's. The version is not
+ * recorded on a trace (asked upstream), so callers read the active one.
+ */
+export function traceWorkflowId(
+  trace: Pick<TraceDetail, "task_trace_json"> | null | undefined,
+  channel: { workflow_id?: string | null } | null | undefined,
+): string | null {
+  const fromSteps = executionTrace(trace)?.steps.find((s) => typeof s.workflow_id === "string" && s.workflow_id)?.workflow_id
+  return fromSteps ?? channel?.workflow_id ?? null
+}
+
+/**
+ * Why a trace has no steps to show, as a reason a page can word: the run has
+ * not settled; the channel is unknown; `tracing.task_details` is off; it keeps
+ * failures only and this run did not fail; it failed before its first step; or
+ * it ran nothing (a condition or rollout gate skipped it).
+ */
+export type StepDataGap = "unsettled" | "no_channel" | "details_off" | "errors_only" | "failed_before_steps" | "ran_nothing"
+
+export function stepDataGap(
+  trace: Pick<TraceDetail, "status">,
+  channel: { config?: { tracing?: { task_details?: boolean; errors_only?: boolean } | null } | null } | null | undefined,
+): StepDataGap {
+  if (trace.status === "pending" || trace.status === "running") return "unsettled"
+  if (!channel) return "no_channel"
+  const tracing = channel.config?.tracing
+  if (!tracing?.task_details) return "details_off"
+  if (tracing.errors_only && trace.status !== "failed") return "errors_only"
+  if (trace.status === "failed") return "failed_before_steps"
+  return "ran_nothing"
 }
 
 export function buildTimeline(

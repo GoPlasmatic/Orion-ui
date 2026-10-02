@@ -1,3 +1,4 @@
+import { AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } from "@/lib/audit-vocabulary"
 import { Fragment, useState } from "react"
 import { Link } from "react-router"
 import { useAuditLogs } from "@/hooks/use-audit"
@@ -28,52 +29,6 @@ const columnHelper = createColumnHelper<typeof listTableFeatures, AuditLog>()
 
 /** Every filter in the URL: an audit search is the thing most worth pasting into an incident thread. */
 const FILTER_KEYS = ["action", "resource_type", "resource_id", "principal", "start", "end"] as const
-
-/**
- * The server's own action vocabulary (docs/operate/audit-logs.md). A status
- * change is named for the status requested — there is no `status_draft`,
- * because a transition *to* draft is refused before anything is written. The
- * wire value is an open string, so one this build does not list still filters:
- * `UnknownOption` keeps it visible in the dropdown.
- */
-const AUDIT_ACTIONS = [
-  { value: "create", label: "Create" },
-  { value: "update", label: "Update" },
-  { value: "delete", label: "Delete" },
-  { value: "create_version", label: "Create version" },
-  { value: "status_active", label: "Activate" },
-  { value: "status_archived", label: "Archive" },
-  { value: "update_rollout", label: "Update rollout" },
-  { value: "admit", label: "Admit (model)" },
-  { value: "import", label: "Import" },
-  { value: "test", label: "Test" },
-  { value: "trigger", label: "Trigger (cron)" },
-  { value: "retry", label: "Retry (occurrence)" },
-  { value: "cancel", label: "Cancel (occurrence)" },
-  { value: "invalidate", label: "Invalidate (cache)" },
-  { value: "reload", label: "Reload" },
-  { value: "reset", label: "Reset breaker" },
-  { value: "requeue", label: "Requeue (DLQ)" },
-  { value: "purge", label: "Purge (DLQ)" },
-  { value: "package_staged", label: "Package staged" },
-  { value: "package_applied", label: "Package applied" },
-] as const
-
-/** The resource types the server records. Kept beside `lib/audit-routes.ts`. */
-const AUDIT_RESOURCE_TYPES = [
-  { value: "channel", label: "Channel" },
-  { value: "workflow", label: "Workflow" },
-  { value: "connector", label: "Connector" },
-  { value: "plugin", label: "Plugin" },
-  { value: "model", label: "Model" },
-  { value: "cron_occurrence", label: "Cron occurrence" },
-  { value: "cache_namespace", label: "Cache namespace" },
-  { value: "engine", label: "Engine" },
-  { value: "circuit_breaker", label: "Circuit breaker" },
-  { value: "trace_dlq", label: "Trace DLQ" },
-  { value: "package", label: "Package" },
-  { value: "backup", label: "Backup" },
-] as const
 
 /** The values in each dropdown, for the unlisted-value fallback. */
 const ACTION_VALUES = AUDIT_ACTIONS.map((a) => a.value)

@@ -76,6 +76,27 @@ export function workflowSteps(
   return [...setup, ...(Array.isArray(workflow.tasks) ? workflow.tasks : [])]
 }
 
+/**
+ * What a loop iterates, when it says so plainly: `{ as: "it", over:
+ * "temp_data.plan" }` for `over: {"var": "temp_data.plan"}` (or the `??`
+ * fallback form). Null for a counter loop or a computed `over`.
+ */
+export function loopBinding(workflow: Pick<Workflow, "loop"> | null | undefined): { as: string; over: string } | null {
+  const loop = workflow?.loop
+  if (!loop?.as || loop.over == null || typeof loop.over !== "object") return null
+  const readVar = (v: unknown): string | null => {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const o = v as Record<string, unknown>
+      if (typeof o.var === "string") return o.var
+      if (Array.isArray(o.var) && typeof o.var[0] === "string") return o.var[0]
+      if (Array.isArray(o["??"])) return readVar(o["??"][0])
+    }
+    return null
+  }
+  const over = readVar(loop.over)
+  return over ? { as: loop.as, over } : null
+}
+
 /** Ids of the leaf tasks in a loop's `setup`, which run once before the body. */
 export function loopSetupTaskIds(workflow: Pick<Workflow, "loop"> | null | undefined): Set<string> {
   const setup = workflow?.loop && Array.isArray(workflow.loop.setup) ? workflow.loop.setup : []

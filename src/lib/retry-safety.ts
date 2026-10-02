@@ -1,5 +1,6 @@
 import type { FunctionSchema, Step } from "@/api/types"
 import { flattenSteps } from "@/lib/workflow-steps"
+import { functionIndex, isRetryRisk, stepEffect } from "@/lib/function-effects"
 
 /** A task whose function a second run may not repeat safely. */
 export interface RetryRisk {
@@ -17,30 +18,26 @@ export interface RetryRisk {
  * `retry_safety` (1.6) is what says which functions mind. `unsafe_write` is
  * named outright; `depends_on` is named with the input that decides, because
  * an upsert repeats safely and an insert does not, and only the task knows
- * which it is. `pure`, `read` and `idempotent_write` are not risks.
+ * which it is — so a literal input is read (`lib/function-effects.ts`): an
+ * `http_call` GET or a `data_write` upsert is not a risk, a POST or an insert
+ * is, and a computed one is named with the input to check. `pure`, `read` and
+ * `idempotent_write` are not risks.
  */
 export function retryRisks(
   steps: Step[] | null | undefined,
   catalogue: FunctionSchema[] | undefined,
 ): RetryRisk[] {
   if (!catalogue) return []
-  const byName = new Map<string, FunctionSchema>()
-  for (const fn of catalogue) {
-    byName.set(fn.name, fn)
-    for (const alias of fn.aliases ?? []) byName.set(alias, fn)
-  }
+  const index = functionIndex(catalogue)
   const out: RetryRisk[] = []
   for (const task of flattenSteps(steps)) {
     const name = task.function?.name
     if (!name) continue
-    const safety = byName.get(name)?.retry_safety
-    if (!safety) continue
+    const effect = stepEffect(task, index)
+    if (!isRetryRisk(effect) || !index.has(name)) continue
     const label = task.name || task.id
-    if (safety.kind === "unsafe_write") {
-      out.push({ task: label, function: name, kind: "unsafe_write" })
-    } else if (safety.kind === "depends_on") {
-      out.push({ task: label, function: name, kind: "depends_on", input: safety.input })
-    }
+    if (effect.retry === "unsafe_write") out.push({ task: label, function: name, kind: "unsafe_write" })
+    else out.push({ task: label, function: name, kind: "depends_on", input: effect.decidedBy })
   }
   return out
 }

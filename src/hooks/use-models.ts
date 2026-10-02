@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useMutation, useQueryClient, queryOptions } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { toastError } from "@/lib/toast-error"
 import { modelsApi } from "@/api/models"
@@ -66,12 +66,16 @@ export function useModelVersions(id: string) {
   })
 }
 
-export function useModelDependencies(id: string) {
-  return useQuery({
+/** The query for a model's dependants — shared by the hook and by `useQueries` callers. */
+export const modelDependenciesQuery = (id: string) =>
+  queryOptions({
     queryKey: ["models", id, "dependencies"],
     queryFn: () => modelsApi.dependencies(id),
     enabled: !!id,
   })
+
+export function useModelDependencies(id: string) {
+  return useQuery(modelDependenciesQuery(id))
 }
 
 export function useCreateModel() {

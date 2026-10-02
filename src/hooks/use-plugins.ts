@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useMutation, useQueryClient, queryOptions } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { toastError } from "@/lib/toast-error"
 import { pluginsApi } from "@/api/plugins"
@@ -35,12 +35,16 @@ export function usePluginVersions(id: string) {
   })
 }
 
-export function usePluginDependencies(id: string) {
-  return useQuery({
+/** The query for a plugin's dependants — shared by the hook and by `useQueries` callers. */
+export const pluginDependenciesQuery = (id: string) =>
+  queryOptions({
     queryKey: ["plugins", id, "dependencies"],
     queryFn: () => pluginsApi.dependencies(id),
     enabled: !!id,
   })
+
+export function usePluginDependencies(id: string) {
+  return useQuery(pluginDependenciesQuery(id))
 }
 
 export function useCreatePlugin() {

@@ -188,6 +188,11 @@ export function formatDuration(ms: number | null | undefined): string {
   return `${m}m ${s}s`
 }
 
+/** `1 channel`, `3 channels`; `plural(2, "entry", "entries")`. Counts get thousands separators. */
+export function plural(n: number, word: string, pluralWord = `${word}s`): string {
+  return `${n.toLocaleString("en")} ${n === 1 ? word : pluralWord}`
+}
+
 /** Safely parse a JSON string; returns the original string on failure. */
 export function parseJson(value: string | null | undefined): unknown {
   if (value == null) return null

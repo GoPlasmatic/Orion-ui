@@ -645,6 +645,10 @@ export interface Task {
   // compose by `or`, and the task keeps its own status on the audit trail
   // rather than the 299 a `filter` halt records.
   halt_on?: "failure" | "never"
+  // Fan-out (dataflow-rs 3.14 / Orion 1.9.1): run this task's function once
+  // per element of `over`, each call on its own copy of the message, folded
+  // back in element order. Steps then carry `element_index`.
+  for_each?: TaskForEach
 }
 
 /**
@@ -667,6 +671,14 @@ export interface TaskGroup {
   // finding (dataflow-rs 3.11): the flag belongs on the member tasks.
   continue_on_error?: boolean
   tasks: Step[]
+}
+
+export interface TaskForEach {
+  over: JsonLogicValue
+  as: string
+  max_concurrency?: number
+  collect?: string
+  into?: string
 }
 
 /** One element of a workflow's `tasks` array: a task, or a group of them. */

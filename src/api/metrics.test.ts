@@ -167,3 +167,10 @@ describe("workflow vs task duration (Orion 1.2)", () => {
     expect(((wfSum - taskSum) / runs) * 1000).toBeCloseTo(5, 6)
   })
 })
+
+describe("label unescaping", () => {
+  it("reads an escaped backslash before n as a backslash and an n, not a newline", () => {
+    const snap = parsePrometheus('m{a="x\\\\ny",b="q\\"r",c="l1\\nl2"} 1')
+    expect(snap.lines[0].labels).toEqual({ a: "x\\ny", b: 'q"r', c: "l1\nl2" })
+  })
+})

@@ -327,6 +327,24 @@ export function formatMs(ms: number | null | undefined): string {
   return `${ms.toFixed(1)}ms`
 }
 
+/** A multiple of a baseline: `<0.1×`, `0.3×`, `42×`, `11,600×`. */
+export function formatRatio(r: number | null | undefined): string {
+  if (r == null || !Number.isFinite(r)) return "—"
+  if (r < 0.1) return "<0.1×"
+  if (r < 10) return `${r.toFixed(1)}×`
+  if (r < 100) return `${Math.round(r)}×`
+  return `${Number(r.toPrecision(3)).toLocaleString("en")}×`
+}
+
+/** `412/min · 0.4% err · p95 43ms` — the one-line traffic summary every card, tile and cell uses. */
+export function trafficLine(load: { ratePerMin?: number | null; errorPct?: number | null; p95Ms?: number | null }): string {
+  const parts: string[] = []
+  if (load.ratePerMin != null) parts.push(`${compactNumber(load.ratePerMin)}/min`)
+  if (load.errorPct != null) parts.push(`${formatPct(load.errorPct)} err`)
+  if (load.p95Ms != null) parts.push(`p95 ${formatMs(load.p95Ms)}`)
+  return parts.join(" · ")
+}
+
 export function formatPct(pct: number | null | undefined): string {
   if (pct == null) return "—"
   if (pct === 0) return "0%"

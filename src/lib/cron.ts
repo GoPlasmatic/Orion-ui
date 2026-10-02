@@ -160,6 +160,37 @@ export function isRetryable(status: string | null | undefined): boolean {
   return !!status && RETRYABLE_STATUSES.has(status)
 }
 
+/** An attempt is under way or waiting for a worker — what `cancel` (1.10) accepts. */
+export const IN_FLIGHT_STATUSES: ReadonlySet<string> = new Set(["pending", "claimed", "running"])
+
+export function isInFlight(status: string | null | undefined): boolean {
+  return !!status && IN_FLIGHT_STATUSES.has(status)
+}
+
+/** `POST admin/cron/occurrences/{id}/cancel` accepts exactly the in-flight statuses; 409 otherwise. */
+export const isCancellable = isInFlight
+
+/** Did not complete: failed, or skipped (misfire, every slot held). */
+export function isFailedOrSkipped(status: string | null | undefined): boolean {
+  return status === "failed" || (!!status && status.startsWith("skipped"))
+}
+
+/**
+ * Pending occurrences waiting this long are a backlog rather than scheduling
+ * jitter; without an age, this many are. One verdict for the dashboard tile
+ * and the incident list, which used to disagree.
+ */
+export const CRON_BACKLOG_AGE_SEC = 120
+export const CRON_BACKLOG_COUNT = 10
+
+export type CronBacklog = "none" | "queued" | "backlog"
+
+export function cronBacklog(pending: number, oldestPendingAgeSec: number | null | undefined): CronBacklog {
+  if (pending <= 0) return "none"
+  if ((oldestPendingAgeSec ?? 0) >= CRON_BACKLOG_AGE_SEC || pending >= CRON_BACKLOG_COUNT) return "backlog"
+  return "queued"
+}
+
 /** Human labels for the occurrence statuses, for filters and legends. */
 export const OCCURRENCE_STATUS_LABELS: Record<string, string> = {
   pending: "Pending",

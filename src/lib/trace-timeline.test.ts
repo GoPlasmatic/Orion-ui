@@ -131,3 +131,21 @@ describe("formatMicros", () => {
     expect(formatMicros(8115055)).toBe("8.12 s")
   })
 })
+
+describe("trace helpers", () => {
+  it("prefers the workflow the trace's steps name over the channel's current one", async () => {
+    const { traceWorkflowId, stepDataGap, hasSteps } = await import("@/lib/trace-timeline")
+    expect(traceWorkflowId(TRACE, { workflow_id: "repointed" })).toBe("soma-clock-pair-run")
+    expect(traceWorkflowId({ task_trace_json: undefined }, { workflow_id: "w" })).toBe("w")
+    expect(hasSteps(TRACE)).toBe(true)
+    expect(stepDataGap({ status: "completed" }, { config: { tracing: { task_details: true, errors_only: true } } })).toBe("errors_only")
+    expect(stepDataGap({ status: "completed" }, { config: {} })).toBe("details_off")
+    expect(stepDataGap({ status: "running" }, null)).toBe("unsettled")
+  })
+
+  it("reads the loop binding through the ?? fallback", async () => {
+    const { loopBinding } = await import("@/lib/workflow-steps")
+    expect(loopBinding({ loop: { as: "it", over: { "??": [{ var: "temp_data.plan" }, []] } } })).toEqual({ as: "it", over: "temp_data.plan" })
+    expect(loopBinding({ loop: { max: 3 } })).toBeNull()
+  })
+})
