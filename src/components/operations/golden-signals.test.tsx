@@ -1,10 +1,4 @@
-/**
- * What the dashboard says about the metrics feed in each of its states.
- *
- * QA (1.12.0, 7.5k series) showed "metrics offline" and "Enable [metrics]…"
- * while the first ~900 kB scrape was still loading. Only `off` may say to
- * enable anything.
- */
+/** Only `off` may tell an operator to enable [metrics]; every other state says what it is. */
 import { describe, expect, it, afterEach } from "vitest"
 import { render, screen, cleanup } from "@testing-library/react"
 import { MemoryRouter } from "react-router"
@@ -127,7 +121,7 @@ describe("golden signals by metrics state", () => {
   it("warming shows real totals and says when rates arrive", () => {
     renderSignals("warming")
     expect(pageText()).toContain("12,340")
-    expect(pageText()).toContain("rates after the next sample (~10 s)")
+    expect(pageText()).toContain("rates after the next sample")
     expect(pageText()).not.toMatch(/enable/i)
   })
 
@@ -147,7 +141,7 @@ describe("golden signals by metrics state", () => {
 
   it("error says unreachable, not off", () => {
     renderSignals("error")
-    expect(pageText()).toMatch(/Metrics unreachable/)
+    expect(pageText()).toMatch(/The last metrics scrape failed/)
     expect(pageText()).not.toMatch(/enable/i)
   })
 })
@@ -156,7 +150,7 @@ describe("metrics state pill", () => {
   const now = Date.now()
   it.each([
     ["loading", "loading metrics"],
-    ["warming", "first sample · rates in ~10 s"],
+    ["warming", "rates after the next sample"],
     ["off", "metrics off"],
     ["error", "metrics unreachable"],
   ] as const)("%s reads %s", (state, text) => {

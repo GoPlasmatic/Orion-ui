@@ -6,11 +6,12 @@ import { CostLens } from "@/components/workflow/cost-lens"
 import { DepsLens } from "@/components/workflow/deps-lens"
 import { RunLens } from "@/components/workflow/run-lens"
 import { StructureLens } from "@/components/workflow/structure-lens"
-import { useWorkflowDependencies } from "@/hooks/use-workflows"
+import { useFunctionIndex } from "@/hooks/use-functions"
+import { useWorkflowCost } from "@/hooks/use-ops-metrics"
 import { readStorage, writeStorage } from "@/lib/storage"
 import { useUrlFilters } from "@/lib/use-url-filters"
 import { cn } from "@/lib/utils"
-import { LENSES, LENS_LABELS, lensSections, parseLens, type Lens } from "@/lib/workflow-lens"
+import { costView, LENSES, LENS_LABELS, lensSections, parseLens, type Lens } from "@/lib/workflow-lens"
 
 /** Whether the diagram area is folded away — a laptop screen preference, per browser. */
 const DIAGRAM_KEY = "orion-workflow-diagram"
@@ -33,15 +34,12 @@ export function WorkflowLenses({ workflow, runsOn }: { workflow: Workflow; runsO
   const lens = parseLens(values.lens)
   const [hidden, setHidden] = useState(() => readStorage(DIAGRAM_KEY) === "hidden")
 
-  // The server's walk names the plugin behind each function; the rows need it
-  // to place a plugin call in its column. Shared by every lens.
-  const deps = useWorkflowDependencies(workflow.workflow_id)
-  const pluginOf = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const p of deps.data?.plugins ?? []) for (const fn of p.functions) m.set(fn, p.id)
-    return m
-  }, [deps.data])
-  const sections = useMemo(() => lensSections(workflow, pluginOf), [workflow, pluginOf])
+  // The catalogue says what each step touches (and whose plugin it calls);
+  // the cost is read once here and shared by the lenses that show or quote it.
+  const fnIndex = useFunctionIndex()
+  const sections = useMemo(() => lensSections(workflow, fnIndex), [workflow, fnIndex])
+  const cost = useWorkflowCost(workflow.workflow_id)
+  const measured = useMemo(() => (cost.runs > 0 ? costView(sections, cost) : null), [sections, cost])
   // Active channels first: the one whose traces and schedule the lenses read.
   const channels = useMemo(
     () => [...runsOn].sort((a, b) => Number(b.status === "active") - Number(a.status === "active")),
@@ -89,14 +87,15 @@ export function WorkflowLenses({ workflow, runsOn }: { workflow: Workflow; runsO
         <div>
           {lens === "structure" && <StructureLens workflow={workflow} />}
           {lens === "deps" && (
-            <DepsLens workflow={workflow} runsOn={channels} sections={sections} deps={deps.data} depsError={deps.error} />
+            <DepsLens workflow={workflow} runsOn={channels} sections={sections} cost={measured} />
           )}
-          {lens === "cost" && <CostLens workflow={workflow} sections={sections} />}
+          {lens === "cost" && <CostLens workflow={workflow} sections={sections} state={cost.state} cost={measured} />}
           {lens === "run" && (
             <RunLens
               workflow={workflow}
               runsOn={channels}
               sections={sections}
+              cost={measured}
               traceId={values.trace}
               onClearTrace={() => set({ trace: "" })}
             />

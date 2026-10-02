@@ -6,23 +6,14 @@ import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
 import { DetailSkeleton } from "@/components/shared/detail-header"
 import { ErrorState } from "@/components/shared/error-state"
+import { Fact } from "@/components/shared/fact"
 import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { RetrySafetyWarning } from "@/components/shared/retry-safety-warning"
 import { CancelOccurrenceButton } from "@/components/admin/cancel-occurrence"
 import { occurrenceStatusBadgeClass } from "@/lib/status"
-import { isRetryable, occurrenceStatusLabel } from "@/lib/cron"
+import { isInFlight, isRetryable, occurrenceStatusLabel } from "@/lib/cron"
 import { formatDate, formatDuration, serverSpan } from "@/lib/utils"
 import { RotateCcw, ScrollText } from "lucide-react"
-
-function Meta({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
-  return (
-    <div>
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className={mono ? "mt-0.5 font-mono text-xs" : "mt-0.5"}>{value}</dd>
-    </div>
-  )
-}
-
 
 /**
  * One occurrence in full — the diagnostic detail the ledger's list leaves out:
@@ -49,7 +40,8 @@ export function OccurrenceDetailPage() {
     )
   }
 
-  const inFlight = occ.status === "claimed" || occ.status === "running"
+  // Holding a claim (and a lease) — not `pending`, which has neither yet.
+  const claimed = occ.status === "claimed" || occ.status === "running"
   const lag = serverSpan(occ.scheduled_for, occ.started_at)
   const duration = serverSpan(occ.started_at, occ.completed_at)
 
@@ -102,65 +94,52 @@ export function OccurrenceDetailPage() {
           )}
 
           <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
-            <Meta label="Scheduled for" value={formatDate(occ.scheduled_for)} />
-            <Meta label="Started" value={occ.started_at ? formatDate(occ.started_at) : "—"} />
-            <Meta label="Completed" value={occ.completed_at ? formatDate(occ.completed_at) : "—"} />
-            <Meta label="Duration" value={duration == null ? "—" : formatDuration(duration)} />
-            <Meta
-              label="Lag"
-              value={lag == null ? "—" : formatDuration(Math.max(0, lag))}
-            />
-            <Meta
-              label="Channel version"
-              value={
-                occ.executing_version != null && occ.executing_version !== occ.channel_version
-                  ? `v${occ.channel_version} → ran v${occ.executing_version}`
-                  : `v${occ.channel_version}`
-              }
-            />
-            <Meta
-              label="Workflow"
-              value={
-                occ.workflow_id ? (
-                  <Link to={`/workflows/${occ.workflow_id}`} className="font-mono text-xs text-primary hover:underline">
-                    {occ.workflow_id}
-                  </Link>
-                ) : (
-                  "—"
-                )
-              }
-            />
-            <Meta label="Singleton key" value={occ.singleton_key ?? "—"} mono />
+            <Fact label="Scheduled for" mono={false}>{formatDate(occ.scheduled_for)}</Fact>
+            <Fact label="Started" mono={false}>{occ.started_at ? formatDate(occ.started_at) : "—"}</Fact>
+            <Fact label="Completed" mono={false}>{occ.completed_at ? formatDate(occ.completed_at) : "—"}</Fact>
+            <Fact label="Duration" mono={false}>{duration == null ? "—" : formatDuration(duration)}</Fact>
+            <Fact label="Lag" mono={false}>{lag == null ? "—" : formatDuration(Math.max(0, lag))}</Fact>
+            <Fact label="Channel version" mono={false}>
+              {occ.executing_version != null && occ.executing_version !== occ.channel_version
+                ? `v${occ.channel_version} → ran v${occ.executing_version}`
+                : `v${occ.channel_version}`}
+            </Fact>
+            <Fact label="Workflow" mono={false}>
+              {occ.workflow_id ? (
+                <Link to={`/workflows/${occ.workflow_id}`} className="font-mono text-xs text-primary hover:underline">
+                  {occ.workflow_id}
+                </Link>
+              ) : (
+                "—"
+              )}
+            </Fact>
+            <Fact label="Singleton key">{occ.singleton_key ?? "—"}</Fact>
             {occ.singleton_slot != null && (
-              <Meta
+              <Fact
                 label="Slot"
-                value={
-                  <span title="Which of the key's concurrency.slots this attempt holds, from 0. A run takes the lowest free one and holds it for the whole attempt; the workflow reads it at metadata.trigger.singleton_slot.">
-                    {occ.singleton_slot}
-                  </span>
-                }
-                mono
-              />
+                title="Which of the key's concurrency.slots this attempt holds, from 0. A run takes the lowest free one and holds it for the whole attempt; the workflow reads it at metadata.trigger.singleton_slot."
+              >
+                {occ.singleton_slot}
+              </Fact>
             )}
-            {(inFlight || occ.claimed_by) && (
+            {(claimed || occ.claimed_by) && (
               <>
-                <Meta label="Claimed by" value={occ.claimed_by ?? "—"} mono />
-                <Meta label="Lease until" value={occ.claimed_until ? formatDate(occ.claimed_until) : "—"} />
+                <Fact label="Claimed by">{occ.claimed_by ?? "—"}</Fact>
+                <Fact label="Lease until" mono={false}>
+                  {occ.claimed_until ? formatDate(occ.claimed_until) : "—"}
+                </Fact>
               </>
             )}
             {occ.fencing_token != null && (
-              <Meta
+              <Fact
                 label="Fencing token"
-                value={
-                  <span title="The acquisition generation this attempt holds its key under. Two occurrences of one key can share a token when they hold different slots, so it is the key-and-slot pair that names a hold.">
-                    {occ.fencing_token}
-                  </span>
-                }
-                mono
-              />
+                title="The acquisition generation this attempt holds its key under. Two occurrences of one key can share a token when they hold different slots, so it is the key-and-slot pair that names a hold."
+              >
+                {occ.fencing_token}
+              </Fact>
             )}
-            <Meta label="Created" value={formatDate(occ.created_at)} />
-            <Meta label="Updated" value={formatDate(occ.updated_at)} />
+            <Fact label="Created" mono={false}>{formatDate(occ.created_at)}</Fact>
+            <Fact label="Updated" mono={false}>{formatDate(occ.updated_at)}</Fact>
           </dl>
 
           <p className="text-xs text-muted-foreground">
@@ -183,7 +162,7 @@ export function OccurrenceDetailPage() {
               </Button>
             ) : (
               <span className="text-xs text-muted-foreground">
-                No trace: {inFlight || occ.status === "pending" ? "not yet admitted" : "trace storage did not keep the row — the occurrence is kept either way"}.
+                No trace: {isInFlight(occ.status) ? "not yet admitted" : "trace storage did not keep the row — the occurrence is kept either way"}.
               </span>
             )}
             <CancelOccurrenceButton occurrence={occ} size="sm" />

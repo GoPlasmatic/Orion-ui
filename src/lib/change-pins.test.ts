@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest"
-import { buildChangePins, changeText, pinTitle } from "@/components/graph/change-pins"
+import { buildChangePins, changeText, pinTitle } from "@/lib/change-pins"
 import { buildIndex } from "@/lib/topology"
 import { buildSystemGraph } from "@/lib/system-graph"
 import type { AuditLog, Channel, Workflow } from "@/api/types"

@@ -7,22 +7,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router"
+import { functionIndex, stepEffect } from "@/lib/function-effects"
 import { buildTimeline } from "@/lib/trace-timeline"
 import { TraceTimeline } from "./trace-timeline"
 import { StepDetail } from "./step-detail"
-import { stepUses } from "./step-uses"
 import { CATALOGUE, COSTS, TRACE, WORKFLOW } from "./__fixtures__/trace-64b46dde"
 
 afterEach(cleanup)
 
 const timeline = buildTimeline(TRACE, WORKFLOW)!
-const uses = timeline.steps.map((s) => stepUses(s.task, CATALOGUE))
+const index = functionIndex(CATALOGUE)
+const effects = timeline.steps.map((s) => (s.task ? stepEffect(s.task, index) : null))
 
 function renderTimeline(onSelect = vi.fn(), selected: number | null = timeline.failed!.index) {
   render(
     <TraceTimeline
       timeline={timeline}
-      uses={uses}
+      effects={effects}
       costs={COSTS}
       selected={selected}
       onSelect={onSelect}
@@ -47,7 +48,7 @@ describe("TraceTimeline", () => {
     expect(row).toHaveAttribute("aria-selected", "true")
     expect(within(row).getByText(/Failed/)).toBeInTheDocument()
     expect(within(row).getByText("8.12 s")).toBeInTheDocument()
-    expect(within(row).getByText("11,593×")).toBeInTheDocument()
+    expect(within(row).getByText("11,600×")).toBeInTheDocument()
     expect(rowFor("insert")).toHaveAttribute("aria-selected", "false")
     expect(within(rowFor("insert")).queryByText(/Failed/)).toBeNull()
   })
@@ -65,11 +66,12 @@ describe("TraceTimeline", () => {
 
   it("leads with the headline: the share in one step and the engine's own time", () => {
     renderTimeline()
-    expect(screen.getByText("In one step").nextElementSibling).toHaveTextContent("97%")
+    expect(screen.getByText("In one step")).toBeInTheDocument()
+    expect(screen.getByText("97%")).toBeInTheDocument()
     expect(screen.getByText("bump_work.bump · 8.12 s")).toBeInTheDocument()
     expect(screen.getByText("Other 10 steps")).toBeInTheDocument()
     expect(screen.getByText("10 hand-offs")).toBeInTheDocument()
-    expect(screen.getByText("trace + occurrence write", { selector: "dd" })).toBeInTheDocument()
+    expect(screen.getByText("trace + occurrence write", { selector: "p" })).toBeInTheDocument()
   })
 
   it("groups the loop: setup once, then the iteration with its binding", () => {
@@ -93,6 +95,29 @@ describe("TraceTimeline", () => {
     expect(within(axis()).getByText("8.36 s")).toBeInTheDocument()
   })
 
+  it("follows the data until the person picks an axis", () => {
+    // Re-polled mid-run: ten quick steps, then the hang lands on the next poll.
+    const early = buildTimeline(
+      {
+        ...TRACE,
+        status: "running",
+        completed_at: "2026-10-02T05:41:15.936000",
+        task_trace_json: { steps: (TRACE.task_trace_json as { steps: unknown[] }).steps.slice(0, 10) },
+      },
+      WORKFLOW,
+    )!
+    const props = { effects, costs: COSTS, selected: null, onSelect: vi.fn(), mode: "cron" }
+    const { rerender } = render(<TraceTimeline timeline={early} {...props} />)
+    const linear = () => screen.getByRole("button", { name: "Linear" })
+    expect(linear()).toHaveAttribute("aria-pressed", "true")
+    rerender(<TraceTimeline timeline={timeline} {...props} />)
+    expect(screen.getByRole("button", { name: "Split axis" })).toHaveAttribute("aria-pressed", "true")
+
+    fireEvent.click(linear())
+    rerender(<TraceTimeline timeline={buildTimeline(TRACE, WORKFLOW)!} {...props} />)
+    expect(linear()).toHaveAttribute("aria-pressed", "true")
+  })
+
   it("selects a step by pointer and by keyboard", () => {
     const onSelect = renderTimeline()
     fireEvent.click(rowFor("insert"))
@@ -103,16 +128,16 @@ describe("TraceTimeline", () => {
 })
 
 describe("StepDetail", () => {
-  const renderDetail = (index: number) =>
+  const renderDetail = (i: number) =>
     render(
       <MemoryRouter>
         <StepDetail
-          step={timeline.steps[index]}
+          step={timeline.steps[i]}
           timeline={timeline}
-          uses={uses[index]}
+          effect={effects[i]}
           costState="live"
-          cost={COSTS.get(timeline.steps[index].taskId)}
-          catalogue={CATALOGUE}
+          cost={COSTS.get(timeline.steps[i].taskId)}
+          index={index}
           trace={TRACE}
           workflowId="soma-clock-pair-run"
           connectorId="c-cache"
@@ -153,10 +178,10 @@ describe("StepDetail", () => {
         <StepDetail
           step={timeline.steps[0]}
           timeline={timeline}
-          uses={uses[0]}
+          effect={effects[0]}
           costState="off"
           cost={undefined}
-          catalogue={CATALOGUE}
+          index={index}
           trace={TRACE}
           workflowId={null}
           connectorId={null}

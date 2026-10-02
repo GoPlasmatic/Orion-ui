@@ -1,7 +1,8 @@
 import { flattenSteps, workflowSteps } from "@/lib/workflow-steps"
 import { buildDomains, type DomainIndex, type DomainMode } from "@/lib/domains"
-import type { EntityIndex } from "@/lib/topology"
-import type { SystemGraph } from "@/lib/system-graph"
+import { stepEffect, type FunctionIndex } from "@/lib/function-effects"
+import { connectorEdgeKey, type EntityIndex } from "@/lib/topology"
+import type { SystemGraph, SystemNode } from "@/lib/system-graph"
 import type { ChannelTraffic } from "@/hooks/use-metrics"
 import type { ConnectorChannelTraffic, ConnectorTraffic } from "@/hooks/use-ops-metrics"
 import { errorLevel, latencyLevel, type ColorMetric, type HealthLevel } from "@/lib/traffic-encoding"
@@ -75,16 +76,24 @@ export interface DependencyGraph {
   hubById: Map<string, Hub>
   /** Channel name → hub ids it depends on, sorted. */
   refsOf: Map<string, string[]>
-  /** Channel name → its domain id. */
-  domainOf: Map<string, string>
+}
+
+/** A channel's domain id (`domain:<name>`), read off the domain index. */
+export function domainIdOf(dg: Pick<DependencyGraph, "domainIndex">, channel: string): string | undefined {
+  const name = dg.domainIndex.domainOf.get(channel)
+  return name === undefined ? undefined : domainId(name)
 }
 
 export interface DependencyOptions {
   /** Channel names the view keeps (lifecycle, tag); everything registered when absent. */
   visible?: ReadonlySet<string>
   mode?: DomainMode
-  /** Function name → plugin id, from the catalogue's `source: "plugin"` rows. */
-  pluginOfFunction?: ReadonlyMap<string, string>
+  /**
+   * The function catalogue. With it, plugin functions are recognised and
+   * connector-bearing functions are the catalogue's; without it `stepEffect`
+   * falls back to its built-in list and plugins are not seen.
+   */
+  functions?: FunctionIndex
   /**
    * `[channel, connector]` pairs the exporter has counted. Folded into the
    * references so a connector a workflow names at runtime still has its edge.
@@ -94,23 +103,12 @@ export interface DependencyOptions {
   includeUnused?: boolean
 }
 
-/** `model_infer`'s literal `model`; a computed one is answered per message and is unknowable here. */
-function modelRefs(tasks: ReturnType<typeof flattenSteps>): string[] {
-  const out = new Set<string>()
-  for (const t of tasks) {
-    if (t.function?.name !== "model_infer") continue
-    const model = (t.function.input as Record<string, unknown> | undefined)?.model
-    if (typeof model === "string" && model) out.add(model)
-  }
-  return [...out]
-}
-
 export function buildDependencyGraph(
   graph: SystemGraph,
   index: EntityIndex,
   options: DependencyOptions = {},
 ): DependencyGraph {
-  const { visible, mode = { by: "prefix" }, pluginOfFunction, measured, includeUnused = true } = options
+  const { visible, mode = { by: "prefix" }, functions, measured, includeUnused = true } = options
   const channels = graph.nodes.filter((n) => !n.unresolved && (!visible || visible.has(n.id)))
   const inView = new Set(channels.map((n) => n.id))
 
@@ -120,8 +118,6 @@ export function buildDependencyGraph(
     name,
     members,
   }))
-  const domainOf = new Map<string, string>()
-  for (const [channel, name] of domainIndex.domainOf) domainOf.set(channel, domainId(name))
 
   const hubs = new Map<string, Hub>()
   const refs = new Map<string, Set<string>>()
@@ -137,13 +133,13 @@ export function buildDependencyGraph(
     for (const c of node.connectors) note(node.id, "connector", c)
     const workflow = node.workflowId ? index.workflowsById.get(node.workflowId) : undefined
     if (!workflow) continue
-    const tasks = flattenSteps(workflowSteps(workflow))
-    for (const m of modelRefs(tasks)) note(node.id, "model", m)
-    if (pluginOfFunction && pluginOfFunction.size > 0) {
-      for (const t of tasks) {
-        const plugin = t.function ? pluginOfFunction.get(t.function.name) : undefined
-        if (plugin) note(node.id, "plugin", plugin)
-      }
+    // What each step touches, from the one reader every page shares. A
+    // computed target is answered per message and is unknowable here; a
+    // `channel_call` is the calls lens's business.
+    for (const task of flattenSteps(workflowSteps(workflow))) {
+      const r = stepEffect(task, functions).resource
+      if (!r || !r.name || r.dynamic || r.kind === "channel") continue
+      note(node.id, r.kind, r.name)
     }
   }
   for (const [channel, connector] of measured ?? []) {
@@ -178,7 +174,6 @@ export function buildDependencyGraph(
     hubs: sorted,
     hubById: new Map(sorted.map((h) => [h.id, h])),
     refsOf,
-    domainOf,
   }
 }
 
@@ -232,7 +227,11 @@ export function dependencyEdges(dg: DependencyGraph, isExpanded: (domainId: stri
     }
     const byHub = new Map<string, string[]>()
     for (const channel of domain.members) {
-      for (const hub of dg.refsOf.get(channel) ?? []) byHub.set(hub, [...(byHub.get(hub) ?? []), channel])
+      for (const hub of dg.refsOf.get(channel) ?? []) {
+        const list = byHub.get(hub)
+        if (list) list.push(channel)
+        else byHub.set(hub, [channel])
+      }
     }
     for (const [hub, channels] of byHub) {
       out.push({ id: `${domain.id}=>${hub}`, source: domain.id, target: hub, channels })
@@ -241,58 +240,60 @@ export function dependencyEdges(dg: DependencyGraph, isExpanded: (domainId: stri
   return out
 }
 
-/**
- * `useConnectorTraffic().byEdge`'s key. Spelled out here rather than imported
- * so this module stays free of the hook module at runtime (a test mocking
- * `use-ops-metrics` must not take the map's pure half down with it); the test
- * asserts the two agree.
- */
-export const connectorEdgeKey = (channel: string, connector: string) => `${channel}|${connector}`
-
 export interface EdgeLoad {
-  /** Calls in the window, or since the server started while only one sample exists. */
+  /**
+   * Calls over the window once one exists, since the server started before
+   * that — never a mix of the two across the channels an edge stands for.
+   */
   calls: number
+  /** Errors in the window; 0 before a window exists (the reader keeps no cumulative per-edge errors). */
   errors: number
-  /** errors / calls; null with no calls. */
+  /** errors / calls over the window; null with no window or no calls. */
   errorPct: number | null
-  /** The exporter counted something on this edge. Otherwise it is a static reference. */
+  /**
+   * The exporter has counted this edge at all. A measured edge with no calls
+   * in the window is a measured *idle* edge, not a static reference.
+   */
   measured: boolean
   /** True when `calls` is a window count rather than a cumulative one. */
   windowed: boolean
 }
 
 /**
- * What crossed an edge, summed over the channels it stands for. Only a
- * connector is metered per channel; a plugin or model edge is always a
+ * What crossed an edge, summed over the channels it stands for. `hasWindow`
+ * is whether the reader has a window yet (two samples): every edge then reads
+ * its window count, and before that every edge reads its cumulative one.
+ * Only a connector is metered per channel; a plugin or model edge is always a
  * reference.
  */
 export function edgeLoad(
   channels: string[],
   hub: Pick<Hub, "kind" | "name">,
   byEdge: ReadonlyMap<string, ConnectorChannelTraffic>,
+  hasWindow: boolean,
 ): EdgeLoad {
   let calls = 0
   let errors = 0
-  let windowed = true
+  let measured = false
   if (hub.kind === "connector") {
     for (const channel of channels) {
       const e = byEdge.get(connectorEdgeKey(channel, hub.name))
       if (!e) continue
-      if (e.windowed == null) {
-        windowed = false
-        calls += e.total
-      } else {
-        calls += e.windowed
+      measured = true
+      if (hasWindow) {
+        calls += e.windowed ?? 0
         errors += e.errors ?? 0
+      } else {
+        calls += e.total
       }
     }
   }
   return {
     calls,
     errors,
-    errorPct: calls > 0 && windowed ? (errors / calls) * 100 : null,
-    measured: calls > 0,
-    windowed,
+    errorPct: hasWindow && calls > 0 ? (errors / calls) * 100 : null,
+    measured,
+    windowed: hasWindow,
   }
 }
 
@@ -353,12 +354,12 @@ export function dependencyFocus(dg: DependencyGraph, selected: string): Set<stri
   if (hub) {
     for (const channel of hub.dependants) {
       out.add(channel)
-      const d = dg.domainOf.get(channel)
+      const d = domainIdOf(dg, channel)
       if (d) out.add(d)
     }
     return out
   }
-  const d = dg.domainOf.get(selected)
+  const d = domainIdOf(dg, selected)
   if (d) out.add(d)
   for (const h of dg.refsOf.get(selected) ?? []) out.add(h)
   return out
@@ -369,7 +370,9 @@ export function dependantsByDomain(dg: DependencyGraph, hub: Hub): { domain: str
   const groups = new Map<string, string[]>()
   for (const channel of hub.dependants) {
     const name = dg.domainIndex.domainOf.get(channel) ?? "other"
-    groups.set(name, [...(groups.get(name) ?? []), channel])
+    const list = groups.get(name)
+    if (list) list.push(channel)
+    else groups.set(name, [channel])
   }
   return [...groups.entries()]
     .map(([domain, channels]) => ({ domain, channels }))
@@ -501,7 +504,7 @@ export function layoutDependencies(
   // Hubs at the barycenter of their sources. A source is the open channel, or
   // the domain box standing in for it; hubs nothing in view uses go last.
   const sourceCentre = (channel: string) =>
-    centres.get(channel) ?? centres.get(dg.domainOf.get(channel) ?? "") ?? null
+    centres.get(channel) ?? centres.get(domainIdOf(dg, channel) ?? "") ?? null
   const keyed = dg.hubs.map((hub, index) => {
     const ys = hub.dependants.map(sourceCentre).filter((v): v is number => v != null)
     return { hub, index, key: mean(ys) }
@@ -539,4 +542,45 @@ export function callShare(graph: SystemGraph): number {
   if (registered.length === 0) return 0
   const involved = registered.filter((n) => n.callers.length > 0 || n.callees.length > 0).length
   return involved / registered.length
+}
+
+/**
+ * The map's search (`?q=`): ids to keep lit, or null when nothing is typed.
+ *
+ * A term that names a domain with the shared prefix — `soma-clock`, which is
+ * how the Operations domain cards link here — lights exactly that domain's
+ * channels: a substring search would also catch `soma-clockwork-*`. A bare
+ * domain name (`clock`) lights the domain *and* the substring hits, since a
+ * person typing a word may mean either. Otherwise it is a case-insensitive
+ * substring of the name, route, topic, workflow title or a tag; hubs match by
+ * name.
+ */
+export function mapSearch(
+  term: string,
+  nodes: readonly Pick<SystemNode, "id" | "name" | "route" | "topic" | "workflowName" | "tags">[],
+  domains: Pick<DomainIndex, "prefix" | "members">,
+  hubs: readonly Pick<Hub, "id" | "name">[] = [],
+): Set<string> | null {
+  const t = term.trim().toLowerCase()
+  if (!t) return null
+  const prefix = domains.prefix.toLowerCase()
+  const hits = new Set<string>()
+  for (const [domain, members] of domains.members) {
+    const d = domain.toLowerCase()
+    if (prefix && (t === `${prefix}${d}` || t === `${prefix}${d}-`)) return new Set(members)
+    if (t === d) for (const m of members) hits.add(m)
+  }
+  for (const n of nodes) {
+    if (
+      n.name.toLowerCase().includes(t) ||
+      (n.route ?? "").toLowerCase().includes(t) ||
+      (n.topic ?? "").toLowerCase().includes(t) ||
+      (n.workflowName ?? "").toLowerCase().includes(t) ||
+      n.tags.some((tag) => tag.toLowerCase().includes(t))
+    ) {
+      hits.add(n.id)
+    }
+  }
+  for (const h of hubs) if (h.name.toLowerCase().includes(t)) hits.add(h.id)
+  return hits
 }

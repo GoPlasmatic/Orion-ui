@@ -1,18 +1,19 @@
-import { useMemo, type ReactNode } from "react"
+import { useMemo } from "react"
 import { Link } from "react-router"
 import type { Channel, TraceDetail } from "@/api/types"
 import { useActiveWorkflow } from "@/hooks/use-workflows"
 import { useWorkflowCost } from "@/hooks/use-ops-metrics"
-import { useFunctions } from "@/hooks/use-functions"
+import { useFunctionIndex } from "@/hooks/use-functions"
 import { useConnectors } from "@/hooks/use-connectors"
-import { buildTimeline, executionTrace, notReached } from "@/lib/trace-timeline"
+import { stepEffect } from "@/lib/function-effects"
+import { buildTimeline, notReached, stepDataGap, traceWorkflowId, type StepDataGap } from "@/lib/trace-timeline"
+import { loopBinding } from "@/lib/workflow-steps"
 import { useUrlFilters } from "@/lib/use-url-filters"
 import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Callout } from "@/components/ui/callout"
 import { TraceTimeline } from "./trace-timeline"
 import { StepDetail } from "./step-detail"
-import { stepUses } from "./step-uses"
 
 const STEP_KEYS = ["step"] as const
 
@@ -22,20 +23,19 @@ const STEP_KEYS = ["step"] as const
  * The selection lives in `?step=<index>` so a link lands on the step.
  */
 export function TraceSteps({ trace, channel }: { trace: TraceDetail; channel: Channel | undefined }) {
-  const et = useMemo(() => executionTrace(trace), [trace])
-  const workflowId =
-    channel?.workflow_id ?? et?.steps.find((s) => typeof s.workflow_id === "string")?.workflow_id ?? null
-  // The version that runs — the latest is the draft while one is open.
+  // The workflow the run's own steps name — the channel may have been
+  // re-pointed since — at its active version, since a trace records none.
+  const workflowId = traceWorkflowId(trace, channel)
   const { workflow } = useActiveWorkflow(workflowId ?? "")
   const timeline = useMemo(() => buildTimeline(trace, workflow), [trace, workflow])
   const cost = useWorkflowCost(workflowId)
-  const { data: catalogue } = useFunctions()
+  const index = useFunctionIndex()
   const connectors = useConnectors({ limit: REGISTRY_LIMIT }, !!timeline)
   const { values, set } = useUrlFilters(STEP_KEYS)
 
-  const uses = useMemo(
-    () => (timeline ? timeline.steps.map((s) => stepUses(s.task, catalogue)) : []),
-    [timeline, catalogue],
+  const effects = useMemo(
+    () => (timeline ? timeline.steps.map((s) => (s.task ? stepEffect(s.task, index) : null)) : []),
+    [timeline, index],
   )
 
   if (!timeline) return <NoStepData trace={trace} channel={channel} />
@@ -46,16 +46,11 @@ export function TraceSteps({ trace, channel }: { trace: TraceDetail; channel: Ch
       ? fromUrl
       : (timeline.failed ?? timeline.dominant)?.index ?? null
   const selected = selectedIndex != null ? timeline.steps[selectedIndex] : null
-  const selectedUses = selected ? uses[selected.index] : null
-  const connectorId =
-    selectedUses?.kind === "connector" && selectedUses.resource
-      ? (connectors.data?.data.find((c) => c.name === selectedUses.resource)?.id ?? null)
-      : null
-
-  const loop = workflow?.loop
-  const over = loop?.over as { var?: unknown } | undefined
-  const loopBinding =
-    loop?.as && over && typeof over === "object" && typeof over.var === "string" ? { as: loop.as, over: over.var } : null
+  const selectedEffect = selected ? (effects[selected.index] ?? null) : null
+  const connectorName = selectedEffect?.resource?.kind === "connector" ? selectedEffect.resource.name : null
+  const connectorId = connectorName
+    ? (connectors.data?.data.find((c) => c.name === connectorName)?.id ?? null)
+    : null
 
   const firstDropped = timeline.truncated ? timeline.steps.find((s) => s.outcome !== "skipped" && !s.hasSnapshot) : undefined
   const missed = trace.status === "failed" || trace.status === "completed" ? notReached(timeline, workflow) : []
@@ -69,12 +64,12 @@ export function TraceSteps({ trace, channel }: { trace: TraceDetail; channel: Ch
         <TraceTimeline
           key={trace.id}
           timeline={timeline}
-          uses={uses}
+          effects={effects}
           costs={cost.tasks.size ? cost.tasks : null}
           selected={selectedIndex}
           onSelect={(i) => set({ step: String(i) })}
           mode={trace.mode}
-          loopBinding={loopBinding}
+          loopBinding={loopBinding(workflow)}
         />
 
         {timeline.truncated && (
@@ -92,15 +87,15 @@ export function TraceSteps({ trace, channel }: { trace: TraceDetail; channel: Ch
           </p>
         )}
 
-        {selected && selectedUses && (
+        {selected && (
           <StepDetail
             key={selected.index}
             step={selected}
             timeline={timeline}
-            uses={selectedUses}
+            effect={selectedEffect}
             costState={cost.state}
             cost={cost.tasks.get(selected.taskId)}
-            catalogue={catalogue}
+            index={index}
             trace={trace}
             workflowId={workflowId}
             connectorId={connectorId}
@@ -111,48 +106,50 @@ export function TraceSteps({ trace, channel }: { trace: TraceDetail; channel: Ch
   )
 }
 
+/** Why a run kept no steps, worded for the reader; `stepDataGap` decides which. */
+function gapText(gap: StepDataGap, trace: TraceDetail, channelName: string | undefined) {
+  const name = <span className="font-medium">{channelName}</span>
+  switch (gap) {
+    case "unsettled":
+      return "The run has not finished. Steps are recorded when it settles."
+    case "no_channel":
+      return trace.channel_id
+        ? "The channel could not be loaded, so its tracing settings are unknown."
+        : "This run arrived on no channel the console can read, so its tracing settings are unknown."
+    case "details_off":
+      return (
+        <>
+          {name} does not keep step data: <code>tracing.task_details</code> is off. Turn it on to record every
+          step's timing, writes and snapshot for future runs.
+        </>
+      )
+    case "errors_only":
+      return (
+        <>
+          {name} keeps step data for failed runs only (<code>tracing.errors_only</code>), and this run did not
+          fail. A slow run that succeeds keeps no steps.
+        </>
+      )
+    case "failed_before_steps":
+      return "The run failed before its first step: refused at admission, by validation or before the workflow was chosen."
+    case "ran_nothing":
+      return (
+        <>
+          {name} records steps, but this run kept none — its workflow's condition or rollout gate may have
+          skipped it, or the channel was changed after it ran.
+        </>
+      )
+  }
+}
+
 /**
  * The run kept no steps. Say why, from the channel's own `tracing` block, and
  * where to change it — an empty pipeline reads as "the workflow did nothing".
  */
 function NoStepData({ trace, channel }: { trace: TraceDetail; channel: Channel | undefined }) {
-  const tracing = channel?.config?.tracing
-  const editTo = channel ? (channel.status === "draft" ? `/channels/${channel.channel_id}/edit` : `/channels/${channel.channel_id}`) : null
-  const editLabel = channel?.status === "draft" ? "Edit the channel's tracing" : "Open the channel (a new version changes tracing)"
-
-  let why: ReactNode
-  if (trace.status === "pending" || trace.status === "running") {
-    why = "The run has not finished. Steps are recorded when it settles."
-  } else if (!channel) {
-    why = trace.channel_id
-      ? "The channel could not be loaded, so its tracing settings are unknown."
-      : "This run arrived on no channel the console can read, so its tracing settings are unknown."
-  } else if (!tracing?.task_details) {
-    why = (
-      <>
-        <span className="font-medium">{channel.name}</span> does not keep step data:{" "}
-        <code>tracing.task_details</code> is off. Turn it on to record every step's timing, writes and
-        snapshot for future runs.
-      </>
-    )
-  } else if (tracing.errors_only && trace.status !== "failed") {
-    why = (
-      <>
-        <span className="font-medium">{channel.name}</span> keeps step data for failed runs only (
-        <code>tracing.errors_only</code>), and this run did not fail. A slow run that succeeds keeps no steps.
-      </>
-    )
-  } else if (trace.status === "failed") {
-    why = "The run failed before its first step: refused at admission, by validation or before the workflow was chosen."
-  } else {
-    why = (
-      <>
-        <span className="font-medium">{channel.name}</span> records steps, but this run kept none — its
-        workflow's condition or rollout gate may have skipped it, or the channel was changed after it ran.
-      </>
-    )
-  }
-
+  const gap = stepDataGap(trace, channel)
+  const draft = channel?.status === "draft"
+  const showEdit = !!channel && (gap === "details_off" || gap === "errors_only")
   return (
     <Card>
       <CardHeader>
@@ -160,10 +157,12 @@ function NoStepData({ trace, channel }: { trace: TraceDetail; channel: Channel |
       </CardHeader>
       <CardContent>
         <Callout variant="muted">
-          <p>No step data for this run. {why}</p>
-          {editTo && (!tracing?.task_details || (tracing.errors_only && trace.status !== "failed")) && (
+          <p>No step data for this run. {gapText(gap, trace, channel?.name)}</p>
+          {showEdit && (
             <p className="mt-2">
-              <Link to={editTo}>{editLabel}</Link>
+              <Link to={draft ? `/channels/${channel.channel_id}/edit` : `/channels/${channel.channel_id}`}>
+                {draft ? "Edit the channel's tracing" : "Open the channel (a new version changes tracing)"}
+              </Link>
             </p>
           )}
         </Callout>

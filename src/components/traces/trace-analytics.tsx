@@ -15,6 +15,7 @@ import {
 import { formatDate, formatDuration } from "@/lib/utils"
 import { statusChartColor } from "@/lib/status"
 import { middleTruncate } from "@/lib/domains"
+import { formatPct } from "@/lib/traffic-encoding"
 
 const tooltipStyle = {
   background: "var(--popover)",
@@ -203,7 +204,7 @@ export function TraceAnalytics() {
                     <Tooltip
                       cursor={{ fill: "var(--muted)", opacity: 0.4 }}
                       contentStyle={tooltipStyle}
-                      formatter={(v) => [`${Number(v).toFixed(1)}%`, "Error rate"]}
+                      formatter={(v) => [formatPct(Number(v)), "Error rate"]}
                     />
                     <Bar
                       dataKey="errorPct"
@@ -244,7 +245,7 @@ export function TraceAnalytics() {
                     <TableCell className="text-right tabular-nums">{c.volume}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       <span className={c.errorPct > 0 ? "text-destructive" : "text-muted-foreground"}>
-                        {c.errorPct.toFixed(1)}%
+                        {formatPct(c.errorPct)}
                       </span>
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">{formatDuration(c.avgMs)}</TableCell>

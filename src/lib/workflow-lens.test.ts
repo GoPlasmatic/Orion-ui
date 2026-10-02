@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest"
 import type { Workflow } from "@/api/types"
 import { buildTimeline } from "@/lib/trace-timeline"
+import { functionIndex } from "@/lib/function-effects"
 import {
-  classifyOp,
   costInsights,
   costView,
   depsInsights,
+  effectTone,
   formatOps,
-  formatRatio,
   insightText,
   lensSections,
   mergeServerResources,
@@ -16,14 +16,13 @@ import {
   runInsights,
   runOverlay,
   sectionLabel,
-  stepResource,
   taskRows,
   type LensTaskRow,
 } from "@/lib/workflow-lens"
-import { clockPair, clockPairCost, clockPairDeps, failedRun } from "@/lib/workflow-lens.fixture"
+import { clockPair, clockPairCatalogue, clockPairCost, clockPairDeps, failedRun } from "@/lib/workflow-lens.fixture"
 
-const pluginOf = new Map([["tb.pairing.pair", "tb.pairing"]])
-const sections = lensSections(clockPair, pluginOf)
+const index = functionIndex(clockPairCatalogue)
+const sections = lensSections(clockPair, index)
 const rows = taskRows(sections)
 const row = (id: string) => rows.find((r) => r.id === id) as LensTaskRow
 
@@ -37,49 +36,29 @@ describe("parseLens", () => {
   })
 })
 
-describe("classifyOp", () => {
-  it("names what a function does to the resource it touches", () => {
-    expect(classifyOp("db_read")).toBe("read")
-    expect(classifyOp("mongo_aggregate")).toBe("read")
-    expect(classifyOp("db_write")).toBe("write")
-    expect(classifyOp("cache_delete")).toBe("write")
-    expect(classifyOp("cache_incr")).toBe("incr")
-    expect(classifyOp("http_call")).toBe("call")
-    expect(classifyOp("channel_call")).toBe("call")
-    expect(classifyOp("publish_kafka")).toBe("publish")
-    expect(classifyOp("send_email")).toBe("send")
-    expect(classifyOp("storage_presign")).toBe("presign")
-    expect(classifyOp("model_infer")).toBe("infer")
+describe("step effects on the rows", () => {
+  it("reads what each step touches from the catalogue", () => {
+    expect(row("demand").effect).toMatchObject({ op: "read", resource: { kind: "connector", name: "soma-db" }, retry: "read" })
+    expect(row("insert").effect).toMatchObject({ op: "write", retry: "unsafe_write" })
+    expect(row("pair").effect.resource).toMatchObject({ kind: "plugin", name: "tb.pairing", version: 2 })
+    expect(row("bump_work.bump").effect).toMatchObject({ op: "incr", resource: { kind: "connector", name: "soma-cache" } })
+    expect(row("plan").effect.resource).toBeNull()
+    expect(row("picked").effect.gate).toBe(true)
   })
 
-  it("reads a plugin function as a call, named or by its namespace", () => {
-    expect(classifyOp("score", new Set(["score"]))).toBe("call")
-    expect(classifyOp("tb.pairing.pair")).toBe("call")
+  it("colours a chip by what a retry repeats", () => {
+    expect(effectTone(row("demand").effect)).toBe("read")
+    expect(effectTone(row("insert").effect)).toBe("write")
+    expect(effectTone(row("bump_work.bump").effect)).toBe("write")
+    expect(effectTone(row("pair").effect)).toBe("neutral")
+    expect(effectTone(row("held").effect)).toBe("gate")
   })
 
-  it("leaves in-memory functions alone", () => {
-    expect(classifyOp("map")).toBeNull()
-    expect(classifyOp("filter")).toBeNull()
-    expect(classifyOp("parse_json")).toBeNull()
-    expect(classifyOp(undefined)).toBeNull()
-  })
-})
-
-describe("stepResource", () => {
-  it("finds connectors, plugins, models and call targets", () => {
-    expect(row("demand").resource).toEqual({ kind: "connector", name: "soma-db" })
-    expect(row("pair").resource).toEqual({ kind: "plugin", name: "tb.pairing" })
-    expect(row("bump_work.bump").resource).toEqual({ kind: "connector", name: "soma-cache" })
-    expect(row("plan").resource).toBeNull()
-    expect(
-      stepResource({ id: "m", name: "m", function: { name: "model_infer", input: { model: "fraud.v3" } } }),
-    ).toEqual({ kind: "model", name: "fraud.v3" })
-    expect(
-      stepResource({ id: "c", name: "c", function: { name: "channel_call", input: { channel: "internal-auth" } } }),
-    ).toEqual({ kind: "channel", name: "internal-auth" })
-    expect(
-      stepResource({ id: "c", name: "c", function: { name: "channel_call", input: { channel: { var: "x" } } } }),
-    ).toMatchObject({ kind: "channel", dynamic: true })
+  it("does not recognise a plugin before the catalogue loads", () => {
+    const bare = taskRows(lensSections(clockPair))
+    expect(bare.find((r) => r.id === "pair")?.effect.resource).toBeNull()
+    // …but still reads a connector read as a read.
+    expect(effectTone(bare.find((r) => r.id === "demand")!.effect)).toBe("read")
   })
 })
 
@@ -92,16 +71,16 @@ describe("lensSections", () => {
   })
 
   it("marks gates, conditions and declared writes", () => {
-    expect(row("picked").gate).toBe(true)
-    expect(row("held").gate).toBe(true)
+    expect(row("picked").effect.gate).toBe(true)
+    expect(row("held").effect.gate).toBe(true)
     expect(row("bump_work.bump").conditional).toBe(true)
     expect(row("pick").writes).toEqual(["temp_data.pick"])
     expect(row("plan").writes).toEqual(["temp_data.plan"])
   })
 
   it("labels the loop sections by what the body iterates", () => {
-    expect(sectionLabel("setup", clockPair.loop)).toEqual({ title: "loop.setup", detail: "once per run" })
-    expect(sectionLabel("body", clockPair.loop)).toEqual({ title: "loop body", detail: "per element of temp_data.plan" })
+    expect(sectionLabel("setup", clockPair)).toEqual({ title: "loop.setup", detail: "once per run" })
+    expect(sectionLabel("body", clockPair)).toEqual({ title: "loop body", detail: "per element of temp_data.plan, as it" })
   })
 
   it("keeps task-group nesting and terminal / halt markers in a plain workflow", () => {
@@ -142,10 +121,11 @@ describe("resourceColumns", () => {
   })
 
   it("adds what only the server's walk found", () => {
-    const merged = mergeServerResources(columns, {
-      ...clockPairDeps,
-      connectors: [...clockPairDeps.connectors, { connector: "soma-search", function: "http_call" }],
-    })
+    const merged = mergeServerResources(
+      columns,
+      { ...clockPairDeps, connectors: [...clockPairDeps.connectors, { connector: "soma-search", function: "http_call" }] },
+      index,
+    )
     expect(merged.map((c) => c.key)).toContain("connector:soma-search")
     expect(merged.find((c) => c.key === "connector:soma-search")?.steps).toEqual([])
     expect(merged).toHaveLength(4)
@@ -168,12 +148,12 @@ describe("cost", () => {
   it("reads out the dominant step, the write and the engine's overhead", () => {
     const text = costInsights(sections, view).map(insightText)
     expect(text[0]).toBe(
-      "demand is 68% of a typical run (88.4 ms of 129 ms). Its p95 is 230 ms, against 306 ms for the whole run.",
+      "demand is 68% of a typical run (88ms of 129ms). Its p95 is 230ms, against 306ms for the whole run.",
     )
     expect(text[1]).toBe(
-      "insert, the only write, costs 14.7 ms per run on average: 18.7 ms per iteration × 0.79 iterations per run.",
+      "insert, the costliest of 2 writes, costs 15ms per run on average: 19ms per iteration × 0.79 iterations per run.",
     )
-    expect(text[2]).toContain("Engine overhead is 4.55 ms (3.5%)")
+    expect(text[2]).toContain("Engine overhead is 4.5ms (3.5%)")
     expect(text[2]).toContain("The 3 filters cost nothing measurable.")
     expect(costInsights(sections, view)[0].tone).toBe("warn")
   })
@@ -193,7 +173,6 @@ describe("dependency read-outs", () => {
       workflowId: "soma-clock-pair-run",
       workflowName: "Clock: pair",
       pluginUsers: new Map([["tb.pairing", ["soma-clock-pair-run"]]]),
-      pluginVersions: new Map([["tb.pairing", 2]]),
       connectorUsers: new Map([
         ["soma-db", 145],
         ["soma-cache", 32],
@@ -213,8 +192,8 @@ describe("dependency read-outs", () => {
 
   it("says who else a shared plugin reaches", () => {
     const [plugin] = depsInsights({
-      sections: lensSections({ tasks: [clockPair.loop!.setup![5]] }, pluginOf),
-      columns: resourceColumns(lensSections({ tasks: [clockPair.loop!.setup![5]] }, pluginOf)),
+      sections: lensSections({ tasks: [clockPair.loop!.setup![5]] }, index),
+      columns: resourceColumns(lensSections({ tasks: [clockPair.loop!.setup![5]] }, index)),
       workflowId: "soma-clock-pair-run",
       workflowName: "Clock: pair",
       pluginUsers: new Map([["tb.pairing", ["soma-clock-pair-run", "other-a", "other-b"]]]),
@@ -248,13 +227,8 @@ describe("last run", () => {
     const text = runInsights(sections, overlay, timeline, costView(sections, clockPairCost), failedRun.error).map(insightText)
     expect(text[0]).toBe("10 steps ran in 92.9 ms, each inside its p95.")
     expect(text[1]).toBe(
-      "The run then spent 8.12 s in bump_work.bump, about 11,600× its p95, before it failed: Function execution error: Redis INCRBY failed for key 'gen:work'",
+      "The run then spent 8.12 s in bump_work.bump, about 11,600× its p95, before it failed: Redis INCRBY failed for key 'gen:work'",
     )
   })
 
-  it("rounds ratios to what can be compared", () => {
-    expect(formatRatio(0.05)).toBe("<0.1×")
-    expect(formatRatio(2.34)).toBe("2.3×")
-    expect(formatRatio(11592.9)).toBe("11,600×")
-  })
 })

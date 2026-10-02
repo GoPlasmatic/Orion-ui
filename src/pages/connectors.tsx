@@ -28,8 +28,9 @@ import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { EntityTable } from "@/components/shared/entity-table"
 import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter-bar"
 import { enabledBadgeClass, disabledBadgeClass, breakerStateBadgeClass } from "@/lib/status"
-import { cn, formatDate, formatWhen, downloadJson } from "@/lib/utils"
+import { cn, formatDate, formatWhen, downloadJson, plural } from "@/lib/utils"
 import { compactNumber, errorLevel, formatMs, formatPct, healthText } from "@/lib/traffic-encoding"
+import { METRICS_STATE_TEXT, metricsShort } from "@/lib/metrics-state"
 import { Download, Plug, Plus, RefreshCw, Upload } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, ConnectorListItem>()
@@ -59,16 +60,25 @@ function TrafficFigure({
   connector: string
   pick: "rate" | "error" | "p95"
 }) {
-  if (traffic.state === "off" || traffic.state === "error") {
-    return <span className="text-muted-foreground" title="Metrics are not available">—</span>
+  if (traffic.state === "off" || traffic.state === "error" || traffic.state === "loading") {
+    return (
+      <span className="text-xs text-muted-foreground" title={METRICS_STATE_TEXT[traffic.state].sentence}>
+        {traffic.state === "loading" ? "…" : "—"}
+      </span>
+    )
   }
-  if (traffic.state === "loading") return <span className="text-xs text-muted-foreground">…</span>
   const t = traffic.byConnector.get(connector)
   if (!t || t.total === 0) {
     return <span className="text-xs text-muted-foreground" title="No call through this connector since the server started">idle</span>
   }
   if (pick === "rate") {
-    if (t.ratePerMin == null) return <span className="text-xs text-muted-foreground" title="Waiting for a second sample">warming</span>
+    if (t.ratePerMin == null) {
+      return (
+        <span className="text-xs text-muted-foreground" title={METRICS_STATE_TEXT.warming.sentence}>
+          {metricsShort("warming")}
+        </span>
+      )
+    }
     return <span className="font-mono text-xs tabular-nums">{compactNumber(t.ratePerMin)}/min</span>
   }
   if (pick === "error") {
@@ -118,7 +128,7 @@ function buildColumns(
             className="text-sm tabular-nums"
             title={`${users.slice(0, 12).join(", ")}${users.length > 12 ? `, +${users.length - 12} more` : ""}`}
           >
-            {users.length} channel{users.length === 1 ? "" : "s"}
+            {plural(users.length, "channel")}
           </span>
         )
       },
@@ -220,7 +230,7 @@ export function ConnectorsPage() {
   const exportAll = useExport(async () => {
     const connectors = await connectorsApi.export({ tag: filters.tag || undefined })
     downloadJson(connectors, "orion-connectors")
-    return `Exported ${connectors.length} connector${connectors.length !== 1 ? "s" : ""} — secrets masked`
+    return `Exported ${plural(connectors.length, "connector")} — secrets masked`
   })
   const reloadConnectors = useReloadConnectors()
   const importConnectors = useImportConnectors()

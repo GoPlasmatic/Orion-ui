@@ -2,7 +2,7 @@ import { Panel, useReactFlow } from "@xyflow/react"
 import { Maximize } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useReducedMotion } from "@/lib/motion"
-import { fitOptions } from "@/components/graph/map-fit"
+import { fitOptions } from "@/lib/map-fit"
 
 /**
  * The Fit control, named and in the corner the eye lands on — React Flow's

@@ -1,69 +1,67 @@
-import { useState, type ReactNode } from "react"
+import { useState } from "react"
 import { Link } from "react-router"
 import { ExternalLink, GitBranch, Search } from "lucide-react"
-import type { FunctionSchema } from "@/api/types"
 import type { TaskCost } from "@/hooks/use-ops-metrics"
 import type { MetricsState } from "@/hooks/use-metrics"
+import type { FunctionIndex, StepEffect } from "@/lib/function-effects"
+import { metricsShort } from "@/lib/metrics-state"
 import type { Timeline, TimelineStep } from "@/lib/trace-timeline"
 import { formatMicros } from "@/lib/trace-timeline"
-import { cn } from "@/lib/utils"
+import { effectLabel, resourceLabel, retryLabel, writesBefore, type PriorWrite } from "@/lib/trace-step-uses"
+import { formatMs } from "@/lib/traffic-encoding"
+import { plural } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
+import { Fact } from "@/components/shared/fact"
 import { JsonViewer } from "@/components/shared/json-viewer"
-import { retrySafetyLabel, writesBefore, type PriorWrite, type StepUses } from "./step-uses"
 
 export interface StepDetailProps {
   step: TimelineStep
   timeline: Timeline
-  uses: StepUses
+  effect: StepEffect | null
   /** The metrics feed's state, and this task's baseline when it has one. */
   costState: MetricsState
   cost: TaskCost | undefined
-  catalogue: FunctionSchema[] | undefined
+  /** The function catalogue, indexed once by the page. */
+  index: FunctionIndex
   trace: { id: string; error?: string | null; channel?: string | null }
   workflowId: string | null
-  /** The connector's id when `uses` names one the registry knows. */
+  /** The connector's id when `effect` names one the registry knows. */
   connectorId: string | null
 }
 
-function Fact({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
-  return (
-    <div className={cn("min-w-0", wide && "sm:col-span-2")}>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 break-words font-mono text-[13px]">{children}</dd>
-    </div>
-  )
-}
-
-const msOf = (ms: number | null | undefined) => (ms == null ? "—" : formatMicros(ms * 1000))
-
 function normalText(state: MetricsState, cost: TaskCost | undefined): string {
-  if (cost && cost.runs > 0) return `mean ${msOf(cost.meanMs)} · p95 ${msOf(cost.p95Ms)}`
-  if (state === "loading") return "loading metrics"
-  if (state === "off") return "metrics off"
-  if (state === "error") return "metrics unavailable"
+  if (cost && cost.runs > 0) return `mean ${formatMs(cost.meanMs)} · p95 ${formatMs(cost.p95Ms)}`
+  if (state === "loading" || state === "off" || state === "error") return metricsShort(state)
   return "no runs recorded since the server started"
 }
 
-/** `(db_write → soma-db) · unsafe write · finished 793 µs earlier · wrote temp_data.s.inserted` */
+/** `(db_write → soma-db) · unsafe to retry · finished 793 µs earlier · wrote temp_data.s.inserted` */
 function priorLine(w: PriorWrite): string {
-  const parts = [
-    `(${w.function}${w.uses.resource ? ` → ${w.uses.resource}` : ""})`,
-    `${retrySafetyLabel(w.safety)}${w.decidingValue != null ? ` (${w.decidingValue})` : ""}`,
-  ]
+  const r = w.effect.resource
+  const parts = [`(${w.effect.fn}${r ? ` → ${resourceLabel(r)}` : ""})`, retryLabel(w.effect)]
   if (w.gapUs != null) parts.push(`finished ${formatMicros(w.gapUs)} earlier`)
   if (w.step.changes.length > 0) parts.push(`wrote ${w.step.changes.map((c) => c.path).join(", ")}`)
   return parts.join(" · ")
 }
 
+function resourceLink(effect: StepEffect | null, connectorId: string | null): string | null {
+  const r = effect?.resource
+  if (!r?.name) return null
+  if (r.kind === "connector") return connectorId ? `/connectors/${encodeURIComponent(connectorId)}` : null
+  if (r.kind === "plugin") return `/plugins/${encodeURIComponent(r.name)}`
+  if (r.kind === "model") return `/models/${encodeURIComponent(r.name)}`
+  return null
+}
+
 export function StepDetail({
   step,
   timeline,
-  uses,
+  effect,
   costState,
   cost,
-  catalogue,
+  index,
   trace,
   workflowId,
   connectorId,
@@ -71,23 +69,12 @@ export function StepDetail({
   const [showValues, setShowValues] = useState(false)
   const failed = step.outcome === "failed"
   const skipped = step.outcome === "skipped"
-  const fn = step.task?.function?.name ?? null
   const recorded = Array.isArray(step.raw.changes)
   const hasValues = step.changes.some((c) => c.new_value !== undefined)
-  const prior = failed ? writesBefore(timeline, step, catalogue) : []
+  const prior = failed ? writesBefore(timeline, step, index) : []
   const snapshot = step.raw.message
   const snapshotData = snapshot?.context?.data
-  const runsNoun = step.phase === "body" ? "iterations" : "runs"
-
-  const resourceLink =
-    uses.kind === "connector" && connectorId
-      ? `/connectors/${encodeURIComponent(connectorId)}`
-      : uses.kind === "plugin" && uses.resourceId
-        ? `/plugins/${encodeURIComponent(uses.resourceId)}`
-        : uses.kind === "model" && uses.resourceId
-          ? `/models/${encodeURIComponent(uses.resourceId)}`
-          : null
-
+  const link = resourceLink(effect, connectorId)
   const sameStep = trace.channel
     ? `/traces?channel=${encodeURIComponent(trace.channel)}${failed ? "&status=failed" : ""}`
     : null
@@ -113,11 +100,17 @@ export function StepDetail({
       )}
 
       <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-        <Fact label="Function">{fn ?? "not in the loaded workflow"}</Fact>
-        <Fact label="Uses">{uses.label}</Fact>
+        <Fact label="Function">{effect?.fn || "not in the loaded workflow"}</Fact>
+        <Fact label="Uses">{effectLabel(effect)}</Fact>
         <Fact label="Started">{step.startUs != null ? `+${formatMicros(step.startUs)}` : "—"}</Fact>
         <Fact label="Took">{skipped ? "skipped" : formatMicros(step.durationUs)}</Fact>
-        <Fact label={cost && cost.runs > 0 ? `Normal (${cost.runs.toLocaleString("en")} ${runsNoun})` : "Normal"}>
+        <Fact
+          label={
+            cost && cost.runs > 0
+              ? `Normal (${plural(cost.runs, step.phase === "body" ? "iteration" : "run")})`
+              : "Normal"
+          }
+        >
           {normalText(costState, cost)}
         </Fact>
         <Fact label="Snapshot">
@@ -195,10 +188,10 @@ export function StepDetail({
             </Link>
           </Button>
         )}
-        {resourceLink && (
+        {link && effect?.resource && (
           <Button variant="outline" size="sm" asChild>
-            <Link to={resourceLink}>
-              <ExternalLink className="h-3.5 w-3.5" /> Open {uses.resource}
+            <Link to={link}>
+              <ExternalLink className="h-3.5 w-3.5" /> Open {resourceLabel(effect.resource)}
             </Link>
           </Button>
         )}

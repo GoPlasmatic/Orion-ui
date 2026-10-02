@@ -29,12 +29,13 @@ import { MetricsStatePill } from "@/components/operations/metrics-state"
 import { InstanceStrip } from "@/components/operations/instance-strip"
 import { GoldenSignals } from "@/components/operations/golden-signals"
 import { IncidentsPanel } from "@/components/operations/incidents-panel"
-import { DomainsGrid, type DomainChannel } from "@/components/operations/domains-grid"
+import { DomainsGrid } from "@/components/operations/domains-grid"
 import { SubsystemsRow } from "@/components/operations/subsystems-row"
 import { useUrlFilters } from "@/lib/use-url-filters"
 import { isFirstRun } from "@/lib/onboarding"
 import { buildDomains } from "@/lib/domains"
-import { formatDate, formatDuration, formatRelative, formatSpan, serverTime, cn } from "@/lib/utils"
+import { formatDate, formatRelative, formatSpan, plural, serverTime, cn } from "@/lib/utils"
+import { compactNumber, formatMs, formatPct } from "@/lib/traffic-encoding"
 import { occurrenceStatusBadgeClass } from "@/lib/status"
 
 /** Rows a summary table shows before deferring to its own page. */
@@ -52,21 +53,14 @@ interface Frozen {
 }
 
 /**
- * Operations: the signals and the incidents first, the inventory last.
- *
- * Above the fold — one line about the instance, the four golden signals over
- * the chosen window, incidents (grouped failures and live faults, which
- * resolve themselves when later runs succeed) beside the domain health grid,
- * and every subsystem's state in one row. Below it, the reference data: the
- * per-channel table, workflow cost and the next 24 h of schedules.
+ * Operations: signals and incidents above the fold, reference data (channel
+ * table, workflow cost, the next 24 h of schedules) below it.
  */
 export function OperationsPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
-  // The window every windowed figure on this page shares, in the URL like the
-  // map's so a link carries it. Incidents read a fixed window of their own
-  // (`INCIDENT_WINDOW`) so the sidebar and this page agree on what is open.
+  // The page's window lives in the URL; incidents read their own fixed window.
   const { values: view, set: setView } = useUrlFilters(WINDOW_KEY)
   const windowSec = trafficWindowFromParam(view.window)
   const windowLabel = trafficWindowLabel(windowSec)
@@ -88,9 +82,7 @@ export function OperationsPage() {
   const liveTraffic = useChannelTraffic(windowSec)
   const liveSubsystems = useSubsystemMetrics(windowSec)
   const metrics = useMetrics()
-  // Pause holds the figures still to read them; every reader of /metrics
-  // shares one poll (the sidebar's included), so pausing is a freeze of what
-  // this page draws rather than of the scrape.
+  // Pause freezes what this page draws; the shared /metrics poll keeps running.
   const [frozen, setFrozen] = useState<Frozen | null>(null)
   const traffic = frozen?.traffic ?? liveTraffic
   const subsystems = frozen?.subsystems ?? liveSubsystems
@@ -118,17 +110,12 @@ export function OperationsPage() {
   // ---- Domains ----
   const activeChannels = useMemo(() => {
     const rows = (channelList?.data ?? []).filter((c) => c.status === "active")
-    if (rows.length > 0) return rows.map((c) => ({ name: c.name, tags: c.tags, cron: c.protocol === "cron" }))
-    // The registry has not answered; the engine's own list names what it serves.
-    return (engine?.channels ?? []).map((name) => ({ name, tags: [] as string[], cron: false }))
+    if (rows.length > 0) return rows.map((c) => ({ name: c.name, tags: c.tags }))
+    // Before the registry answers, the engine's own list names what it serves.
+    return (engine?.channels ?? []).map((name) => ({ name, tags: [] as string[] }))
   }, [channelList?.data, engine?.channels])
   const domainIndex = useMemo(() => buildDomains(activeChannels), [activeChannels])
-  const domainChannels = useMemo(
-    () => new Map<string, DomainChannel>(activeChannels.map((c) => [c.name, { name: c.name, cron: c.cron }])),
-    [activeChannels],
-  )
-  // On a large system every name shares a product prefix ("soma-"); a label
-  // without it reads, and the full name is a hover away.
+  // Labels drop the shared product prefix ("soma-"); the full name is a hover away.
   const prefix = domainIndex.prefix
   const label = (name: string) => (prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name)
 
@@ -151,12 +138,7 @@ export function OperationsPage() {
   // ---- Per-channel table ----
   const live = traffic.state === "live"
   const basis = live ? `last ${formatSpan(traffic.spanSec)}` : "since the engine started"
-  /**
-   * Busiest channels in the window, anything with errors first. A straight
-   * top-8 by volume once let the KPI strip report a 10% error rate above a
-   * table where every visible row read 0.0% — the one failing channel sat at
-   * rank 9. A summary table that hides the exception is worse than none.
-   */
+  // Busiest channels, anything with errors first, so the exception is never off the end.
   const topChannels = traffic.channels
     .filter((c) => c.windowed > 0)
     .sort(
@@ -168,9 +150,7 @@ export function OperationsPage() {
     .slice(0, TABLE_ROWS)
   const promotedErrors = topChannels.some((c) => (c.errorPct ?? 0) > 0)
 
-  // Coverage, as a statistic rather than an alert: most channels that never
-  // "served a request" are reached inside the engine, where the exporter
-  // cannot see them at all.
+  // Coverage: a channel reached only by channel_call has no ingress series.
   const coverage = useMemo(() => {
     if ((channelList?.data.length ?? 0) === 0 || !traffic.available) return null
     let serving = 0
@@ -203,7 +183,6 @@ export function OperationsPage() {
   }
 
   const handleRefresh = async () => {
-    // Spin until the refetches settle so the button reports its own work.
     setRefreshing(true)
     setFrozen(null)
     try {
@@ -291,7 +270,7 @@ export function OperationsPage() {
         <DomainsGrid
           className="lg:col-span-2"
           index={domainIndex}
-          channels={domainChannels}
+          nodes={systemGraph.nodes}
           traffic={traffic.byChannel}
           state={traffic.state}
           quarantined={quarantined}
@@ -306,6 +285,7 @@ export function OperationsPage() {
         hasCron={hasCron}
         cronEnabled={engine?.capabilities?.cron}
         schedules={schedules}
+        oldestPendingSec={health?.cron?.oldest_pending_age_secs}
         label={label}
         breakers={breakers}
         dlqDepth={dlq?.total ?? null}
@@ -354,15 +334,15 @@ export function OperationsPage() {
                               {label(c.channel)}
                             </TableCell>
                             <TableCell className="text-right tabular-nums">
-                              {c.ratePerMin == null ? "—" : Math.round(c.ratePerMin)}
+                              {compactNumber(c.ratePerMin)}
                             </TableCell>
                             <TableCell className="text-right tabular-nums">
                               <span className={err > 0 ? "text-destructive" : "text-muted-foreground"}>
-                                {err.toFixed(1)}%
+                                {formatPct(c.errorPct ?? 0)}
                               </span>
                             </TableCell>
                             <TableCell className="text-right tabular-nums text-muted-foreground">
-                              {formatDuration(c.p95Ms)}
+                              {formatMs(c.p95Ms)}
                             </TableCell>
                             <TableCell className="hidden sm:table-cell" title={`${c.windowed.toLocaleString()} requests`}>
                               <OutcomeBar traffic={c} />
@@ -394,9 +374,7 @@ export function OperationsPage() {
             </CardContent>
           </Card>
 
-          {/* Workflow cost: a whole run (`orion_workflow_duration_seconds`)
-              minus its task bodies is the engine's own overhead. Cumulative:
-              the subtraction across two histograms is noise at short windows. */}
+          {/* Workflow cost: a run minus its task bodies is engine overhead. Cumulative on purpose. */}
           <Card>
             <CardHeader className="flex h-[3.25rem] flex-row items-center justify-between pb-2">
               <CardTitle>Workflow cost</CardTitle>
@@ -440,19 +418,19 @@ export function OperationsPage() {
                             <TableCell className="text-right tabular-nums text-muted-foreground">
                               {w.runs.toLocaleString()}
                             </TableCell>
-                            <TableCell className="text-right tabular-nums">{formatDuration(w.meanMs)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{formatMs(w.meanMs)}</TableCell>
                             <TableCell className="text-right tabular-nums text-muted-foreground">
-                              {formatDuration(w.p95Ms)}
+                              {formatMs(w.p95Ms)}
                             </TableCell>
                             <TableCell
                               className="text-right tabular-nums text-muted-foreground"
                               title={
                                 w.taskMs == null
                                   ? undefined
-                                  : `${formatDuration(w.taskMs)} in ${w.taskCount} task${w.taskCount === 1 ? "" : "s"}, ${formatDuration(w.overheadMs)} in the engine`
+                                  : `${formatMs(w.taskMs)} in ${plural(w.taskCount, "task")}, ${formatMs(w.overheadMs)} in the engine`
                               }
                             >
-                              {formatDuration(w.overheadMs)}
+                              {formatMs(w.overheadMs)}
                               {w.overheadPct != null && (
                                 <span className="ml-1 text-xs">({w.overheadPct.toFixed(0)}%)</span>
                               )}
@@ -473,8 +451,7 @@ export function OperationsPage() {
         </div>
       )}
 
-      {/* Due soon. A nightly job that fails never enters the DLQ and may leave
-          no trace, so its place on the front page is here and in incidents. */}
+      {/* Due soon: a failing nightly job never enters the DLQ, so it is shown here. */}
       {hasCron && (
         <Card>
           <CardHeader className="flex h-[3.25rem] flex-row items-center justify-between pb-2">

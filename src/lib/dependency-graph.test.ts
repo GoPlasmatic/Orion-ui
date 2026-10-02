@@ -10,22 +10,24 @@ import { buildSystemGraph } from "@/lib/system-graph"
 import {
   buildDependencyGraph,
   callShare,
-  connectorEdgeKey,
   CALLS_SHARE,
   dependantsByDomain,
   dependencyEdges,
   dependencyFocus,
   domainId,
+  domainIdOf,
   domainLoad,
   edgeLoad,
   hubId,
   hubLevel,
   layoutDependencies,
+  mapSearch,
   parseHubId,
 } from "@/lib/dependency-graph"
 import { edgeKey, type ConnectorChannelTraffic } from "@/hooks/use-ops-metrics"
 import type { ChannelTraffic } from "@/hooks/use-metrics"
-import type { Channel, Connector, Workflow } from "@/api/types"
+import { functionIndex } from "@/lib/function-effects"
+import type { Channel, Connector, FunctionSchema, Workflow } from "@/api/types"
 
 function channel(name: string, over: Partial<Channel> = {}): Channel {
   return {
@@ -142,7 +144,17 @@ function qa() {
   return { index, graph: buildSystemGraph(index) }
 }
 
-const plugins = new Map([["pair_score", "pairing"]])
+/** A catalogue with one plugin function, the shape `GET admin/functions` serves. */
+const catalogue = functionIndex([
+  {
+    name: "pair_score",
+    description: "",
+    category: "utility",
+    source: "plugin",
+    retry_safety: { kind: "pure" },
+    plugin: { id: "pairing", version: 2, digest: "sha256:p", abi: "1" },
+  } as FunctionSchema,
+])
 
 describe("buildDependencyGraph", () => {
   it("groups channels into domains by the segment after the shared prefix", () => {
@@ -151,7 +163,7 @@ describe("buildDependencyGraph", () => {
     expect(dg.domainIndex.prefix).toBe("soma-")
     expect(dg.domains.map((d) => d.name)).toEqual(["user", "admin", "gate", "pub", "clock"])
     expect(dg.domains[0].id).toBe("domain:user")
-    expect(dg.domainOf.get("soma-admin-repo-sync")).toBe("domain:admin")
+    expect(domainIdOf(dg, "soma-admin-repo-sync")).toBe("domain:admin")
   })
 
   it("makes every connector a hub, the shared one first, an unused one idle", () => {
@@ -183,7 +195,7 @@ describe("buildDependencyGraph", () => {
     const { graph, index } = qa()
     const without = buildDependencyGraph(graph, index)
     expect(without.hubById.has("plugin:pairing")).toBe(false)
-    const dg = buildDependencyGraph(graph, index, { pluginOfFunction: plugins })
+    const dg = buildDependencyGraph(graph, index, { functions: catalogue })
     expect(dg.refsOf.get("soma-clock-pair")).toEqual(["model:ranker", "plugin:pairing"])
     expect(dg.hubById.get("model:ranker")!.kind).toBe("model")
   })
@@ -253,34 +265,78 @@ describe("dependencyEdges", () => {
 })
 
 describe("edgeLoad", () => {
-  it("keys edges the way the connector reader does", () => {
-    expect(connectorEdgeKey("a-b", "c")).toBe(edgeKey("a-b", "c"))
-  })
-
+  const db = { kind: "connector" as const, name: "soma-db" }
   const byEdge = new Map<string, ConnectorChannelTraffic>([
     [edgeKey("soma-user-profile-get", "soma-db"), { channel: "soma-user-profile-get", total: 900, windowed: 100, errors: 0 }],
     [edgeKey("soma-user-profile-put", "soma-db"), { channel: "soma-user-profile-put", total: 400, windowed: 50, errors: 10 }],
+    // Counted since the server started, idle in this window.
+    [edgeKey("soma-user-prefs-put", "soma-db"), { channel: "soma-user-prefs-put", total: 30, windowed: 0, errors: 0 }],
   ])
+  const three = ["soma-user-profile-get", "soma-user-profile-put", "soma-user-prefs-put"]
 
   it("sums the window across the channels an edge stands for", () => {
-    const l = edgeLoad(["soma-user-profile-get", "soma-user-profile-put", "soma-user-prefs-get"], { kind: "connector", name: "soma-db" }, byEdge)
+    const l = edgeLoad([...three, "soma-user-prefs-get"], db, byEdge, true)
     expect(l).toEqual({ calls: 150, errors: 10, errorPct: (10 / 150) * 100, measured: true, windowed: true })
   })
 
-  it("reads as a static reference with nothing measured", () => {
-    const l = edgeLoad(["soma-user-prefs-get"], { kind: "connector", name: "soma-db" }, byEdge)
+  it("never mixes a cumulative total into a window count", () => {
+    // A channel with a series but no window figure counts zero in the window,
+    // not its 900 since the server started.
+    const mixed = new Map(byEdge).set(edgeKey("soma-user-profile-get", "soma-db"), {
+      channel: "soma-user-profile-get",
+      total: 900,
+      windowed: null,
+      errors: null,
+    })
+    expect(edgeLoad(three, db, mixed, true).calls).toBe(50)
+  })
+
+  it("reads every edge cumulatively before a window exists, with no error share", () => {
+    const l = edgeLoad(three, db, byEdge, false)
+    expect(l).toEqual({ calls: 1330, errors: 0, errorPct: null, measured: true, windowed: false })
+  })
+
+  it("keeps a counted edge that is idle in the window measured", () => {
+    const l = edgeLoad(["soma-user-prefs-put"], db, byEdge, true)
+    expect(l).toMatchObject({ calls: 0, measured: true, errorPct: null })
+  })
+
+  it("reads as a static reference when the exporter never counted it", () => {
+    const l = edgeLoad(["soma-user-prefs-get"], db, byEdge, true)
     expect(l.measured).toBe(false)
     expect(l.errorPct).toBeNull()
   })
 
-  it("falls back to the cumulative count before a second sample, without an error share", () => {
-    const warming = new Map([[edgeKey("a", "c"), { channel: "a", total: 7, windowed: null, errors: null }]])
-    const l = edgeLoad(["a"], { kind: "connector", name: "c" }, warming)
-    expect(l).toMatchObject({ calls: 7, measured: true, windowed: false, errorPct: null })
+  it("never meters a plugin or model edge", () => {
+    expect(edgeLoad(["soma-user-profile-get"], { kind: "model", name: "soma-db" }, byEdge, true).measured).toBe(false)
+  })
+})
+
+describe("mapSearch", () => {
+  it("lights exactly a domain named with its prefix — the Operations domain link", () => {
+    const { graph, index } = qa()
+    const dg = buildDependencyGraph(graph, index)
+    // A channel outside the domain whose name contains the term must not match.
+    const nodes = [...graph.nodes, { ...graph.nodes[0], id: "soma-clockwork-x", name: "soma-clockwork-x" }]
+    const hits = mapSearch("soma-clock", nodes, dg.domainIndex)!
+    expect([...hits]).toEqual(["soma-clock-pair"])
+    expect([...mapSearch("Soma-Admin", nodes, dg.domainIndex)!].sort()).toEqual(dg.domains.find((d) => d.name === "admin")!.members)
   })
 
-  it("never meters a plugin or model edge", () => {
-    expect(edgeLoad(["soma-user-profile-get"], { kind: "model", name: "soma-db" }, byEdge).measured).toBe(false)
+  it("lights a bare domain name and its substring hits together", () => {
+    const { graph, index } = qa()
+    const dg = buildDependencyGraph(graph, index)
+    const hits = mapSearch("gate", graph.nodes, dg.domainIndex)!
+    expect([...hits].sort()).toEqual(["soma-gate-finish", "soma-gate-start"])
+  })
+
+  it("falls back to a substring search, hubs included, and null for nothing typed", () => {
+    const { graph, index } = qa()
+    const dg = buildDependencyGraph(graph, index)
+    expect(mapSearch("  ", graph.nodes, dg.domainIndex)).toBeNull()
+    const hits = mapSearch("keys", graph.nodes, dg.domainIndex, dg.hubs)!
+    expect([...hits].sort()).toEqual(["soma-admin-runner-keys-list", "soma-admin-runner-keys-rotate"])
+    expect(mapSearch("cache", graph.nodes, dg.domainIndex, dg.hubs)!.has("connector:soma-cache")).toBe(true)
   })
 })
 

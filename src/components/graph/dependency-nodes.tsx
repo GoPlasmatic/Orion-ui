@@ -1,19 +1,20 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react"
-import { BrainCircuit, ChevronsDownUp, ChevronsUpDown, Pin, Plug, Puzzle, Unplug } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { ChevronsDownUp, ChevronsUpDown, Pin } from "lucide-react"
+import { cn, plural } from "@/lib/utils"
 import { middleTruncate } from "@/lib/domains"
 import { DOMAIN_HEADER, type DomainGroup, type DomainLoad, type Hub } from "@/lib/dependency-graph"
 import type { NodeFault } from "@/lib/faults"
 import { worstTone } from "@/lib/faults"
 import type { ConnectorTraffic } from "@/hooks/use-ops-metrics"
 import { ChangePin, FaultGlyphs } from "@/components/graph/traffic-node"
+import { HubIcon } from "@/components/graph/hub-icon"
 import {
   compactNumber,
   formatMs,
-  formatPct,
   healthDot,
   healthRing,
   healthText,
+  trafficLine,
   type HealthLevel,
 } from "@/lib/traffic-encoding"
 
@@ -33,8 +34,6 @@ const handleClass = "!h-1.5 !w-1.5 !border-0 !bg-muted-foreground/50"
 
 export interface DomainNodeData extends Record<string, unknown> {
   domain: DomainGroup
-  /** Domain label: the name, or "admin" for `soma-admin-*`. */
-  title: string
   expanded: boolean
   width: number
   height: number
@@ -49,11 +48,11 @@ export interface DomainNodeData extends Record<string, unknown> {
   onToggle: (domainId: string) => void
 }
 
+/** A domain's figures. Percentiles do not add, so the p95 is the slowest member's, said as such. */
 function domainFigures(load: DomainLoad): string {
   if (load.windowed === 0) return "idle in the window"
-  const parts = [`${compactNumber(load.rate)}/m`, `${formatPct(load.errorPct)} err`]
-  if (load.worstP95Ms != null) parts.push(`p95 ≤ ${formatMs(load.worstP95Ms)}`)
-  return parts.join(" · ")
+  const line = trafficLine({ ratePerMin: load.rate, errorPct: load.errorPct })
+  return load.worstP95Ms != null ? `${line} · slowest p95 ${formatMs(load.worstP95Ms)}` : line
 }
 
 /**
@@ -63,10 +62,11 @@ function domainFigures(load: DomainLoad): string {
  * keyboard can fold and open it.
  */
 export function DomainNode({ data }: NodeProps) {
-  const { domain, title, expanded, width, height, load, level, faulted, changed, dependOn, dimmed, onToggle } =
+  const { domain, expanded, width, height, load, level, faulted, changed, dependOn, dimmed, onToggle } =
     data as DomainNodeData
   const n = domain.members.length
-  const caption = `${title} · ${n} channel${n === 1 ? "" : "s"}`
+  const title = domain.name
+  const caption = `${title} · ${plural(n, "channel")}`
   if (!expanded) {
     return (
       <div style={{ width, height }} className={cn("relative transition-opacity", dimmed && "opacity-30")}>
@@ -199,7 +199,7 @@ export function DepChannelNode({ data, selected }: NodeProps) {
       <FaultGlyphs faults={faults} size={lod === "dot" ? "h-4 w-4" : "h-3 w-3"} />
       {lod === "full" && ratePerMin != null && ratePerMin > 0 && (
         <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-          {compactNumber(ratePerMin)}/m
+          {trafficLine({ ratePerMin })}
         </span>
       )}
     </div>
@@ -221,15 +221,13 @@ export interface HubNodeData extends Record<string, unknown> {
   focused: boolean
 }
 
-const HUB_ICON = { connector: Plug, plugin: Puzzle, model: BrainCircuit } as const
-
 function hubLine(hub: Hub, traffic: ConnectorTraffic | undefined, windowed: boolean): string {
   if (hub.kind !== "connector") return "referenced · not metered per channel"
   if (!traffic) return hub.dependants.length === 0 ? "no calls" : "no calls measured"
-  const calls = traffic.windowed ?? traffic.total
+  const calls = windowed ? (traffic.windowed ?? 0) : traffic.total
   if (calls === 0) return "no calls in the window"
-  const rate = windowed && traffic.ratePerMin != null ? `${compactNumber(traffic.ratePerMin)}/m` : `${compactNumber(calls)} total`
-  return `${rate} · ${formatPct(traffic.errorPct)} err · p95 ${formatMs(traffic.p95Ms)}`
+  const line = trafficLine({ ratePerMin: windowed ? traffic.ratePerMin : null, errorPct: traffic.errorPct, p95Ms: traffic.p95Ms })
+  return windowed ? line : `${compactNumber(calls)} total · ${line}`
 }
 
 /**
@@ -239,7 +237,6 @@ function hubLine(hub: Hub, traffic: ConnectorTraffic | undefined, windowed: bool
  */
 export function HubNode({ data, selected }: NodeProps) {
   const { hub, traffic, level, failedToLoad, windowed, dimmed, focused } = data as HubNodeData
-  const Icon = failedToLoad ? Unplug : HUB_ICON[hub.kind]
   const n = hub.dependants.length
   const state = !hub.known ? "not registered" : !hub.enabled ? "off" : null
   return (
@@ -257,7 +254,11 @@ export function HubNode({ data, selected }: NodeProps) {
     >
       <Handle type="target" position={Position.Left} className={handleClass} />
       <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
-        <Icon className={cn("h-5 w-5", failedToLoad ? "text-destructive" : healthText[level])} aria-hidden />
+        <HubIcon
+          kind={hub.kind}
+          failed={!!failedToLoad}
+          className={cn("h-5 w-5", failedToLoad ? "text-destructive" : healthText[level])}
+        />
         <span
           className={cn("absolute -right-1 -top-1 h-3 w-3 rounded-full ring-2 ring-card", healthDot[level])}
         />
@@ -269,7 +270,7 @@ export function HubNode({ data, selected }: NodeProps) {
         <p className="truncate text-[10px] text-muted-foreground">
           <span className="font-medium text-foreground/80">{hub.type ?? "unknown"}</span>
           {" · "}
-          {n === 0 ? "unused" : `${n} dependant${n === 1 ? "" : "s"}`}
+          {n === 0 ? "unused" : plural(n, "dependant")}
           {state && <span className="text-warning"> · {state}</span>}
         </p>
         <p className={cn("truncate font-mono text-[10px] tabular-nums", healthText[level])}>

@@ -2,11 +2,14 @@ import { useMemo } from "react"
 import { Link } from "react-router"
 import type { CacheConfig } from "@/api/types"
 import { useChannels } from "@/hooks/use-channels"
-import { useSubsystemMetrics } from "@/hooks/use-ops-metrics"
+import { useCacheHitsByChannel } from "@/hooks/use-ops-metrics"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { InvalidateNamespaceButton } from "@/components/admin/invalidate-namespace"
 import { cacheNamespaces, hitRatio } from "@/lib/cache-namespaces"
 import { REGISTRY_LIMIT } from "@/lib/use-pagination"
+import { formatPct } from "@/lib/traffic-encoding"
+import { plural } from "@/lib/utils"
+import { Fact } from "@/components/shared/fact"
 import { DatabaseZap } from "lucide-react"
 
 /**
@@ -17,7 +20,7 @@ import { DatabaseZap } from "lucide-react"
  */
 export function ResponseCacheCard({ channelName, cache }: { channelName: string; cache: CacheConfig }) {
   const { data: registry } = useChannels({ limit: REGISTRY_LIMIT })
-  const metrics = useSubsystemMetrics(300)
+  const cacheHits = useCacheHitsByChannel()
   const shared = useMemo(() => {
     const byNs = new Map(cacheNamespaces(registry?.data ?? []).map((r) => [r.namespace, r]))
     return (cache.namespaces ?? []).map((ns) => ({
@@ -25,7 +28,7 @@ export function ResponseCacheCard({ channelName, cache }: { channelName: string;
       channels: byNs.get(ns)?.channels.map((c) => c.name) ?? [channelName],
     }))
   }, [registry, cache.namespaces, channelName])
-  const ratio = hitRatio([channelName], metrics.cache.byChannel)
+  const ratio = hitRatio([channelName], cacheHits.byChannel)
 
   return (
     <Card>
@@ -41,28 +44,21 @@ export function ResponseCacheCard({ channelName, cache }: { channelName: string;
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-          <div>
-            <dt className="text-xs text-muted-foreground">TTL</dt>
-            <dd className="mt-0.5 tabular-nums">{cache.ttl_secs != null ? `${cache.ttl_secs}s` : "server default"}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-muted-foreground">Store</dt>
-            <dd className="mt-0.5 font-mono text-xs">{cache.connector || "in-memory (this node)"}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-muted-foreground">Coalesce misses</dt>
-            <dd className="mt-0.5">{cache.coalesce_misses ? "on, per node" : "off"}</dd>
-          </div>
-          <div
+          <Fact label="TTL">{cache.ttl_secs != null ? `${cache.ttl_secs}s` : "server default"}</Fact>
+          <Fact label="Store">{cache.connector || "in-memory (this node)"}</Fact>
+          <Fact label="Coalesce misses" mono={false}>
+            {cache.coalesce_misses ? "on, per node" : "off"}
+          </Fact>
+          <Fact
+            label="Hit ratio"
             title={
               ratio.pct == null
                 ? "No lookups recorded on the node this console scrapes"
-                : `${ratio.hits.toLocaleString()} hits · ${ratio.misses.toLocaleString()} misses since the server started`
+                : `${plural(ratio.hits, "hit")} · ${plural(ratio.misses, "miss", "misses")} since the server started`
             }
           >
-            <dt className="text-xs text-muted-foreground">Hit ratio</dt>
-            <dd className="mt-0.5 tabular-nums">{ratio.pct == null ? "—" : `${ratio.pct.toFixed(1)}%`}</dd>
-          </div>
+            {formatPct(ratio.pct)}
+          </Fact>
         </dl>
 
         {shared.length === 0 ? (
@@ -86,7 +82,7 @@ export function ResponseCacheCard({ channelName, cache }: { channelName: string;
                     <p className="text-xs text-muted-foreground">
                       {others.length === 0
                         ? "Only this channel declares it"
-                        : `Shared with ${others.length} other channel${others.length === 1 ? "" : "s"}`}
+                        : `Shared with ${plural(others.length, "other channel")}`}
                     </p>
                   </div>
                   <InvalidateNamespaceButton namespace={namespace} channels={channels} />

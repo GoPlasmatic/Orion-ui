@@ -1,12 +1,15 @@
-import { useMemo, useState, type CSSProperties, type ReactNode } from "react"
+import { useMemo, useState } from "react"
 import { X } from "lucide-react"
 import type { TaskCost } from "@/hooks/use-ops-metrics"
+import type { StepEffect } from "@/lib/function-effects"
 import type { Timeline, TimelineGroup, TimelineStep } from "@/lib/trace-timeline"
 import { formatMicros } from "@/lib/trace-timeline"
-import { cn } from "@/lib/utils"
+import { buildAxis, spanPct, splitAdvice, type AxisMode, type TimeAxis } from "@/lib/trace-axis"
+import { effectLabel, overP95, resourceLabel, vsP95 } from "@/lib/trace-step-uses"
+import { formatPct } from "@/lib/traffic-encoding"
+import { cn, plural } from "@/lib/utils"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { buildAxis, spanPct, splitAdvice, type AxisMode, type TimeAxis } from "./timeline-axis"
-import { vsP95, type StepUses } from "./step-uses"
+import { KpiCard } from "@/components/shared/kpi-card"
 
 /**
  * Where a run's time went: the headline numbers, the whole run at true scale,
@@ -16,8 +19,8 @@ import { vsP95, type StepUses } from "./step-uses"
 
 export interface TraceTimelineProps {
   timeline: Timeline
-  /** One per step, by `TimelineStep.index`. */
-  uses: StepUses[]
+  /** One per step, by `TimelineStep.index`; null where the authored task is unknown. */
+  effects: (StepEffect | null)[]
   /** Per-task baselines by task id; null while metrics are unavailable. */
   costs: Map<string, TaskCost> | null
   selected: number | null
@@ -28,9 +31,8 @@ export interface TraceTimelineProps {
   loopBinding?: { as: string; over: string } | null
 }
 
-const HATCH: CSSProperties = {
-  backgroundImage: "repeating-linear-gradient(135deg, var(--border-strong) 0 2px, transparent 2px 6px)",
-}
+const settleCaption = (mode?: string) => (mode === "cron" ? "trace + occurrence write" : "trace write")
+const admissionCaption = (mode?: string) => (mode === "cron" ? "claim, lease" : "before the first step")
 
 const GROUP_FILL: Record<TimelineGroup["kind"], string> = {
   setup: "bg-chart-1",
@@ -43,67 +45,52 @@ function stepFill(s: TimelineStep): string {
   return s.phase === "body" ? "bg-chart-2" : "bg-chart-1"
 }
 
-function sharePct(part: number, total: number): string {
-  if (total <= 0) return "—"
-  const p = (part / total) * 100
-  if (p > 0 && p < 1) return "<1%"
-  return `${Math.round(p)}%`
+/** The hatched break where the split axis skips time. */
+function Hatch({ startPct, endPct, className }: { startPct: number; endPct: number; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn("absolute", className)}
+      style={{
+        backgroundImage: "repeating-linear-gradient(135deg, var(--border-strong) 0 2px, transparent 2px 6px)",
+        left: `${startPct}%`,
+        width: `${endPct - startPct}%`,
+      }}
+    />
+  )
 }
 
 // ---------------------------------------------------------------------------
 // Headline
 // ---------------------------------------------------------------------------
 
-function Tile({ label, value, detail, tone }: { label: string; value: string; detail?: ReactNode; tone?: "bad" }) {
-  return (
-    <div className="grid min-w-0 content-start gap-0.5 rounded-lg border bg-card px-3 py-2.5">
-      <dt className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{label}</dt>
-      <dd className={cn("font-display text-xl font-semibold tabular-nums", tone === "bad" && "text-destructive")}>
-        {value}
-      </dd>
-      {detail && <dd className="break-words font-mono text-xs text-muted-foreground">{detail}</dd>}
-    </div>
-  )
-}
-
 function Headline({ timeline, costs, mode }: Pick<TraceTimelineProps, "timeline" | "costs" | "mode">) {
   const d = timeline.dominant
   const timed = timeline.steps.filter((s) => s.durationUs != null)
   const others = timed.filter((s) => s !== d)
   const othersUs = others.reduce((a, s) => a + (s.durationUs ?? 0), 0)
-  let baseline: string | undefined
-  if (costs && others.length) {
-    const judged = others.filter((s) => (costs.get(s.taskId)?.p95Ms ?? 0) > 0)
-    const over = judged.filter((s) => s.durationUs! > costs.get(s.taskId)!.p95Ms! * 1000)
-    if (judged.length) baseline = over.length === 0 ? "each inside its p95" : `${over.length} over its p95`
-  }
+  const p95 = costs ? overP95(others, (id) => costs.get(id)?.p95Ms) : null
+  const baseline =
+    p95 && p95.judged > 0 ? (p95.over === 0 ? "each inside its p95" : `${p95.over} over its p95`) : undefined
   return (
-    <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-      <Tile label="Total" value={formatMicros(timeline.totalUs)} detail={`${timed.length} steps ran`} />
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+      <KpiCard title="Total" value={formatMicros(timeline.totalUs)} hint={`${plural(timed.length, "step")} ran`} />
       {d && d.durationUs != null && (
-        <Tile
-          label="In one step"
-          value={sharePct(d.durationUs, timeline.totalUs)}
-          detail={`${d.taskId} · ${formatMicros(d.durationUs)}`}
-          tone={d.outcome === "failed" ? "bad" : undefined}
+        <KpiCard
+          title="In one step"
+          value={formatPct((d.durationUs / Math.max(1, timeline.totalUs)) * 100)}
+          hint={`${d.taskId} · ${formatMicros(d.durationUs)}`}
+          valueClass={d.outcome === "failed" ? "text-destructive" : undefined}
         />
       )}
-      <Tile
-        label={`Other ${others.length} step${others.length === 1 ? "" : "s"}`}
-        value={formatMicros(othersUs)}
-        detail={baseline}
-      />
-      <Tile
-        label="Engine between steps"
+      <KpiCard title={`Other ${plural(others.length, "step")}`} value={formatMicros(othersUs)} hint={baseline} />
+      <KpiCard
+        title="Engine between steps"
         value={formatMicros(timeline.gapUs)}
-        detail={`${timeline.gaps} hand-off${timeline.gaps === 1 ? "" : "s"}`}
+        hint={plural(timeline.gaps, "hand-off")}
       />
-      <Tile
-        label="Settle"
-        value={formatMicros(timeline.settleUs)}
-        detail={mode === "cron" ? "trace + occurrence write" : "trace write"}
-      />
-    </dl>
+      <KpiCard title="Settle" value={formatMicros(timeline.settleUs)} hint={settleCaption(mode)} />
+    </div>
   )
 }
 
@@ -111,30 +98,40 @@ function Headline({ timeline, costs, mode }: Pick<TraceTimelineProps, "timeline"
 // Overview strip — always linear
 // ---------------------------------------------------------------------------
 
-function Overview({ timeline, axis }: { timeline: Timeline; axis: TimeAxis }) {
-  const total = Math.max(1, timeline.totalUs)
-  const pieces: { from: number; to: number; fill: string; label: string }[] = []
-  if (timeline.admissionUs > 0) pieces.push({ from: 0, to: timeline.admissionUs, fill: "bg-chart-5", label: "admission" })
+interface Piece {
+  from: number
+  to: number
+  fill: string
+  /** The legend entry this piece belongs to. */
+  legend: string
+}
+
+function overviewPieces(timeline: Timeline): Piece[] {
+  const pieces: Piece[] = []
+  if (timeline.admissionUs > 0) pieces.push({ from: 0, to: timeline.admissionUs, fill: "bg-chart-5", legend: "admission" })
+  const iterations = timeline.groups.filter((g) => g.kind === "iteration").length
   for (const g of timeline.groups) {
     if (g.startUs == null || g.endUs == null) continue
-    pieces.push({ from: g.startUs, to: g.endUs, fill: GROUP_FILL[g.kind], label: g.label || "steps" })
+    const legend =
+      g.kind === "iteration" ? (iterations === 1 ? g.label : plural(iterations, "iteration")) : g.label || "steps"
+    pieces.push({ from: g.startUs, to: g.endUs, fill: GROUP_FILL[g.kind], legend })
   }
   const f = timeline.failed
   if (f && f.startUs != null && f.durationUs != null) {
-    pieces.push({ from: f.startUs, to: f.startUs + f.durationUs, fill: "bg-destructive", label: "failing step" })
+    pieces.push({ from: f.startUs, to: f.startUs + f.durationUs, fill: "bg-destructive", legend: "failing step" })
   }
-  if (timeline.settleUs > 0) pieces.push({ from: timeline.engineEndUs, to: total, fill: "bg-border-strong", label: "settle" })
+  if (timeline.settleUs > 0) {
+    pieces.push({ from: timeline.engineEndUs, to: timeline.totalUs, fill: "bg-border-strong", legend: "settle" })
+  }
+  return pieces
+}
 
-  const iterations = timeline.groups.filter((g) => g.kind === "iteration")
-  const legend: { fill: string; label: string }[] = []
-  if (timeline.admissionUs > 0) legend.push({ fill: "bg-chart-5", label: "admission" })
-  if (timeline.groups.some((g) => g.kind === "setup")) legend.push({ fill: "bg-chart-1", label: "loop.setup" })
-  if (iterations.length) legend.push({ fill: "bg-chart-2", label: iterations.length === 1 ? iterations[0].label : `${iterations.length} iterations` })
-  if (timeline.groups.some((g) => g.kind === "main")) legend.push({ fill: "bg-chart-1", label: "steps" })
-  if (f) legend.push({ fill: "bg-destructive", label: "failing step" })
-  if (timeline.settleUs > 0) legend.push({ fill: "bg-border-strong", label: "settle" })
-
+function Overview({ timeline, axis }: { timeline: Timeline; axis: TimeAxis }) {
+  const total = Math.max(1, timeline.totalUs)
+  const pieces = overviewPieces(timeline)
+  const legend = [...new Map(pieces.map((p) => [p.legend, p.fill])).entries()]
   const zoomed = axis.mode === "split" ? axis.segments.filter((s) => s.zoomed) : []
+  const pct = (us: number) => (us / total) * 100
   return (
     <div className="grid gap-1.5">
       <div
@@ -146,24 +143,24 @@ function Overview({ timeline, axis }: { timeline: Timeline; axis: TimeAxis }) {
           <span
             key={i}
             className={cn("absolute inset-y-0", p.fill)}
-            style={{ left: `${(p.from / total) * 100}%`, width: `${Math.max(((p.to - p.from) / total) * 100, 0.3)}%` }}
-            title={`${p.label} · ${formatMicros(p.to - p.from)}`}
+            style={{ left: `${pct(p.from)}%`, width: `${Math.max(pct(p.to - p.from), 0.3)}%` }}
+            title={`${p.legend} · ${formatMicros(p.to - p.from)}`}
           />
         ))}
         {zoomed.map((z, i) => (
           <span
             key={`z${i}`}
             className="absolute inset-y-0 rounded-sm border-[1.5px] border-foreground"
-            style={{ left: `${(z.fromUs / total) * 100}%`, width: `${Math.max(((z.toUs - z.fromUs) / total) * 100, 1.2)}%` }}
+            style={{ left: `${pct(z.fromUs)}%`, width: `${Math.max(pct(z.toUs - z.fromUs), 1.2)}%` }}
             title={`${formatMicros(z.toUs - z.fromUs)} drawn across ${Math.round(z.endPct - z.startPct)}% of the lane below`}
           />
         ))}
       </div>
       <ul className="flex flex-wrap gap-x-3.5 gap-y-1 font-mono text-[11.5px] text-muted-foreground">
-        {legend.map((l) => (
-          <li key={l.label} className="flex items-center gap-1.5">
-            <i className={cn("inline-block h-2.5 w-2.5 rounded-sm", l.fill)} aria-hidden />
-            {l.label}
+        {legend.map(([label, fill]) => (
+          <li key={label} className="flex items-center gap-1.5">
+            <i className={cn("inline-block h-2.5 w-2.5 rounded-sm", fill)} aria-hidden />
+            {label}
           </li>
         ))}
         {zoomed.length > 0 && (
@@ -188,12 +185,7 @@ function LaneBackdrop({ axis }: { axis: TimeAxis }) {
         <span key={`g${i}`} aria-hidden className="absolute -inset-y-1.5 w-px bg-border" style={{ left: `${pct}%` }} />
       ))}
       {axis.breaks.map((b, i) => (
-        <span
-          key={`b${i}`}
-          aria-hidden
-          className="absolute -inset-y-1.5"
-          style={{ ...HATCH, left: `${b.startPct}%`, width: `${b.endPct - b.startPct}%` }}
-        />
+        <Hatch key={`b${i}`} {...b} className="-inset-y-1.5" />
       ))}
     </>
   )
@@ -220,8 +212,7 @@ function Bar({ axis, from, to, fill, faint, title }: { axis: TimeAxis; from: num
 // ---------------------------------------------------------------------------
 
 function groupCaption(g: TimelineGroup, binding: TraceTimelineProps["loopBinding"]): string {
-  const n = g.steps.length
-  const count = `${n} step${n === 1 ? "" : "s"}`
+  const count = plural(g.steps.length, "step")
   if (g.kind === "setup") return `${count}, once per run`
   if (g.kind === "iteration" && binding && g.iteration != null) {
     return `${binding.as} = ${binding.over}[${g.iteration}] · ${count}`
@@ -266,14 +257,14 @@ function SpanRow({
 
 function StepRow({
   step,
-  uses,
+  effect,
   cost,
   axis,
   selected,
   onSelect,
 }: {
   step: TimelineStep
-  uses: StepUses | undefined
+  effect: StepEffect | null
   cost: TaskCost | undefined
   axis: TimeAxis
   selected: boolean
@@ -283,7 +274,9 @@ function StepRow({
   const skipped = step.outcome === "skipped"
   const vs = vsP95(step.durationUs, cost?.p95Ms)
   const authored = step.task?.name && step.task.name !== step.taskId ? step.task.name : null
-  const tickUs = step.startUs != null && cost?.p95Ms != null ? step.startUs + cost.p95Ms * 1000 : null
+  const p95Us = cost?.p95Ms != null ? cost.p95Ms * 1000 : null
+  const tickUs = step.startUs != null && p95Us != null ? step.startUs + p95Us : null
+  const label = effectLabel(effect)
   return (
     <TableRow
       onActivate={onSelect}
@@ -311,13 +304,13 @@ function StepRow({
           {authored && <small className="truncate font-sans text-[11px] text-muted-foreground">{authored}</small>}
         </div>
       </TableCell>
-      <TableCell className="truncate py-1.5 text-xs" title={uses?.label}>
-        {uses && uses.op && uses.resource ? (
+      <TableCell className="truncate py-1.5 text-xs" title={label}>
+        {effect?.resource && !effect.gate ? (
           <>
-            <em className="not-italic text-muted-foreground">{uses.op}</em> {uses.resource}
+            <em className="not-italic text-muted-foreground">{effect.op}</em> {resourceLabel(effect.resource)}
           </>
         ) : (
-          <span className="text-muted-foreground">{uses?.label ?? "—"}</span>
+          <span className="text-muted-foreground">{label}</span>
         )}
       </TableCell>
       <TableCell className="py-1.5">
@@ -339,11 +332,11 @@ function StepRow({
               />
             )
           )}
-          {!skipped && tickUs != null && tickUs <= axis.totalUs && (
+          {!skipped && tickUs != null && p95Us != null && tickUs <= axis.totalUs && (
             <span
               className="absolute -inset-y-px w-0.5 rounded-sm bg-foreground opacity-55"
               style={{ left: `${axis.x(tickUs)}%` }}
-              title={`p95 ${formatMicros(cost!.p95Ms! * 1000)}`}
+              title={`p95 ${formatMicros(p95Us)}`}
               aria-hidden
             />
           )}
@@ -358,7 +351,7 @@ function StepRow({
 }
 
 function AxisToggle({ mode, onChange, splitAvailable }: { mode: AxisMode; onChange: (m: AxisMode) => void; splitAvailable: boolean }) {
-  const item = (m: AxisMode, label: string, disabled = false) => (
+  const item = (m: AxisMode, label: string, title: string, disabled = false) => (
     <button
       type="button"
       aria-pressed={mode === m}
@@ -368,29 +361,31 @@ function AxisToggle({ mode, onChange, splitAvailable }: { mode: AxisMode; onChan
         "rounded px-2.5 py-1 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50",
         mode === m ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
       )}
-      title={
-        m === "split"
-          ? disabled
-            ? "No single step dominates this run"
-            : "Spread the stretches around the longest step across most of the width"
-          : "Every microsecond the same width"
-      }
+      title={title}
     >
       {label}
     </button>
   )
   return (
     <div role="group" aria-label="Time axis" className="inline-flex rounded-md border bg-muted p-0.5">
-      {item("split", "Split axis", !splitAvailable)}
-      {item("linear", "Linear")}
+      {item(
+        "split",
+        "Split axis",
+        splitAvailable ? "Spread the stretches around the longest step across most of the width" : "No single step dominates this run",
+        !splitAvailable,
+      )}
+      {item("linear", "Linear", "Every microsecond the same width")}
     </div>
   )
 }
 
-export function TraceTimeline({ timeline, uses, costs, selected, onSelect, mode, loopBinding }: TraceTimelineProps) {
+export function TraceTimeline({ timeline, effects, costs, selected, onSelect, mode, loopBinding }: TraceTimelineProps) {
   const advice = useMemo(() => splitAdvice(timeline), [timeline])
-  const [axisMode, setAxisMode] = useState<AxisMode>(advice.preferred ? "split" : "linear")
-  const axis = useMemo(() => buildAxis(timeline, advice.available ? axisMode : "linear"), [timeline, axisMode, advice.available])
+  // The person's choice wins; until they make one the axis follows the data,
+  // so a re-polled run whose long step has just landed switches to split.
+  const [override, setOverride] = useState<AxisMode | null>(null)
+  const axisMode: AxisMode = !advice.available ? "linear" : (override ?? (advice.preferred ? "split" : "linear"))
+  const axis = useMemo(() => buildAxis(timeline, axisMode), [timeline, axisMode])
   const showGroupHeaders = timeline.groups.some((g) => g.kind !== "main")
 
   return (
@@ -405,7 +400,7 @@ export function TraceTimeline({ timeline, uses, costs, selected, onSelect, mode,
             : "Linear axis: every bar at true scale."}{" "}
           The tick on a bar is that task's p95.
         </p>
-        <AxisToggle mode={axis.mode} onChange={setAxisMode} splitAvailable={advice.available} />
+        <AxisToggle mode={axis.mode} onChange={setOverride} splitAvailable={advice.available} />
       </div>
 
       <div className="rounded-lg border bg-card">
@@ -424,12 +419,7 @@ export function TraceTimeline({ timeline, uses, costs, selected, onSelect, mode,
               <TableHead className="normal-case tracking-normal">
                 <div className="relative h-4 font-mono text-[11px] font-normal" data-testid="time-axis">
                   {axis.breaks.map((b, i) => (
-                    <span
-                      key={i}
-                      aria-hidden
-                      className="absolute inset-y-0"
-                      style={{ ...HATCH, left: `${b.startPct}%`, width: `${b.endPct - b.startPct}%` }}
-                    />
+                    <Hatch key={i} {...b} className="inset-y-0" />
                   ))}
                   {axis.ticks.map((t, i) => (
                     <span
@@ -454,7 +444,7 @@ export function TraceTimeline({ timeline, uses, costs, selected, onSelect, mode,
               <SpanRow
                 axis={axis}
                 title="admission"
-                caption={mode === "cron" ? "claim, lease" : "before the first step"}
+                caption={admissionCaption(mode)}
                 from={0}
                 to={timeline.admissionUs}
                 fill="bg-chart-5"
@@ -467,7 +457,7 @@ export function TraceTimeline({ timeline, uses, costs, selected, onSelect, mode,
                 header={showGroupHeaders}
                 caption={groupCaption(g, loopBinding)}
                 axis={axis}
-                uses={uses}
+                effects={effects}
                 costs={costs}
                 selected={selected}
                 onSelect={onSelect}
@@ -477,7 +467,7 @@ export function TraceTimeline({ timeline, uses, costs, selected, onSelect, mode,
               <SpanRow
                 axis={axis}
                 title="settle"
-                caption={mode === "cron" ? "trace + occurrence write" : "trace write"}
+                caption={settleCaption(mode)}
                 from={timeline.engineEndUs}
                 to={timeline.totalUs}
                 fill="bg-border-strong"
@@ -495,7 +485,7 @@ function GroupRows({
   header,
   caption,
   axis,
-  uses,
+  effects,
   costs,
   selected,
   onSelect,
@@ -504,7 +494,7 @@ function GroupRows({
   header: boolean
   caption: string
   axis: TimeAxis
-  uses: StepUses[]
+  effects: (StepEffect | null)[]
   costs: Map<string, TaskCost> | null
   selected: number | null
   onSelect: (index: number) => void
@@ -525,7 +515,7 @@ function GroupRows({
         <StepRow
           key={s.index}
           step={s}
-          uses={uses[s.index]}
+          effect={effects[s.index] ?? null}
           cost={costs?.get(s.taskId)}
           axis={axis}
           selected={selected === s.index}

@@ -23,7 +23,7 @@ import { ErrorState } from "@/components/shared/error-state"
 import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter-bar"
 import { PAGE_SIZE } from "@/lib/use-pagination"
 import { pluginHealthBadgeClass } from "@/lib/status"
-import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
+import { formatDate, formatWhen, downloadJson, plural } from "@/lib/utils"
 import { Blocks, Download, Plus, Upload } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, Plugin>()
@@ -173,7 +173,7 @@ export function PluginsPage() {
     const plugins = await pluginsApi.export({ ...query, include_artifacts: true })
     downloadJson(plugins, "orion-plugins")
     return {
-      message: `Exported ${plugins.length} plugin${plugins.length !== 1 ? "s" : ""}`,
+      message: `Exported ${plural(plugins.length, "plugin")}`,
       description: "Components inlined as base64",
     }
   })
@@ -221,7 +221,7 @@ export function PluginsPage() {
       {sandbox === "degraded" && (
         <Callout variant="warning">
           {failedLoads.length > 0
-            ? `${failedLoads.length} active plugin version${failedLoads.length === 1 ? "" : "s"} did not load on this node — the workflows naming ${failedLoads.length === 1 ? "its" : "their"} functions are quarantined.`
+            ? `${plural(failedLoads.length, "active plugin version")} did not load on this node — the workflows naming ${failedLoads.length === 1 ? "its" : "their"} functions are quarantined.`
             : "An active plugin did not load on this node; the workflows naming its functions are quarantined."}{" "}
           <Link to="/engine" className="underline underline-offset-2">
             See the health report

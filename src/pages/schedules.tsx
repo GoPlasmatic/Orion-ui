@@ -28,7 +28,7 @@ import { KpiCard } from "@/components/shared/kpi-card"
 import { ErrorState } from "@/components/shared/error-state"
 import { occurrenceStatusBadgeClass, statusChartColor } from "@/lib/status"
 import { occurrenceStatusLabel, slotUsage } from "@/lib/cron"
-import { formatDate, formatRelative, serverTime, toRfc3339, cn } from "@/lib/utils"
+import { formatDate, formatRelative, serverTime, toRfc3339, cn, plural } from "@/lib/utils"
 import { useTimeZone } from "@/lib/use-time-zone"
 import { CalendarClock, Play, Plus, History } from "lucide-react"
 
@@ -178,7 +178,7 @@ export function SchedulesPage() {
         <CardHeader className="flex h-[3.25rem] flex-row items-center justify-between pb-2">
           <CardTitle>Active schedules</CardTitle>
           <span className="text-xs text-muted-foreground">
-            {schedules.length} channel{schedules.length === 1 ? "" : "s"}
+            {plural(schedules.length, "channel")}
           </span>
         </CardHeader>
         <CardContent>
@@ -401,7 +401,7 @@ function SlotsCell({ row }: { row: CronScheduleStatus }) {
     <TableCell className="text-right tabular-nums">
       <span
         className={cn(usage.held >= usage.slots && "text-warning")}
-        title={`${row.singleton_key ?? row.channel_id} · ${usage.held} live lease${usage.held === 1 ? "" : "s"} on the key, across every channel sharing it, of ${usage.slots} this channel admits${usage.over ? " — more than this channel's bound, which happens when a peer channel declares more slots or slots was just lowered" : ""}`}
+        title={`${row.singleton_key ?? row.channel_id} · ${plural(usage.held, "live lease")} on the key, across every channel sharing it, of ${usage.slots} this channel admits${usage.over ? " — more than this channel's bound, which happens when a peer channel declares more slots or slots was just lowered" : ""}`}
       >
         {usage.held}/{usage.slots}
         {usage.over && <span className="ml-1 text-warning">*</span>}

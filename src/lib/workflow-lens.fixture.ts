@@ -1,4 +1,4 @@
-import type { ExecutionStep, TraceDetail, Workflow, WorkflowDependencies } from "@/api/types"
+import type { ExecutionStep, FunctionSchema, TraceDetail, Workflow, WorkflowDependencies } from "@/api/types"
 import type { CostInput } from "@/lib/workflow-lens"
 
 /**
@@ -9,7 +9,7 @@ import type { CostInput } from "@/lib/workflow-lens"
  * server's own. Shared by the lens unit tests and the lens render test.
  */
 
-const soma = (fn: string, output: string) => ({ name: fn, input: { connector: "soma-db", query: "…", output } })
+const soma = (fn: string, sql: string, output: string) => ({ name: fn, input: { connector: "soma-db", sql, output } })
 const gate = { name: "filter", input: { condition: { "!!": [{ var: "temp_data.x" }] } } }
 
 export const clockPair: Workflow = {
@@ -28,11 +28,11 @@ export const clockPair: Workflow = {
     over: { var: "temp_data.plan" },
     as: "it",
     setup: [
-      { id: "pick", name: "Pick the live season to pair this tick", function: soma("db_read", "temp_data.pick") },
+      { id: "pick", name: "Pick the live season to pair this tick", function: soma("db_read", "SELECT season FROM …", "temp_data.pick") },
       { id: "picked", name: "Halt while no live season can pair", function: gate },
-      { id: "demand", name: "Read demand, the pool and the room", function: soma("db_read", "temp_data.demand") },
+      { id: "demand", name: "Read demand, the pool and the room", function: soma("db_read", "SELECT demand, pool, room FROM …", "temp_data.demand") },
       { id: "boards", name: "Halt while no board is in play", function: gate },
-      { id: "trials", name: "Find candidates waiting for a trial", function: soma("db_read", "temp_data.trials") },
+      { id: "trials", name: "Find candidates waiting for a trial", function: soma("db_read", "SELECT candidate FROM trials …", "temp_data.trials") },
       {
         id: "pair",
         name: "Choose the room's pairings",
@@ -51,7 +51,7 @@ export const clockPair: Workflow = {
       name: "Name this pairing",
       function: { name: "map", input: { mappings: [{ path: "temp_data.s.pairing_id", logic: { var: "it.id" } }] } },
     },
-    { id: "insert", name: "Insert the match and its seats", function: soma("db_write", "temp_data.s.inserted") },
+    { id: "insert", name: "Insert the match and its seats", function: soma("db_write", "INSERT INTO matches …", "temp_data.s.inserted") },
     { id: "held", name: "Halt if the roster moved under the insert", function: gate },
     {
       id: "bump_work.bump",
@@ -61,6 +61,27 @@ export const clockPair: Workflow = {
     },
   ],
 }
+
+/** The catalogue rows these steps name, as `GET admin/functions` serves them on 1.12. */
+const fn = (name: string, category: string, retry_safety: FunctionSchema["retry_safety"], extra: Partial<FunctionSchema> = {}): FunctionSchema => ({
+  name,
+  description: "",
+  category,
+  source: "orion",
+  retry_safety,
+  ...extra,
+})
+export const clockPairCatalogue: FunctionSchema[] = [
+  fn("db_read", "connector", { kind: "read" }),
+  fn("db_write", "connector", { kind: "depends_on", input: "sql" }),
+  fn("cache_incr", "connector", { kind: "unsafe_write" }),
+  fn("filter", "control", { kind: "pure" }, { source: "engine" }),
+  fn("map", "data", { kind: "pure" }, { source: "engine" }),
+  fn("tb.pairing.pair", "plugin", { kind: "pure" }, {
+    source: "plugin",
+    plugin: { id: "tb.pairing", version: 2, digest: "sha256:ab12", abi: "1.0.0" },
+  }),
+]
 
 export const clockPairDeps: WorkflowDependencies = {
   workflow_id: "soma-clock-pair-run",

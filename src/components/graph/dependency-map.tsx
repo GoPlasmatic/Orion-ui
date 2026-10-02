@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import {
   Background,
   BaseEdge,
@@ -7,20 +7,19 @@ import {
   ReactFlow,
   ReactFlowProvider,
   getBezierPath,
-  useReactFlow,
   useStore,
   type Edge,
   type EdgeProps,
   type Node,
   type NodeChange,
 } from "@xyflow/react"
-import { cn } from "@/lib/utils"
-import { useReducedMotion } from "@/lib/motion"
+import { cn, plural } from "@/lib/utils"
 import { middleTruncate, shortName } from "@/lib/domains"
-import { faultsFor, type MapFaults } from "@/lib/faults"
+import { faultsFor, type MapFaults, type NodeFault } from "@/lib/faults"
 import {
   dependencyEdges,
   dependencyFocus,
+  domainIdOf,
   domainLoad,
   edgeLoad,
   hubLevel,
@@ -31,7 +30,6 @@ import type { SystemGraph } from "@/lib/system-graph"
 import type { TrafficWindow } from "@/hooks/use-metrics"
 import type { ConnectorTrafficWindow } from "@/hooks/use-ops-metrics"
 import {
-  compactNumber,
   deriveLoad,
   errorLevel,
   formatPct,
@@ -39,13 +37,15 @@ import {
   levelFor,
   rawSize,
   sqrtScale,
+  trafficLine,
   worstLevel,
   type ColorMetric,
   type SizeMetric,
 } from "@/lib/traffic-encoding"
-import { pinTitle, type ChangePins } from "@/components/graph/change-pins"
+import { pinTitle, type ChangePins } from "@/lib/change-pins"
 import { FitControl } from "@/components/graph/map-controls"
-import { fitOptions } from "@/components/graph/map-fit"
+import { COLLAPSE_CLUSTER_AT, COLLAPSE_MAP_AT, LOD_ZOOM, MINIMAP_AT } from "@/lib/map-fit"
+import { useMapFraming } from "@/components/graph/use-map-framing"
 import {
   DEP_CHANNEL_H,
   DEP_CHANNEL_W,
@@ -64,11 +64,6 @@ import {
 const nodeTypes = { domain: DomainNode, depChannel: DepChannelNode, hub: HubNode }
 const edgeTypes = { dependency: DependencyEdge }
 
-/** Same thresholds as the calls lens: a big map opens with its crowds folded. */
-const COLLAPSE_MAP_AT = 30
-const COLLAPSE_DOMAIN_AT = 6
-const LOD_ZOOM = 0.55
-const MINIMAP_AT = 15
 /** Label budget of a channel card inside an open domain. */
 const CHANNEL_CHARS = { full: 20, dot: 15 }
 
@@ -124,33 +119,38 @@ function DependencyMapInner({
   expandAll = false,
   onSelect,
 }: DependencyMapProps) {
-  const { fitView } = useReactFlow()
-  const reducedMotion = useReducedMotion()
   const dotLod = useStore((s) => s.transform[2] < LOD_ZOOM)
   const lod = dotLod ? "dot" : "full"
 
+  const domainsById = useMemo(() => new Map(dg.domains.map((d) => [d.id, d])), [dg.domains])
   const channelCount = useMemo(() => dg.domains.reduce((n, d) => n + d.members.length, 0), [dg.domains])
-  const selectedDomain = selectedId ? (dg.domainOf.get(selectedId) ?? null) : null
+  const selectedDomain = selectedId ? (domainIdOf(dg, selectedId) ?? null) : null
 
+  /**
+   * Which domains are open: the operator's toggles, over a default that folds
+   * crowds on a big map (the calls lens's thresholds). The domain holding the
+   * selection is always open — a `?select=` link must land on a visible node.
+   * Structure only: traffic changes every poll and must not move a box.
+   */
   const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(() => new Map())
-  const isExpanded = useCallback(
-    (id: string) => {
-      if (id === selectedDomain) return true
-      const o = overrides.get(id)
-      if (o !== undefined) return o
-      if (expandAll) return true
-      const size = dg.domains.find((d) => d.id === id)?.members.length ?? 0
-      return !(channelCount > COLLAPSE_MAP_AT && size >= COLLAPSE_DOMAIN_AT)
-    },
-    [overrides, selectedDomain, expandAll, dg.domains, channelCount],
-  )
+  const expanded = useMemo(() => {
+    const crowded = channelCount > COLLAPSE_MAP_AT
+    const out = new Set<string>()
+    for (const d of dg.domains) {
+      const override = overrides.get(d.id)
+      const open =
+        d.id === selectedDomain ||
+        (override ?? (expandAll || !(crowded && d.members.length >= COLLAPSE_CLUSTER_AT)))
+      if (open) out.add(d.id)
+    }
+    return out
+  }, [dg.domains, overrides, selectedDomain, expandAll, channelCount])
+  const isExpanded = useCallback((id: string) => expanded.has(id), [expanded])
   const onToggle = useCallback(
-    (id: string) => setOverrides((prev) => new Map(prev).set(id, !isExpanded(id))),
-    [isExpanded],
+    (id: string) => setOverrides((prev) => new Map(prev).set(id, !expanded.has(id))),
+    [expanded],
   )
 
-  // Structure only: traffic changes every poll and must not move a box.
-  const expandedKey = dg.domains.map((d) => (isExpanded(d.id) ? "1" : "0")).join("")
   const layout = useMemo(
     () =>
       layoutDependencies(dg, isExpanded, {
@@ -158,27 +158,26 @@ function DependencyMapInner({
         channel: { width: DEP_CHANNEL_W, height: DEP_CHANNEL_H },
         hub: { width: HUB_W, height: HUB_H },
       }),
-    [dg, expandedKey], // eslint-disable-line react-hooks/exhaustive-deps
+    [dg, isExpanded],
   )
-  const depEdges = useMemo(
-    () => dependencyEdges(dg, isExpanded),
-    [dg, expandedKey], // eslint-disable-line react-hooks/exhaustive-deps
-  )
+  const depEdges = useMemo(() => dependencyEdges(dg, isExpanded), [dg, isExpanded])
 
-  // Frame on open, when the set in view changes, and after a domain folds or opens.
+  // Frame on open, when the set in view changes, and after a domain folds or
+  // opens; travel to a selection named from outside the canvas.
   const fitKey = `${channelCount}|${dg.hubs.length}|${dg.domains.map((d) => d.id).join(",")}|${[...overrides.entries()].join(";")}`
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => fitView(fitOptions(reducedMotion)))
-    return () => cancelAnimationFrame(frame)
-  }, [fitKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  useMapFraming(fitKey, revealToken, selectedId, !!selectedId && layout.positions.has(selectedId))
 
-  useEffect(() => {
-    if (!revealToken || !selectedId || !layout.positions.has(selectedId)) return
-    const frame = requestAnimationFrame(() =>
-      fitView({ nodes: [{ id: selectedId }], duration: reducedMotion ? 0 : 500, maxZoom: 1, minZoom: 0.5 }),
-    )
-    return () => cancelAnimationFrame(frame)
-  }, [revealToken]) // eslint-disable-line react-hooks/exhaustive-deps
+  /** Each channel's faults, once per change of the fault overlay. */
+  const channelFaults = useMemo(() => {
+    const out = new Map<string, NodeFault[]>()
+    for (const d of dg.domains) {
+      for (const m of d.members) {
+        const node = graph.byId.get(m)
+        if (node) out.set(m, faultsFor(node, faults))
+      }
+    }
+    return out
+  }, [dg.domains, graph.byId, faults])
 
   const load = useMemo(() => deriveLoad(graph, traffic.byChannel), [graph, traffic.byChannel])
   const maxSize = useMemo(() => {
@@ -193,7 +192,10 @@ function DependencyMapInner({
   }, [dg.domains, graph.byId, sizeMetric, traffic.byChannel, load])
 
   const focus = useMemo(
-    () => (selectedId && (dg.hubById.has(selectedId) || dg.domainOf.has(selectedId)) ? dependencyFocus(dg, selectedId) : null),
+    () =>
+      selectedId && (dg.hubById.has(selectedId) || dg.domainIndex.domainOf.has(selectedId))
+        ? dependencyFocus(dg, selectedId)
+        : null,
     [dg, selectedId],
   )
   const lit = useCallback(
@@ -206,18 +208,18 @@ function DependencyMapInner({
   const nodes = useMemo<Node[]>(() => {
     const out: Node[] = []
     for (const box of layout.domains) {
-      const domain = dg.domains.find((d) => d.id === box.id)!
+      const domain = domainsById.get(box.id)
+      if (!domain) continue
       let faulted = 0
       let changed = 0
       const levels = domain.members.map((m) => {
         const node = graph.byId.get(m)
-        if (node && faultsFor(node, faults).length > 0) faulted++
+        if ((channelFaults.get(m)?.length ?? 0) > 0) faulted++
         if (pins?.get(m)?.length) changed++
         return node ? levelFor(colorMetric, node, traffic.byChannel.get(m)) : "idle"
       })
       const data: DomainNodeData = {
         domain,
-        title: domain.name,
         expanded: box.expanded,
         width: box.width,
         height: box.height,
@@ -251,11 +253,11 @@ function DependencyMapInner({
         const cd: DepChannelNodeData = {
           id: m,
           label: middleTruncate(short, lod === "dot" ? CHANNEL_CHARS.dot : CHANNEL_CHARS.full),
-          title: `${m}${t?.ratePerMin ? ` · ${compactNumber(t.ratePerMin)}/m` : ""}${t?.errorPct != null ? ` · ${formatPct(t.errorPct)} err` : ""}`,
+          title: t && t.windowed > 0 ? `${m} · ${trafficLine(t)}` : m,
           level: levelFor(colorMetric, node, t),
           dot: sqrtScale(rawSize(sizeMetric, node, t, load.get(m)), maxSize, 7, 18),
           ratePerMin: t?.ratePerMin ?? null,
-          faults: faultsFor(node, faults),
+          faults: channelFaults.get(m) ?? [],
           pin: pinTitle(pins?.get(m)),
           dimmed: !lit(m),
           focused: selectedId === m,
@@ -273,7 +275,7 @@ function DependencyMapInner({
         })
       }
     }
-    const windowed = connectorTraffic.state === "live"
+    const windowed = connectorTraffic.spanSec > 0
     for (const hub of dg.hubs) {
       const pos = layout.positions.get(hub.id)
       if (!pos) continue
@@ -303,6 +305,8 @@ function DependencyMapInner({
   }, [
     layout,
     dg,
+    domainsById,
+    channelFaults,
     graph.byId,
     faults,
     pins,
@@ -320,24 +324,31 @@ function DependencyMapInner({
     lod,
   ])
 
+  const hasWindow = connectorTraffic.spanSec > 0
   const edges = useMemo<Edge[]>(() => {
     const loads = depEdges.map((e) => {
       const hub = dg.hubById.get(e.target)!
-      return { e, hub, l: edgeLoad(e.channels, hub, connectorTraffic.byEdge) }
+      return { e, hub, l: edgeLoad(e.channels, hub, connectorTraffic.byEdge, hasWindow) }
     })
     const maxCalls = Math.max(0, ...loads.map((x) => x.l.calls))
     const span = traffic.spanLabel
     return loads.map(({ e, hub, l }) => {
       const sourceName = e.channels.length === 1 && e.source === e.channels[0] ? e.source : `${e.channels.length} channels in ${dg.domainIndex.domainOf.get(e.channels[0]) ?? "this domain"}`
       const inFocus = lit(e.target) && (e.source.startsWith("domain:") ? e.channels.some(lit) : lit(e.source))
-      const stroke = !l.measured
-        ? "var(--border-strong)"
+      // Three readings: carrying calls (width and colour), measured but idle
+      // in the window (a thin solid line), and a static reference the
+      // exporter has never counted (thin and dashed).
+      const busy = l.measured && l.calls > 0
+      const stroke = !busy
+        ? healthStroke.idle
         : colorMetric === "health" && l.errorPct != null
           ? healthStroke[errorLevel(l.errorPct)]
           : "var(--primary)"
-      const title = l.measured
-        ? `${sourceName} → ${hub.name} · ${compactNumber(l.calls)} call${l.calls === 1 ? "" : "s"} ${l.windowed ? `in the ${span}` : "since the server started"}${l.errorPct != null ? ` · ${formatPct(l.errorPct)} errors` : ""}`
-        : `${sourceName} → ${hub.name} · referenced by the workflow${hub.kind === "connector" ? `; no calls measured (${span})` : ""}`
+      const title = busy
+        ? `${sourceName} → ${hub.name} · ${plural(l.calls, "call")} ${l.windowed ? `in the ${span}` : "since the server started"}${l.errorPct != null ? ` · ${formatPct(l.errorPct)} errors` : ""}`
+        : l.measured
+          ? `${sourceName} → ${hub.name} · measured, no calls in the ${span}`
+          : `${sourceName} → ${hub.name} · referenced by the workflow${hub.kind === "connector" ? "; never counted by the exporter" : ""}`
       const data: DependencyEdgeData = { title }
       return {
         id: e.id,
@@ -347,13 +358,13 @@ function DependencyMapInner({
         data,
         style: {
           stroke,
-          strokeWidth: l.measured ? sqrtScale(l.calls, maxCalls, 1.5, 8) : 1,
+          strokeWidth: busy ? sqrtScale(l.calls, maxCalls, 1.5, 8) : 1,
           strokeDasharray: l.measured ? undefined : "4 4",
-          opacity: inFocus ? (l.measured ? 0.85 : 0.7) : 0.1,
+          opacity: inFocus ? (busy ? 0.85 : 0.7) : 0.1,
         },
       }
     })
-  }, [depEdges, dg, connectorTraffic.byEdge, traffic.spanLabel, colorMetric, lit])
+  }, [depEdges, dg, connectorTraffic.byEdge, hasWindow, traffic.spanLabel, colorMetric, lit])
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {

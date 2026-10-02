@@ -10,7 +10,7 @@ import { render, screen, cleanup, fireEvent, within } from "@testing-library/rea
 import { MemoryRouter, useLocation } from "react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { Channel, Connector, PaginatedResponse } from "@/api/types"
-import { clockPair, clockPairCost, clockPairDeps, failedRun } from "@/lib/workflow-lens.fixture"
+import { clockPair, clockPairCatalogue, clockPairCost, clockPairDeps, failedRun } from "@/lib/workflow-lens.fixture"
 
 const page = <T,>(data: T[]): PaginatedResponse<T> => ({ data, total: data.length, limit: 1000, offset: 0 })
 
@@ -41,17 +41,30 @@ const connector = (id: string, name: string, connector_type: string) =>
 
 // A stand-in for the dataflow-ui visualizer with the same explorer markup and
 // the same starting state: nothing selected until the workflow row is clicked.
+// The decoy shares the workflow's name at another depth (a search hit, a task
+// named like its workflow) — matching by label would click it.
 vi.mock("@goplasmatic/dataflow-ui", () => ({
   WorkflowVisualizer: ({ workflows }: { workflows: { name: string }[] }) => {
     const [selected, setSelected] = useState<string | null>(null)
+    const row = (label: string, pick: string) => (
+      <div className="df-tree-node-content" onClick={() => setSelected(pick)}>
+        <span className="df-tree-label">{label}</span>
+      </div>
+    )
     return (
       <div>
         <div className="df-tree-view">
-          <div className="df-tree-node-content" onClick={() => setSelected("folder")}>
-            <span className="df-tree-label">Workflows</span>
-          </div>
-          <div className="df-tree-node-content" onClick={() => setSelected(workflows[0].name)}>
-            <span className="df-tree-label">{workflows[0].name}</span>
+          {row(workflows[0].name, "decoy")}
+          <div className="df-tree-node">
+            {row("Workflows", "folder")}
+            <div className="df-tree-children">
+              <div className="df-tree-node">
+                {row(workflows[0].name, workflows[0].name)}
+                <div className="df-tree-children">
+                  <div className="df-tree-node">{row(workflows[0].name, "task")}</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <p>{selected ? `flow diagram: ${selected}` : "Select an item from the explorer"}</p>
@@ -60,6 +73,7 @@ vi.mock("@goplasmatic/dataflow-ui", () => ({
   },
 }))
 
+vi.mock("@/api/functions", () => ({ functionsApi: { list: async () => clockPairCatalogue } }))
 vi.mock("@/hooks/use-ops-metrics", () => {
   const cost = { ...clockPairCost, state: "live", workflow: "soma-clock-pair-run", taskMsPerRun: 124.9 }
   return { useWorkflowCost: () => cost }
@@ -131,12 +145,12 @@ function Search() {
   return <output data-testid="search">{useLocation().search}</output>
 }
 
-function renderAt(url: string) {
+function renderAt(url: string, runsOn: Channel[] = [channel]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[url]}>
-        <WorkflowLenses workflow={clockPair} runsOn={[channel]} />
+        <WorkflowLenses workflow={clockPair} runsOn={runsOn} />
         <Search />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -151,8 +165,6 @@ describe("WorkflowLenses", () => {
     expect(screen.getByRole("button", { name: "Structure" })).toHaveAttribute("aria-pressed", "true")
     expect(await screen.findByText("flow diagram: Clock: pair")).toBeInTheDocument()
     expect(screen.queryByText("Select an item from the explorer")).not.toBeInTheDocument()
-    // The visualizer draws the body only; the page says where setup went.
-    expect(screen.getByText(/This diagram draws the loop body/)).toBeInTheDocument()
   })
 
   it("respects ?lens= and switches lenses through the URL", async () => {
@@ -195,5 +207,11 @@ describe("WorkflowLenses", () => {
     renderAt("/workflows/soma-clock-pair-run?lens=run")
     expect(await screen.findByText("Trace 64b46dde")).toBeInTheDocument()
     expect(screen.getByText("newest failed run with step data")).toBeInTheDocument()
+  })
+
+  it("says why there is no run to show when the channel records no steps", async () => {
+    renderAt("/workflows/soma-clock-pair-run?lens=run", [{ ...channel, config: { tracing: { task_details: false } } }])
+    expect(await screen.findByText(/tracing.task_details is off/)).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "soma-clock-pair" })).toHaveAttribute("href", "/channels/c-1")
   })
 })

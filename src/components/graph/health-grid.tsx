@@ -6,13 +6,12 @@ import type { DomainIndex } from "@/lib/domains"
 import type { SystemGraph, SystemNode } from "@/lib/system-graph"
 import type { TrafficWindow } from "@/hooks/use-metrics"
 import { faultsFor, worstTone, type MapFaults } from "@/lib/faults"
-import { pinTitle, type ChangePins } from "@/components/graph/change-pins"
+import { pinTitle, type ChangePins } from "@/lib/change-pins"
 import {
-  compactNumber,
   deriveLoad,
   formatMs,
-  formatPct,
   healthDot,
+  trafficLine,
   type ColorMetric,
   type SizeMetric,
 } from "@/lib/traffic-encoding"
@@ -85,7 +84,7 @@ function SectionHeader({ section }: { section: GridSection }) {
       <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
         {load.windowed === 0
           ? "idle in the window"
-          : `${compactNumber(load.rate)}/m · ${formatPct(load.errorPct)} err${load.worstP95Ms != null ? ` · slowest p95 ${formatMs(load.worstP95Ms)}` : ""} · ${load.active} active`}
+          : `${trafficLine({ ratePerMin: load.rate, errorPct: load.errorPct })}${load.worstP95Ms != null ? ` · slowest p95 ${formatMs(load.worstP95Ms)}` : ""} · ${load.active} active`}
       </span>
     </div>
   )
@@ -113,13 +112,18 @@ export function HealthGrid({
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes])
 
   // Scroll a selection named elsewhere (search, the failing strip) into view.
+  // A token is honoured once, like the canvases' reveal: clicking a tile
+  // changes the selection without scrolling.
   const root = useRef<HTMLDivElement>(null)
+  const handled = useRef(0)
   useEffect(() => {
-    if (!revealToken || !selectedId) return
+    if (!revealToken || revealToken === handled.current || !selectedId) return
     const el = root.current?.querySelector<HTMLElement>(`[data-tile="${CSS.escape(selectedId)}"]`)
-    el?.scrollIntoView({ block: "nearest", behavior: "smooth" })
-    el?.focus({ preventScroll: true })
-  }, [revealToken]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!el) return
+    handled.current = revealToken
+    el.scrollIntoView({ block: "nearest", behavior: "smooth" })
+    el.focus({ preventScroll: true })
+  }, [revealToken, selectedId])
 
   if (sections.length === 0) {
     return (
@@ -146,10 +150,7 @@ export function HealthGrid({
               const t = traffic.byChannel.get(tile.id)
               const f = node ? faultsFor(node, faults) : []
               const pin = pinTitle(pins?.get(tile.id))
-              const figures =
-                t && t.windowed > 0
-                  ? ` · ${compactNumber(t.ratePerMin)}/m · ${formatPct(t.errorPct)} err · p95 ${formatMs(t.p95Ms)}`
-                  : " · no traffic in the window"
+              const figures = t && t.windowed > 0 ? ` · ${trafficLine(t)}` : " · no traffic in the window"
               const title = [`${tile.id}${figures}`, ...f.map((x) => x.detail), ...(pin ? [pin] : [])].join("\n")
               return (
                 <Tile

@@ -1,13 +1,6 @@
 import { Badge } from "@/components/ui/badge"
 import type { RetrySafety } from "@/api/types"
-
-const LABEL: Record<string, string> = {
-  pure: "pure",
-  read: "read",
-  idempotent_write: "idempotent write",
-  unsafe_write: "unsafe to retry",
-  depends_on: "depends on input",
-}
+import { RETRY_EFFECT_LABEL, type RetryEffect } from "@/lib/function-effects"
 
 const HINT: Record<string, string> = {
   pure: "No effect outside the message — free to retry.",
@@ -28,8 +21,12 @@ export function RetrySafetyBadge({ value }: { value: RetrySafety | undefined }) 
   if (!value) return null
   const kind = value.kind
   const input = "input" in value ? value.input : undefined
-  const label =
-    kind === "depends_on" && input ? `depends on ${input}` : (LABEL[kind] ?? kind)
+  // The trace page and the retry guard name an effect with the same words
+  // (`RETRY_EFFECT_LABEL`); `depends_on` is the catalogue's spelling of what
+  // they call `unknown` until the deciding input is read.
+  const effect: RetryEffect | undefined =
+    kind === "depends_on" ? "unknown" : kind in RETRY_EFFECT_LABEL ? (kind as RetryEffect) : undefined
+  const label = effect ? RETRY_EFFECT_LABEL[effect] : kind
   const hint =
     kind === "depends_on"
       ? `Whether a retry is safe depends on the task's own \`${input ?? "input"}\` — an upsert repeats safely, an insert does not.`
@@ -42,7 +39,7 @@ export function RetrySafetyBadge({ value }: { value: RetrySafety | undefined }) 
       className={kind === "depends_on" ? "font-sans text-xs" : "text-xs"}
       title={`Retry safety: ${hint}`}
     >
-      {kind === "depends_on" ? (
+      {kind === "depends_on" && input ? (
         <>
           retry: depends on <code className="font-mono">{input}</code>
         </>

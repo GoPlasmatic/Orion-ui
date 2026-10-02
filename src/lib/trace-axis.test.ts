@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { buildTimeline } from "@/lib/trace-timeline"
-import { buildAxis, formatTick, niceCeil, niceFloor, splitAdvice } from "./timeline-axis"
-import { TRACE, WORKFLOW } from "./__fixtures__/trace-64b46dde"
+import { buildAxis, formatTick, niceCeil, niceFloor, splitAdvice } from "@/lib/trace-axis"
+import { TRACE, WORKFLOW } from "@/components/traces/__fixtures__/trace-64b46dde"
 
 const tl = buildTimeline(TRACE, WORKFLOW)!
 

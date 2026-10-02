@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react"
 import { cn } from "@/lib/utils"
+import { Button, type ButtonProps } from "@/components/ui/button"
 
 /**
  * A button that opens a small panel anchored under it — the overflow "More"
@@ -16,6 +17,8 @@ export function PopoverMenu({
   children,
   align = "end",
   role = "menu",
+  variant = "outline",
+  size = "icon-sm",
   className,
   panelClassName,
 }: {
@@ -26,7 +29,10 @@ export function PopoverMenu({
   children: ReactNode
   align?: "start" | "end"
   role?: "menu" | "group"
-  /** Classes on the trigger button. */
+  /** The trigger is a `Button`; these pick its variant and size. */
+  variant?: ButtonProps["variant"]
+  size?: ButtonProps["size"]
+  /** Extra classes on the trigger button. */
   className?: string
   panelClassName?: string
 }) {
@@ -74,18 +80,20 @@ export function PopoverMenu({
 
   return (
     <div ref={rootRef} className="relative" onKeyDown={onKeyDown}>
-      <button
+      <Button
         ref={triggerRef}
         type="button"
+        variant={variant}
+        size={size}
         aria-label={label}
         aria-haspopup={role === "menu" ? "menu" : "true"}
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         onClick={() => setOpen((o) => !o)}
-        className={className}
+        className={cn("text-muted-foreground aria-expanded:bg-accent aria-expanded:text-accent-foreground", className)}
       >
         {trigger({ open })}
-      </button>
+      </Button>
       {open && (
         <div
           ref={panelRef}

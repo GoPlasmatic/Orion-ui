@@ -22,7 +22,7 @@ import { StatusBadge } from "@/components/shared/status-badge"
 import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { EntityTable } from "@/components/shared/entity-table"
 import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter-bar"
-import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
+import { formatDate, formatWhen, downloadJson, plural } from "@/lib/utils"
 import { cronTransport } from "@/lib/cron"
 import { healthOf } from "@/lib/traffic-encoding"
 import { TrafficCell } from "@/components/admin/traffic-cell"
@@ -244,7 +244,7 @@ export function ChannelsPage() {
   const exportAll = useExport(async () => {
     const channels = await channelsApi.export(query)
     downloadJson(channels, "orion-channels")
-    return `Exported ${channels.length} channel${channels.length !== 1 ? "s" : ""}`
+    return `Exported ${plural(channels.length, "channel")}`
   })
   const importChannels = useImportChannels()
 

@@ -13,9 +13,10 @@ import { PageHeader } from "@/components/shared/page-header"
 import { HealthComponents } from "@/components/shared/health-components"
 import { LoadIssuesReport } from "@/components/shared/load-issues"
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
+import { Fact } from "@/components/shared/fact"
 import { componentStateBadgeClass, traceStatusBadgeClass } from "@/lib/status"
 import { useUrlFilters } from "@/lib/use-url-filters"
-import { formatBytes, formatDate, formatUptime, formatWhen } from "@/lib/utils"
+import { formatBytes, formatDate, formatUptime, formatWhen, plural } from "@/lib/utils"
 import { countLoadIssues } from "@/api/types"
 import type { EngineCapabilities } from "@/api/types"
 import { RefreshCw, Archive, BookOpen, HeartPulse, Server } from "lucide-react"
@@ -111,8 +112,7 @@ export function EnginePage() {
             <CardContent className="space-y-4">
               {quarantined > 0 && (
                 <Callout variant="warning">
-                  The running generation quarantined {quarantined}{" "}
-                  {quarantined === 1 ? "entity" : "entities"}.{" "}
+                  The running generation quarantined {plural(quarantined, "entity", "entities")}.{" "}
                   <button
                     type="button"
                     className="font-medium underline underline-offset-2"
@@ -145,15 +145,6 @@ export function EnginePage() {
   )
 }
 
-function Fact({ label, value, title }: { label: string; value: React.ReactNode; title?: string }) {
-  return (
-    <div title={title}>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 text-sm tabular-nums">{value}</dd>
-    </div>
-  )
-}
-
 /**
  * The running generation as `GET admin/engine/status` reports it. Every fact
  * here describes **the node that answered** — a peer reloading on the same
@@ -181,26 +172,23 @@ function ClusterRuntime() {
         </CardHeader>
         <CardContent className="space-y-4">
           <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
-            <Fact label="Version" value={engine?.version ?? "—"} />
-            <Fact
-              label="Build"
-              value={health?.git_hash ? <span className="font-mono text-xs">{health.git_hash}</span> : "—"}
-            />
+            <Fact label="Version">{engine?.version ?? "—"}</Fact>
+            <Fact label="Build">{health?.git_hash ?? "—"}</Fact>
             <Fact
               label="Generation"
-              value={engine?.generation ? engine.generation : "—"}
               title="Bumped by every reload this node completes. 0 or absent: a server before 1.9."
-            />
-            <Fact label="Uptime" value={engine ? formatUptime(engine.uptime_seconds) : "—"} />
-            <Fact
-              label="Workflows"
-              value={engine ? `${engine.active_workflows} active of ${engine.workflows_count}` : "—"}
-            />
-            <Fact
-              label="Node"
-              value={nodeId ? <span className="font-mono text-xs">{nodeId.slice(0, 8)}</span> : "—"}
-              title={nodeId ? `Instance ${nodeId}` : undefined}
-            />
+            >
+              {engine?.generation ? engine.generation : "—"}
+            </Fact>
+            <Fact label="Uptime" mono={false}>
+              {engine ? formatUptime(engine.uptime_seconds) : "—"}
+            </Fact>
+            <Fact label="Workflows" mono={false}>
+              {engine ? `${engine.active_workflows} active of ${engine.workflows_count}` : "—"}
+            </Fact>
+            <Fact label="Node" title={nodeId ? `Instance ${nodeId}` : undefined}>
+              {nodeId ? nodeId.slice(0, 8) : "—"}
+            </Fact>
           </dl>
           {engine?.capabilities && <Capabilities capabilities={engine.capabilities} />}
         </CardContent>
@@ -266,8 +254,7 @@ function Maintenance({ quarantined }: { quarantined: number }) {
           </Button>
           {quarantined > 0 && (
             <span className="text-sm text-warning">
-              The current generation quarantined {quarantined}{" "}
-              {quarantined === 1 ? "entity" : "entities"}; a reload retries {quarantined === 1 ? "it" : "them"}.
+              The current generation quarantined {plural(quarantined, "entity", "entities")}; a reload retries {quarantined === 1 ? "it" : "them"}.
             </span>
           )}
           {confirmReload && (

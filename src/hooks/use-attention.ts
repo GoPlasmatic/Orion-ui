@@ -15,7 +15,7 @@ import { isComponentFault } from "@/lib/status"
 import { openBreakers } from "@/lib/breakers"
 import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { formatSpan, serverTime } from "@/lib/utils"
-import { readStorage, writeStorageJson } from "@/lib/storage"
+import { readStorageJson, writeStorageJson } from "@/lib/storage"
 import {
   ACK_STORAGE_KEY,
   FAILURE_LOOKBACK_MS,
@@ -23,35 +23,24 @@ import {
   groupFailures,
   isAcked,
   needsAttention,
-  parseAcks,
   pruneAcks,
+  sanitizeAcks,
   type AckMap,
   type Incident,
   type RecoveryEvidence,
 } from "@/lib/incidents"
 
 /**
- * "Needs attention", as incidents (`lib/incidents.ts`): the one list the
- * dashboard renders and the sidebar counts, so the two cannot disagree. The
- * sidebar's number is the incidents that are open and not acknowledged in
- * this browser — a resolved incident ("Recovered · 12 min clean") is shown on
- * the dashboard for an hour and never counted.
+ * "Needs attention", as incidents (`lib/incidents.ts`): one list the dashboard
+ * renders and the sidebar counts — open and not acknowledged, never resolved.
  */
 
 export interface AttentionOptions {
-  /**
-   * Background use — the sidebar's count on every page: slower polls and a
-   * slower clock. The dashboard's own faster cadence wins while it is open,
-   * because TanStack polls a shared key at the shortest interval asked for.
-   */
+  /** The sidebar's use: slower polls. A shared key polls at the fastest interval asked for. */
   background?: boolean
 }
 
-/**
- * The window incidents read traffic over. Fixed rather than the page's
- * selection, so the sidebar (which has no selection) and the dashboard agree
- * on what is open whatever window the dashboard is showing.
- */
+/** Incidents read a fixed window, not the page's, so the sidebar and the dashboard agree. */
 export const INCIDENT_WINDOW = DEFAULT_TRAFFIC_WINDOW
 /** Failed traces read per poll — enough to group an outage, not every failure ever. */
 const FAILED_TRACE_PAGE = 50
@@ -65,16 +54,14 @@ const SKIP_STATUSES = ["skipped_misfire", "skipped_singleton"] as const
 // Acknowledgement, per browser
 // ---------------------------------------------------------------------------
 
-/**
- * One in-memory copy, seeded from storage and written through: a browser that
- * refuses storage (private mode) still keeps an ack for the session, and every
- * reader — the sidebar, the dashboard — sees a change at once.
- */
+/** One in-memory copy, written through to storage, so every reader sees an ack at once (and private mode keeps it for the session). */
 let ackMemory: AckMap | null = null
 const ackListeners = new Set<() => void>()
 
+const loadAcks = () => sanitizeAcks(readStorageJson<unknown>(ACK_STORAGE_KEY, {}))
+
 function readAcks(): AckMap {
-  if (ackMemory === null) ackMemory = pruneAcks(parseAcks(readStorage(ACK_STORAGE_KEY)), Date.now())
+  if (ackMemory === null) ackMemory = pruneAcks(loadAcks(), Date.now())
   return ackMemory
 }
 
@@ -89,7 +76,7 @@ function subscribeAcks(listener: () => void) {
   // Another tab acknowledged something.
   const onStorage = (e: StorageEvent) => {
     if (e.key !== ACK_STORAGE_KEY) return
-    ackMemory = parseAcks(e.newValue)
+    ackMemory = loadAcks()
     listener()
   }
   window.addEventListener("storage", onStorage)
@@ -172,9 +159,8 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
     [failedTraces?.data, failedOcc?.data, misfireOcc?.data, singletonOcc?.data, now],
   )
 
-  // The newest completed trace of each channel a failure group names: the
-  // proof that it has run cleanly since. Same key shape as `useTraces`, so an
-  // invalidation of ["traces"] refreshes these too.
+  // Recovery evidence: each failing channel's newest completed trace, under
+  // the `useTraces` key shape so invalidating ["traces"] refreshes it.
   const evidenceChannels = useMemo(
     () => [...new Set(groups.flatMap((g) => g.channels.map((c) => c.name)))].slice(0, EVIDENCE_CHANNELS),
     [groups],
@@ -229,9 +215,7 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
       lastCompletedRun,
     }
 
-    // The engine's copy of what this generation refused is preferred: the
-    // health detail is served only to a caller the server knows as an admin.
-    // Absent load_issues is a pre-1.9 server, so /health's lists stand in.
+    // Prefer the engine's load issues (admin plane); /health's stand in before 1.9.
     const issues = engine?.load_issues
     const quarantined = issues?.channels ?? health?.channels?.quarantined ?? []
     const failedConnectors = issues?.connectors ?? health?.connectors?.failed_to_load ?? []

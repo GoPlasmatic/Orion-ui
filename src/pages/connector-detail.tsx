@@ -16,7 +16,7 @@ import { NeighbourhoodMap } from "@/components/graph/neighbourhood-map"
 import { MoreActions } from "@/components/admin/more-actions"
 import { ConnectorTestDialog } from "@/components/shared/connector-test-dialog"
 import { ErrorState } from "@/components/shared/error-state"
-import { formatDate } from "@/lib/utils"
+import { formatDate, plural } from "@/lib/utils"
 import { enabledBadgeClass, disabledBadgeClass, breakerStateBadgeClass } from "@/lib/status"
 import { RefreshCw, Pencil, Activity } from "lucide-react"
 import { useMemo, useState } from "react"
@@ -94,7 +94,7 @@ export function ConnectorDetailPage() {
               disabled={deleteConnector.isPending}
               deleteDescription={
                 users.length > 0
-                  ? `"${connector.name}" is referenced by ${users.length} channel${users.length === 1 ? "" : "s"} (${users.slice(0, 5).join(", ")}${users.length > 5 ? ", …" : ""}). The server refuses the delete while an active workflow uses it; a draft one will start failing. This cannot be undone.`
+                  ? `"${connector.name}" is referenced by ${plural(users.length, "channel")} (${users.slice(0, 5).join(", ")}${users.length > 5 ? ", …" : ""}). The server refuses the delete while an active workflow uses it; a draft one will start failing. This cannot be undone.`
                   : "This permanently deletes the connector. It cannot be undone."
               }
               onDelete={() =>
@@ -109,7 +109,7 @@ export function ConnectorDetailPage() {
         <span>Created: {formatDate(connector.created_at)}</span>
         <span className="ml-4">Updated: {formatDate(connector.updated_at)}</span>
         <span className="ml-4">
-          Used by {users.length} channel{users.length === 1 ? "" : "s"}
+          Used by {plural(users.length, "channel")}
         </span>
       </div>
 

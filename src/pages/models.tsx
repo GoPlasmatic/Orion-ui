@@ -24,7 +24,7 @@ import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter
 import { PAGE_SIZE } from "@/lib/use-pagination"
 import { admissionStateBadgeClass, modelHealthBadgeClass } from "@/lib/status"
 import { admissionFailure } from "@/lib/model-manifest"
-import { formatBytes, formatDate, formatWhen, downloadJson } from "@/lib/utils"
+import { formatBytes, formatDate, formatWhen, downloadJson, plural } from "@/lib/utils"
 import { Boxes, Download, Plus, Upload } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, Model>()
@@ -218,7 +218,7 @@ export function ModelsPage() {
     const models = await modelsApi.export(query)
     downloadJson(models, "orion-models")
     return {
-      message: `Exported ${models.length} model${models.length !== 1 ? "s" : ""}`,
+      message: `Exported ${plural(models.length, "model")}`,
       description: "Artifact references only — the bytes stay in the bucket",
     }
   })
@@ -264,7 +264,7 @@ export function ModelsPage() {
       {runtime === "degraded" && (
         <Callout variant="warning">
           {failedLoads.length > 0
-            ? `${failedLoads.length} active model version${failedLoads.length === 1 ? "" : "s"} could not be carried by this node's generation — the workflows naming ${failedLoads.length === 1 ? "it" : "them"} are quarantined.`
+            ? `${plural(failedLoads.length, "active model version")} could not be carried by this node's generation — the workflows naming ${failedLoads.length === 1 ? "it" : "them"} are quarantined.`
             : "This node's admission worker is down: a new registration will wait for its verdict indefinitely."}{" "}
           <Link to="/engine" className="underline underline-offset-2">
             See the health report

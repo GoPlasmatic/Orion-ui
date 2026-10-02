@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router"
 import { useChannels } from "@/hooks/use-channels"
-import { useSubsystemMetrics } from "@/hooks/use-ops-metrics"
+import { useCacheHitsByChannel } from "@/hooks/use-ops-metrics"
+import { KpiCard } from "@/components/shared/kpi-card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
@@ -15,12 +16,12 @@ import { InvalidateNamespaceButton } from "@/components/admin/invalidate-namespa
 import { cacheNamespaces, hitRatio, lintNamespace, type CacheNamespace } from "@/lib/cache-namespaces"
 import { useUrlFilters } from "@/lib/use-url-filters"
 import { REGISTRY_LIMIT } from "@/lib/use-pagination"
-import { cn } from "@/lib/utils"
+import { cn, plural } from "@/lib/utils"
+import { formatPct } from "@/lib/traffic-encoding"
+import { metricsShort } from "@/lib/metrics-state"
 import { DatabaseZap } from "lucide-react"
 
 const KEYS = ["namespace", "q"] as const
-/** The hit-ratio window; the per-channel split is cumulative (see below). */
-const WINDOW_SEC = 300
 /** Channels named in a row before "+n more". */
 const SHOWN = 4
 
@@ -37,7 +38,7 @@ const SHOWN = 4
 export function CachesPage() {
   const { values, set } = useUrlFilters(KEYS)
   const channelsQuery = useChannels({ limit: REGISTRY_LIMIT })
-  const metrics = useSubsystemMetrics(WINDOW_SEC)
+  const cache = useCacheHitsByChannel()
   const rows = useMemo(() => cacheNamespaces(channelsQuery.data?.data ?? []), [channelsQuery.data])
 
   const q = values.q.trim().toLowerCase()
@@ -45,8 +46,12 @@ export function CachesPage() {
   const target = values.namespace
   const targetDeclared = !target || rows.some((r) => r.namespace === target)
 
-  const cache = metrics.cache
-  const metricsOff = metrics.state === "off" || metrics.state === "error"
+  const metricsOff = cache.state === "off" || cache.state === "error"
+  // Every channel with a lookup, not only those declaring a namespace: the
+  // response cache as a whole, since the server started.
+  const overall = hitRatio([...cache.byChannel.keys()], cache.byChannel)
+  const declaring = new Set(rows.flatMap((r) => r.channels.map((c) => c.channel_id))).size
+  const shared = rows.filter((r) => r.channels.length > 1).length
 
   return (
     <div className="space-y-6">
@@ -63,27 +68,31 @@ export function CachesPage() {
         />
       ) : (
         <>
-          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <Stat label="Namespaces" value={channelsQuery.isLoading ? null : rows.length} />
-            <Stat
-              label="Channels declaring one"
-              value={
-                channelsQuery.isLoading
-                  ? null
-                  : new Set(rows.flatMap((r) => r.channels.map((c) => c.channel_id))).size
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <KpiCard title="Namespaces" value={String(rows.length)} loading={channelsQuery.isLoading} />
+            <KpiCard
+              title="Channels declaring one"
+              value={String(declaring)}
+              loading={channelsQuery.isLoading}
+            />
+            <KpiCard
+              title="Shared by several channels"
+              value={String(shared)}
+              hint="One invalidation drops entries across all of them"
+              loading={channelsQuery.isLoading}
+            />
+            <KpiCard
+              title="Hit ratio, every cached channel"
+              value={formatPct(overall.pct)}
+              hint={metricsOff ? metricsShort(cache.state) : "since the server started"}
+              hintTitle={
+                overall.pct == null
+                  ? undefined
+                  : `${plural(overall.hits, "hit")} · ${plural(overall.misses, "miss", "misses")}`
               }
+              loading={cache.state === "loading"}
             />
-            <Stat
-              label="Hit ratio, every cached channel"
-              value={cache.hitPct == null ? "—" : `${cache.hitPct.toFixed(1)}%`}
-              title={metricsOff ? "Metrics are not available on this instance" : "Over the last five minutes once two samples exist; since server start before that"}
-            />
-            <Stat
-              label="Invalidations, 5 min"
-              value={cache.invalidations == null ? "—" : cache.invalidations}
-              title="orion_response_cache_invalidations_total inside the window"
-            />
-          </dl>
+          </div>
 
           {target && !targetDeclared && lintNamespace(target) == null && (
             <Callout variant="info">
@@ -157,7 +166,7 @@ export function CachesPage() {
                       row={row}
                       highlighted={row.namespace === target}
                       byChannel={cache.byChannel}
-                      metricsOff={metricsOff}
+                      unavailable={metricsOff ? metricsShort(cache.state) : null}
                     />
                   ))
                 )}
@@ -175,27 +184,17 @@ export function CachesPage() {
   )
 }
 
-function Stat({ label, value, title }: { label: string; value: React.ReactNode | null; title?: string }) {
-  return (
-    <div className="rounded-xl border bg-card px-4 py-3 shadow-xs" title={title}>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-1 text-xl font-semibold tabular-nums">
-        {value == null ? <Skeleton className="h-6 w-12" /> : value}
-      </dd>
-    </div>
-  )
-}
-
 function NamespaceRow({
   row,
   highlighted,
   byChannel,
-  metricsOff,
+  unavailable,
 }: {
   row: CacheNamespace
   highlighted: boolean
   byChannel: Map<string, { hits: number; misses: number }>
-  metricsOff: boolean
+  /** Why there is no ratio at all (metrics off or unreachable), or null. */
+  unavailable: string | null
 }) {
   const ref = useRef<HTMLTableRowElement>(null)
   const [expanded, setExpanded] = useState(false)
@@ -265,14 +264,14 @@ function NamespaceRow({
       <TableCell
         className="align-top text-right tabular-nums"
         title={
-          metricsOff
-            ? "Metrics are not available on this instance"
+          unavailable
+            ? unavailable
             : ratio.pct == null
               ? "No lookups recorded for these channels"
-              : `${ratio.hits.toLocaleString()} hits · ${ratio.misses.toLocaleString()} misses`
+              : `${plural(ratio.hits, "hit")} · ${plural(ratio.misses, "miss", "misses")}`
         }
       >
-        {ratio.pct == null ? <span className="text-muted-foreground">—</span> : `${ratio.pct.toFixed(1)}%`}
+        {ratio.pct == null ? <span className="text-muted-foreground">—</span> : formatPct(ratio.pct)}
       </TableCell>
       <TableCell className="align-top text-right">
         <InvalidateNamespaceButton namespace={row.namespace} channels={row.channels.map((c) => c.name)} />

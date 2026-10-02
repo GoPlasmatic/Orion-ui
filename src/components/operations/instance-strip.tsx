@@ -1,33 +1,12 @@
-import type { ReactNode } from "react"
 import { Link } from "react-router"
 import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { InlineFact } from "@/components/shared/fact"
 import type { AuditLog, EngineStatus } from "@/api/types"
 import { countLoadIssues, noLoadIssues } from "@/api/types"
 import { auditResourceRoute } from "@/lib/audit-routes"
+import { auditVerb } from "@/lib/audit-vocabulary"
 import { cn, formatDate, formatRelative, formatUptime } from "@/lib/utils"
-
-/** An audit action as a past-tense verb: `status_active` reads "activated". */
-const ACTION_VERB: Record<string, string> = {
-  create: "created",
-  update: "updated",
-  delete: "deleted",
-  status_active: "activated",
-  status_archived: "archived",
-  status_draft: "returned to draft",
-  import: "imported",
-  new_version: "new version",
-  rollout: "rollout changed",
-  trigger: "triggered",
-  retry: "retried",
-  admit: "re-admitted",
-  reset: "reset",
-  requeue: "requeued",
-  purge: "purged",
-  reload: "reloaded",
-}
-
-const verb = (action: string) => ACTION_VERB[action] ?? action.replace(/_/g, " ")
 
 /**
  * Which node this is and what it is running, in one line: instance(s) from
@@ -103,17 +82,17 @@ export function InstanceStrip({
         </span>
       </span>
 
-      <Fact label="load issues" to="/engine" title={issuesKnown ? undefined : "This server predates the report (1.9) and cannot say"}>
+      <InlineFact label="load issues" to="/engine" title={issuesKnown ? undefined : "This server predates the report (1.9) and cannot say"}>
         <span className={cn(issuesKnown && issueCount > 0 && "text-warning")}>
           {issuesKnown ? (noLoadIssues(issues) ? "0" : issueCount.toLocaleString()) : "unknown"}
         </span>
-      </Fact>
+      </InlineFact>
 
       {caps && (
         <>
-          <Fact label="cron">{caps.cron ? "on" : "off"}</Fact>
-          <Fact label="plugins">{caps.plugins ? "on" : "off"}</Fact>
-          <Fact label="models">{caps.models ? "on" : "off"}</Fact>
+          <InlineFact label="cron">{caps.cron ? "on" : "off"}</InlineFact>
+          <InlineFact label="plugins">{caps.plugins ? "on" : "off"}</InlineFact>
+          <InlineFact label="models">{caps.models ? "on" : "off"}</InlineFact>
         </>
       )}
 
@@ -129,7 +108,7 @@ export function InstanceStrip({
               {resourceName(lastChange.resource_type, lastChange.resource_id)}
             </span>
           )}{" "}
-          {verb(lastChange.action)} ·{" "}
+          {auditVerb(lastChange.action)} ·{" "}
           <Link
             to={`/audit?resource_type=${encodeURIComponent(lastChange.resource_type)}&resource_id=${encodeURIComponent(lastChange.resource_id)}`}
             className="hover:underline"
@@ -140,33 +119,5 @@ export function InstanceStrip({
         </span>
       )}
     </Card>
-  )
-}
-
-function Fact({
-  label,
-  children,
-  to,
-  title,
-}: {
-  label: string
-  children: ReactNode
-  to?: string
-  title?: string
-}) {
-  const body = (
-    <>
-      <span className="text-muted-foreground">{label}</span>{" "}
-      <span className="font-medium tabular-nums">{children}</span>
-    </>
-  )
-  return to ? (
-    <Link to={to} className="whitespace-nowrap rounded hover:underline" title={title}>
-      {body}
-    </Link>
-  ) : (
-    <span className="whitespace-nowrap" title={title}>
-      {body}
-    </span>
   )
 }

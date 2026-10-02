@@ -42,7 +42,7 @@ export interface TimeAxis {
 }
 
 /** The dominant step must be this many times the rest of the run before split is the default. */
-export const SPLIT_RATIO = 20
+const SPLIT_RATIO = 20
 const BREAK_PCT = 3
 /** Width the compressed stretch keeps when there is a zoomed piece on each side. */
 const MIDDLE_PCT = 22

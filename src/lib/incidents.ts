@@ -7,38 +7,26 @@ import type {
   PluginLoadIssue,
   Trace,
 } from "@/api/types"
+import { entityRoute } from "@/lib/audit-routes"
 import type { BreakerRow } from "@/lib/breakers"
+import { cronBacklog, isFailedOrSkipped } from "@/lib/cron"
 import { componentRoute } from "@/lib/health"
-import { serverTime } from "@/lib/utils"
+import { parseEngineError } from "@/lib/trace-error"
+import { errorLevel, formatPct } from "@/lib/traffic-encoding"
+import { plural, serverTime } from "@/lib/utils"
 
 /**
- * Incidents: what the dashboard and the sidebar count, as data.
+ * Incidents: what the dashboard lists and the sidebar counts, as data.
  *
- * "Needs attention" used to list the five newest failed traces, whatever their
- * age and whatever happened next. On QA four failures from one Redis outage at
- * boot (`soma-clock-count`, `-pair`, `-reap` ×2) were still flagged 39 minutes
- * and hundreds of clean runs later. An incident is the fix for both halves of
- * that:
+ * - Failures group by an *error signature* (code, wrapper phrases, and the
+ *   cause with its numbers, quotes, ids, keys and command words normalised).
+ * - A failure incident resolves once every channel in it has succeeded since
+ *   its own last failure, shows "Recovered" for an hour, then drops off.
+ * - Live signals (quarantines, failed loads, failing channels, breakers, DLQ,
+ *   cron backlog, degraded components) are open while present.
+ * - Acknowledgement is per browser and holds until the incident fails again.
  *
- * - **Grouping.** Failures group by an *error signature* — the error with its
- *   numbers, quoted values, ids, keys and command words normalised, plus the
- *   wrapper phrases naming the failing function — so one outage across three
- *   channels reads as one line, "Redis MGET/SETEX/INCRBY failed".
- * - **Resolution.** An incident is resolved once every channel in it has
- *   succeeded since its own last failure: windowed traffic with ok > 0 over a
- *   window that began after the failure, a newer completed trace, or (for a
- *   cron channel) a newer completed occurrence. A resolved incident reads
- *   "Recovered · N min clean" for an hour and then drops off.
- *
- * Live signals (quarantines, failed loads, failing channels, open breakers,
- * DLQ exhaustion, cron backlog, degraded components) are incidents too: open
- * while the signal is present, gone when it is not.
- *
- * Acknowledgement is per browser (`orion-incidents-ack`: key → ack time) until
- * the server has a place to keep it. An ack holds until the incident fails
- * again after it.
- *
- * Pure and synchronous; `hooks/use-attention.ts` feeds it.
+ * Pure; `hooks/use-attention.ts` feeds it.
  */
 
 /** Failures older than this are history, not an incident. */
@@ -49,12 +37,12 @@ export const RESOLVED_TTL_MS = 60 * 60 * 1000
 const OCCURRENCE_MATCH_MS = 2 * 60 * 1000
 /** Acks older than this are forgotten. */
 const ACK_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
-/** Failure share at which a channel in the window is worth naming. */
-export const FAILING_PCT = 1
-/** Pending occurrences waiting this long are a backlog, not scheduling jitter. */
-const BACKLOG_AGE_SEC = 120
-/** Without an age, this many pending occurrences is a backlog. */
-const BACKLOG_COUNT = 10
+
+/** A channel failing in the window, by the same bands the map paints. */
+const isFailing = (errorPct: number | null) => {
+  const level = errorLevel(errorPct)
+  return level === "warning" || level === "critical"
+}
 
 // ---------------------------------------------------------------------------
 // Error signatures
@@ -65,7 +53,7 @@ export interface ErrorSignature {
   signature: string
   /** The leading code (`FUNCTION_ERROR`, `circuit_open`), when there is one. */
   code: string | null
-  /** The wrapper phrases naming where it failed ("Function execution error"). */
+  /** The wrapper phrases naming where it failed, normalised ("Task {} error · Function execution error"). */
   phrase: string | null
   /** The cause up to its failure word, normalised, with `{A}` for each command word. */
   head: string
@@ -73,7 +61,6 @@ export interface ErrorSignature {
   tokens: string[]
 }
 
-const CODE = /^([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+|[a-z]+(?:_[a-z]+)+)\s*:\s*/
 const URL_RE = /\b[a-z][a-z0-9+.-]*:\/\/\S+/gi
 const UUID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi
 const QUOTED_RE = /'[^']*'|"[^"]*"|`[^`]*`/g
@@ -83,15 +70,12 @@ const KEY_RE = /\b[\w.-]+(?::[\w.-]+)+\b/g
 const ID_RE = /\b(?:[0-9a-f]{12,}|(?=[a-z]*\d)(?=\d*[a-z])[a-z0-9]{10,})\b/gi
 const SUBJECT_RE = /\b(task|workflow|step)\s+(?!\{)[^\s:]+(?=\s+(?:error|failed))/gi
 const NUMBER_RE = /\b\d+(?:\.\d+)?(?:ms|s|m|h|kb|mb|gb|b)?\b/gi
-// An upper-case word: a command or verb (`MGET`, `SETEX`, `POST`). Underscored
-// codes (`IO_ERROR`) do not match — `_` is a word character, so no boundary.
+// An upper-case word is a command or verb (`MGET`, `POST`); `IO_ERROR` has no boundary at `_`.
 const CAPS_RE = /\b[A-Z][A-Z0-9]+\b/g
 const FAILURE_WORD =
   /\b(?:failed|failure|errored|error|timed out|timeout|refused|unavailable|unreachable|not found|denied|exceeded|rejected|reset|closed)\b/i
-const WRAPPER =
-  /^(?:(?:task|workflow|step) \{\} (?:error|failed)|(?:function|task|workflow) (?:execution )?error|execution error|error)$/i
 
-function normalise(segment: string, tokens: string[]): string {
+function normalise(segment: string, tokens: string[] = []): string {
   return segment
     .replace(URL_RE, "{url}")
     .replace(UUID_RE, "{id}")
@@ -109,41 +93,25 @@ function normalise(segment: string, tokens: string[]): string {
 }
 
 /**
- * The signature of one error message. `FUNCTION_ERROR: Task probe error:
- * Function execution error: Redis MGET failed for 2 keys` becomes code
- * `FUNCTION_ERROR`, phrase `Task {} error · Function execution error`, head
- * `Redis {A} failed` with tokens `["MGET"]` — and so does the same failure on
- * `SETEX` from another task, which is the point.
+ * The signature of one error message. The code and wrappers come from
+ * `parseEngineError`; the cause is normalised and cut after its failure word,
+ * so `Redis MGET failed for 2 keys` and `Redis SETEX failed for key '…'` from
+ * another task share the head `Redis {A} failed`.
  */
 export function errorSignature(message: string | null | undefined): ErrorSignature {
-  const raw = (message ?? "").trim()
-  if (!raw) return { signature: "∅", code: null, phrase: null, head: "", tokens: [] }
-  let rest = raw
-  let code: string | null = null
-  const m = CODE.exec(rest)
-  if (m) {
-    code = m[1]
-    rest = rest.slice(m[0].length)
-  }
-  const segments = rest.split(/:\s+/).filter(Boolean)
-  const wrappers: string[] = []
-  let i = 0
-  for (; i < segments.length - 1; i++) {
-    const norm = normalise(segments[i], [])
-    if (!WRAPPER.test(norm)) break
-    wrappers.push(norm)
-  }
+  if (!(message ?? "").trim()) return { signature: "∅", code: null, phrase: null, head: "", tokens: [] }
+  const parsed = parseEngineError(message)
   const tokens: string[] = []
-  const cause = normalise(segments.slice(i).join(": "), tokens)
+  const cause = normalise(parsed.cause, tokens)
   const fw = FAILURE_WORD.exec(cause)
   let head = (fw ? cause.slice(0, fw.index + fw[0].length) : cause).slice(0, 120)
-  // A head that is nothing but the failure word says nothing; keep the clause.
+  // A head that is only the failure word says nothing; keep the clause.
   if (head.split(" ").length < 2) head = cause.slice(0, 120)
   const used = (head.match(/\{A\}/g) ?? []).length
-  const phrase = wrappers.length ? wrappers.join(" · ") : null
+  const phrase = parsed.wrappers.length ? parsed.wrappers.map((w) => normalise(w)).join(" · ") : null
   return {
-    signature: [code ?? "", phrase ?? "", head].join(" | "),
-    code,
+    signature: [parsed.code ?? "", phrase ?? "", head].join(" | "),
+    code: parsed.code,
     phrase,
     head,
     tokens: tokens.slice(0, used),
@@ -188,12 +156,12 @@ export interface FailureGroup {
   sample: string | null
   channels: GroupChannel[]
   failures: number
-  /** Scheduled runs among the failures (matched occurrences, or occurrences alone). */
+  /** Scheduled runs among the failures. */
   scheduled: number
   first: number
   last: number
   latestTraceId: string | null
-  /** Occurrence-only groups name a status (`failed`, `skipped_misfire`…). */
+  /** Occurrence-only groups name their status (`failed`, `skipped_misfire`…); null for trace groups. */
   occurrenceStatus: string | null
   latestOccurrenceId: string | null
 }
@@ -205,6 +173,8 @@ interface Member {
   cron: boolean
   traceId: string | null
   occurrenceId: string | null
+  /** An occurrence with no trace: its status is the signature. Null for a trace. */
+  status: string | null
   message: string | null
   sig: ErrorSignature
 }
@@ -218,12 +188,43 @@ const OCCURRENCE_TITLE: Record<string, string> = {
 const occurrenceAt = (o: CronOccurrenceSummary) =>
   serverTime(o.completed_at) ?? serverTime(o.started_at) ?? serverTime(o.scheduled_for)
 
+function traceMember(t: Trace, floor: number): Member | null {
+  if (t.status !== "failed") return null
+  const at = serverTime(t.created_at)
+  if (at == null || at < floor) return null
+  return {
+    at,
+    channel: t.channel,
+    channelId: t.channel_id ?? null,
+    cron: t.mode === "cron",
+    traceId: t.id,
+    occurrenceId: null,
+    status: null,
+    message: t.error_message,
+    sig: errorSignature(t.error_message),
+  }
+}
+
+function occurrenceMember(o: CronOccurrenceSummary, at: number): Member {
+  return {
+    at,
+    channel: o.channel_name,
+    channelId: o.channel_id,
+    cron: true,
+    traceId: null,
+    occurrenceId: o.id,
+    status: o.status,
+    message: null,
+    sig: { signature: `occurrence | ${o.status}`, code: null, phrase: null, head: "", tokens: [] },
+  }
+}
+
 /**
  * Failed traces and failed or skipped occurrences inside the lookback, grouped
- * by signature. A failed occurrence that has a failed cron trace on the same
- * channel within two minutes is the same failure, counted once, under the
- * trace's signature (the occurrence summary carries no error text). One with
- * no trace — sampled out, or a skip — groups by its status.
+ * by signature. A failed occurrence with a failed cron trace on the same
+ * channel within two minutes is that trace's failure, counted once (the
+ * occurrence summary carries no error text). Any other occurrence groups by
+ * its status.
  */
 export function groupFailures({
   traces,
@@ -237,28 +238,10 @@ export function groupFailures({
   lookbackMs?: number
 }): FailureGroup[] {
   const floor = now - lookbackMs
-  const members: Member[] = []
-  const cronTraces: Member[] = []
-  for (const t of traces) {
-    if (t.status !== "failed") continue
-    const at = serverTime(t.created_at)
-    if (at == null || at < floor) continue
-    const m: Member = {
-      at,
-      channel: t.channel,
-      channelId: t.channel_id ?? null,
-      cron: t.mode === "cron",
-      traceId: t.id,
-      occurrenceId: null,
-      message: t.error_message,
-      sig: errorSignature(t.error_message),
-    }
-    members.push(m)
-    if (m.cron) cronTraces.push(m)
-  }
-  const matchedOccurrences = new Map<Member, string>()
+  const members = traces.map((t) => traceMember(t, floor)).filter((m): m is Member => m !== null)
+  const cronTraces = members.filter((m) => m.cron)
   for (const o of occurrences) {
-    if (o.status !== "failed" && !o.status.startsWith("skipped")) continue
+    if (!isFailedOrSkipped(o.status)) continue
     const at = occurrenceAt(o)
     if (at == null || at < floor) continue
     if (o.status === "failed") {
@@ -266,41 +249,21 @@ export function groupFailures({
       const twin = cronTraces.find(
         (m) =>
           m.channel === o.channel_name &&
-          !matchedOccurrences.has(m) &&
+          m.occurrenceId == null &&
           (Math.abs(m.at - start) <= OCCURRENCE_MATCH_MS || Math.abs(m.at - at) <= OCCURRENCE_MATCH_MS),
       )
       if (twin) {
-        matchedOccurrences.set(twin, o.id)
         twin.occurrenceId = o.id
         continue
       }
     }
-    members.push({
-      at,
-      channel: o.channel_name,
-      channelId: o.channel_id,
-      cron: true,
-      traceId: null,
-      occurrenceId: o.id,
-      message: null,
-      sig: {
-        signature: `occurrence | ${o.status}`,
-        code: null,
-        phrase: null,
-        head: "",
-        tokens: [],
-      },
-    })
+    members.push(occurrenceMember(o, at))
   }
 
   // Oldest first, so first-seen order is the order things went wrong.
   members.sort((a, b) => a.at - b.at)
-  const groups = new Map<
-    string,
-    { g: FailureGroup; variants: Map<string, number>[]; head: string; status: string | null }
-  >()
+  const groups = new Map<string, { g: FailureGroup; variants: Map<string, number>[]; head: string }>()
   for (const m of members) {
-    const status = m.sig.signature.startsWith("occurrence | ") ? m.sig.signature.slice(13) : null
     let entry = groups.get(m.sig.signature)
     if (!entry) {
       entry = {
@@ -316,27 +279,25 @@ export function groupFailures({
           first: m.at,
           last: m.at,
           latestTraceId: null,
-          occurrenceStatus: status,
+          occurrenceStatus: m.status,
           latestOccurrenceId: null,
         },
         variants: [],
         head: m.sig.head,
-        status,
       }
       groups.set(m.sig.signature, entry)
     }
-    const g = entry.g
+    const { g, variants } = entry
     g.failures++
     if (m.cron) g.scheduled++
     g.last = Math.max(g.last, m.at)
-    g.first = Math.min(g.first, m.at)
     if (m.message) g.sample = m.message
     if (m.traceId) g.latestTraceId = m.traceId
     if (m.occurrenceId) g.latestOccurrenceId = m.occurrenceId
     m.sig.tokens.forEach((tok, i) => {
-      const v = entry.variants[i] ?? new Map<string, number>()
+      const v = variants[i] ?? new Map<string, number>()
       v.set(tok, (v.get(tok) ?? 0) + 1)
-      entry.variants[i] = v
+      variants[i] = v
     })
     let ch = g.channels.find((c) => c.name === m.channel)
     if (!ch) {
@@ -349,7 +310,7 @@ export function groupFailures({
     ch.channelId ??= m.channelId
   }
 
-  return [...groups.values()].map(({ g, variants, head, status }) => {
+  return [...groups.values()].map(({ g, variants, head }) => {
     // Most frequent first; ties keep first-seen order (Map insertion order).
     const ordered = variants.map((v) =>
       [...v.entries()]
@@ -357,6 +318,7 @@ export function groupFailures({
         .sort((a, b) => b.n - a.n || a.i - b.i)
         .map((x) => x.tok),
     )
+    const status = g.occurrenceStatus
     g.title = status ? (OCCURRENCE_TITLE[status] ?? `Scheduled runs ${status}`) : titleFrom(head, ordered)
     g.channels.sort((a, b) => b.failures - a.failures || a.name.localeCompare(b.name))
     return g
@@ -374,16 +336,12 @@ export interface WindowedOutcome {
 
 /** What says a channel has run cleanly since it failed. */
 export interface RecoveryEvidence {
-  /**
-   * The live traffic window, when two samples exist: when it began, and each
-   * channel's outcomes inside it. Before a second sample there is no ordering
-   * to read, so this is null.
-   */
-  window: { start: number; label: string; byChannel: Map<string, WindowedOutcome> } | null
+  /** The live traffic window; null before a second sample (no ordering to read). */
+  window: { start: number; label: string; byChannel: ReadonlyMap<string, WindowedOutcome> } | null
   /** channel name → newest completed trace (ms). */
-  lastCompletedTrace: Map<string, number>
+  lastCompletedTrace: ReadonlyMap<string, number>
   /** channel name → newest completed scheduled run (ms). */
-  lastCompletedRun: Map<string, number>
+  lastCompletedRun: ReadonlyMap<string, number>
 }
 
 export type RecoveryProof = "traffic" | "trace" | "schedule"
@@ -393,7 +351,7 @@ export interface ChannelRecovery {
   /** Failing again inside a window that began after the last recorded failure. */
   failingNow: boolean
   proof: RecoveryProof | null
-  /** Clean requests in the window, when traffic is the proof. */
+  /** Clean requests in the window, when the window began after the failure. */
   cleanRuns: number | null
 }
 
@@ -404,27 +362,16 @@ export function channelRecovery(
 ): ChannelRecovery {
   const w = evidence.window
   const outcome = w?.byChannel.get(channel)
-  // A window that began after the failure and still saw failures: there are
-  // newer failures the trace page did not keep. Not recovered, whatever else says.
-  if (w && outcome && w.start > lastFailure && outcome.failed > 0) {
-    return { recovered: false, failingNow: true, proof: null, cleanRuns: null }
-  }
+  const after = !!w && !!outcome && w.start > lastFailure
+  // Failures in a window that began after the last one we hold: newer ones the
+  // trace list did not keep. Not recovered, whatever else says.
+  if (after && outcome!.failed > 0) return { recovered: false, failingNow: true, proof: null, cleanRuns: null }
+  const cleanRuns = after ? outcome!.ok : null
   const trace = evidence.lastCompletedTrace.get(channel)
-  if (trace != null && trace > lastFailure) {
-    return {
-      recovered: true,
-      failingNow: false,
-      proof: "trace",
-      cleanRuns: w && outcome && w.start > lastFailure ? outcome.ok : null,
-    }
-  }
+  if (trace != null && trace > lastFailure) return { recovered: true, failingNow: false, proof: "trace", cleanRuns }
   const run = evidence.lastCompletedRun.get(channel)
-  if (run != null && run > lastFailure) {
-    return { recovered: true, failingNow: false, proof: "schedule", cleanRuns: null }
-  }
-  if (w && outcome && w.start > lastFailure && outcome.ok > 0) {
-    return { recovered: true, failingNow: false, proof: "traffic", cleanRuns: outcome.ok }
-  }
+  if (run != null && run > lastFailure) return { recovered: true, failingNow: false, proof: "schedule", cleanRuns }
+  if (after && outcome!.ok > 0) return { recovered: true, failingNow: false, proof: "traffic", cleanRuns }
   return { recovered: false, failingNow: false, proof: null, cleanRuns: null }
 }
 
@@ -469,11 +416,10 @@ export interface Incident {
   /** Where to act. */
   to: string
   links: IncidentLink[]
-  /** The channels it is about, failure groups and channel signals. */
   channels: IncidentChannel[]
   /** Failure groups only. */
   group: FailureGroup | null
-  /** Ms; null for a live signal with no history. */
+  /** Ms; null for a live signal, which is happening now. */
   firstSeen: number | null
   lastSeen: number | null
   /** Resolved only: why, in words. */
@@ -482,13 +428,18 @@ export interface Incident {
   closesAt: number | null
 }
 
+export interface TrafficSignal {
+  label: string
+  channels: { channel: string; ok: number; failed: number; errorPct: number | null }[]
+}
+
 export interface LiveSignals {
   quarantined?: ChannelLoadIssue[]
   connectors?: ConnectorLoadIssue[]
   plugins?: PluginLoadIssue[]
   models?: ModelLoadIssue[]
   /** Per-channel outcomes over the live window; null before a second sample. */
-  traffic?: { label: string; channels: { channel: string; ok: number; failed: number; errorPct: number | null }[] } | null
+  traffic?: TrafficSignal | null
   components?: [string, string][]
   tasks?: BackgroundTaskReport[]
   breakers?: BreakerRow[]
@@ -502,8 +453,8 @@ export interface IncidentInput {
   evidence: RecoveryEvidence
   live: LiveSignals
   /** channel name → id, for links when the signal did not carry one. */
-  channelIdByName?: Map<string, string>
-  connectorIdByName?: Map<string, string>
+  channelIdByName?: ReadonlyMap<string, string>
+  connectorIdByName?: ReadonlyMap<string, string>
 }
 
 const COMPONENT_DETAIL: Record<string, string> = {
@@ -513,36 +464,62 @@ const COMPONENT_DETAIL: Record<string, string> = {
   config_propagation: "A change committed here has not reached the peers",
 }
 
-const pct = (v: number | null) => (v == null ? "—" : v >= 10 ? `${v.toFixed(0)}%` : `${v.toFixed(1)}%`)
-const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`
-const enc = encodeURIComponent
-
 const PROOF_WORDS: Record<RecoveryProof, string> = {
   traffic: "clean traffic",
   trace: "a newer completed trace",
   schedule: "a newer completed run",
 }
 
-export function buildIncidents({
-  now,
-  groups,
-  evidence,
-  live,
-  channelIdByName = new Map(),
-  connectorIdByName = new Map(),
-}: IncidentInput): Incident[] {
-  const out: Incident[] = []
-  const channelPath = (name: string, id?: string | null) => {
-    const resolved = id || channelIdByName.get(name)
-    return resolved ? `/channels/${resolved}` : `/system-map?select=${enc(name)}`
-  }
-  const failingNow = new Map(
-    (live.traffic?.channels ?? [])
-      .filter((c) => c.failed > 0 && c.errorPct != null && c.errorPct >= FAILING_PCT)
-      .map((c) => [c.channel, c]),
-  )
-  const coveredByGroup = new Set<string>()
+const enc = encodeURIComponent
+const mapPath = (name: string) => `/system-map?select=${enc(name)}`
+const failedTracesPath = (name?: string) =>
+  name ? `/traces?channel=${enc(name)}&status=failed` : "/traces?status=failed"
 
+type SignalSpec = Pick<Incident, "key" | "kind" | "severity" | "tone" | "title" | "detail" | "to"> &
+  Partial<Pick<Incident, "links" | "channels">>
+
+/** A live signal: open, no history, no links unless given. */
+function signal(spec: SignalSpec): Incident {
+  return {
+    state: "open",
+    group: null,
+    firstSeen: null,
+    lastSeen: null,
+    recoveredBecause: null,
+    closesAt: null,
+    links: [],
+    channels: [],
+    ...spec,
+  }
+}
+
+interface Lookups {
+  now: number
+  channelIdByName: ReadonlyMap<string, string>
+  connectorIdByName: ReadonlyMap<string, string>
+}
+
+function channelRef(name: string, l: Lookups, channelId?: string | null): IncidentChannel {
+  return {
+    name,
+    failures: 0,
+    first: l.now,
+    last: l.now,
+    cron: false,
+    channelId: channelId || l.channelIdByName.get(name) || null,
+    recovery: null,
+  }
+}
+
+/** The failure groups as incidents, open or recovered, plus the channels they cover. */
+export function failureIncidents(
+  groups: FailureGroup[],
+  evidence: RecoveryEvidence,
+  failingNow: ReadonlySet<string>,
+  now: number,
+): { incidents: Incident[]; covered: Set<string> } {
+  const incidents: Incident[] = []
+  const covered = new Set<string>()
   for (const g of groups) {
     const channels: IncidentChannel[] = g.channels.map((c) => ({
       ...c,
@@ -551,33 +528,22 @@ export function buildIncidents({
     const stillFailing = channels.some((c) => c.recovery?.failingNow || failingNow.has(c.name))
     const resolved = !stillFailing && channels.every((c) => c.recovery?.recovered)
     if (resolved && now - g.last > RESOLVED_TTL_MS) continue
-    for (const c of channels) coveredByGroup.add(c.name)
+    for (const c of channels) covered.add(c.name)
+
     const occurrenceOnly = g.occurrenceStatus != null
     const skip = occurrenceOnly && g.occurrenceStatus !== "failed"
     const single = channels.length === 1 ? channels[0] : null
-    const cronChannel = channels.find((c) => c.cron)
     const links: IncidentLink[] = []
-    if (!occurrenceOnly) {
-      links.push({
-        label: "Traces",
-        to: single ? `/traces?channel=${enc(single.name)}&status=failed` : "/traces?status=failed",
-      })
-    }
-    if (cronChannel) {
-      const id = single?.channelId
+    if (!occurrenceOnly) links.push({ label: "Traces", to: failedTracesPath(single?.name) })
+    if (channels.some((c) => c.cron)) {
       links.push({
         label: "Schedules",
-        to: id ? `/schedules?channel_id=${enc(id)}` : "/schedules",
+        to: single?.channelId ? `/schedules?channel_id=${enc(single.channelId)}` : "/schedules",
       })
     }
-    links.push({ label: "Map", to: `/system-map?select=${enc(channels[0]?.name ?? "")}` })
+    links.push({ label: "Map", to: mapPath(channels[0]?.name ?? "") })
 
-    const proofs = new Set(channels.map((c) => c.recovery?.proof).filter(Boolean) as RecoveryProof[])
-    const clean = channels.reduce<number | null>(
-      (n, c) => (c.recovery?.cleanRuns == null ? n : (n ?? 0) + c.recovery.cleanRuns),
-      null,
-    )
-    out.push({
+    incidents.push({
       key: `fail:${g.signature}`,
       kind: occurrenceOnly ? "occurrences" : "failures",
       severity: stillFailing ? 2 : skip ? 7 : 3,
@@ -591,37 +557,23 @@ export function buildIncidents({
       group: g,
       firstSeen: g.first,
       lastSeen: g.last,
-      recoveredBecause: resolved
-        ? `${channels.length === 1 ? "The channel has" : `All ${channels.length} channels have`} succeeded since — ${[...proofs]
-            .map((p) => PROOF_WORDS[p])
-            .join(", ")}${clean != null && clean > 0 ? ` (${plural(clean, "clean request")} in the last ${evidence.window?.label ?? "window"})` : ""}`
-        : null,
+      recoveredBecause: resolved ? recoveryText(channels, evidence) : null,
       closesAt: resolved ? g.last + RESOLVED_TTL_MS : null,
     })
   }
+  return { incidents, covered }
+}
 
-  const signal = (i: Omit<Incident, "state" | "group" | "firstSeen" | "lastSeen" | "recoveredBecause" | "closesAt" | "channels"> & { channels?: IncidentChannel[] }) =>
-    out.push({
-      state: "open",
-      group: null,
-      firstSeen: null,
-      lastSeen: null,
-      recoveredBecause: null,
-      closesAt: null,
-      channels: [],
-      ...i,
-    })
-  const channelRef = (name: string, channelId?: string | null): IncidentChannel => ({
-    name,
-    failures: 0,
-    first: now,
-    last: now,
-    cron: false,
-    channelId: channelId ?? channelIdByName.get(name) ?? null,
-    recovery: null,
-  })
+function recoveryText(channels: IncidentChannel[], evidence: RecoveryEvidence): string {
+  const proofs = [...new Set(channels.map((c) => c.recovery?.proof).filter((p): p is RecoveryProof => !!p))]
+  const clean = channels.reduce((n, c) => n + (c.recovery?.cleanRuns ?? 0), 0)
+  const who = channels.length === 1 ? "The channel has" : `All ${channels.length} channels have`
+  const runs = clean > 0 ? ` (${plural(clean, "clean request")} in the last ${evidence.window?.label ?? "window"})` : ""
+  return `${who} succeeded since — ${proofs.map((p) => PROOF_WORDS[p]).join(", ")}${runs}`
+}
 
-  for (const q of live.quarantined ?? []) {
+function quarantineIncidents(list: ChannelLoadIssue[], l: Lookups): Incident[] {
+  return list.map((q) =>
     signal({
       key: `quarantine:${q.channel}`,
       kind: "quarantine",
@@ -629,67 +581,74 @@ export function buildIncidents({
       tone: "destructive",
       title: `Quarantined: ${q.channel}`,
       detail: q.reason || "Refused at load — the route is not being served",
-      to: channelPath(q.channel, q.channel_id),
-      links: [{ label: "Map", to: `/system-map?select=${enc(q.channel)}` }],
-      channels: [channelRef(q.channel, q.channel_id)],
-    })
-  }
-  for (const c of live.connectors ?? []) {
-    const id = c.connector_id || connectorIdByName.get(c.connector)
-    signal({
-      key: `connector:${c.connector}`,
-      kind: "connector",
-      severity: 1,
-      tone: "destructive",
-      title: `Connector failed to load: ${c.connector}`,
-      detail: c.reason ? `${c.stage}: ${c.reason}` : "Every task using it is failing",
-      to: id ? `/connectors/${id}?test=1` : "/connectors",
-      links: [],
-    })
-  }
-  for (const p of live.plugins ?? []) {
-    signal({
-      key: `plugin:${p.plugin}@${p.version}`,
-      kind: "plugin",
-      severity: 1,
-      tone: "destructive",
-      title: `Plugin not loaded: ${p.plugin} v${p.version}`,
-      detail: `${p.stage}: ${p.reason}`,
-      to: `/plugins/${enc(p.plugin)}`,
-      links: [],
-    })
-  }
-  for (const m of live.models ?? []) {
-    signal({
-      key: `model:${m.model}@${m.version}`,
-      kind: "model",
-      severity: 1,
-      tone: "destructive",
-      title: `Model not serving: ${m.model} v${m.version}`,
-      detail: `${m.stage}: ${m.reason}`,
-      to: `/models/${enc(m.model)}`,
-      links: [],
-    })
-  }
-  // A failing channel already inside a failure group is that group's news
-  // (it was raised to severity 2 above); only the rest stand alone. The
-  // counters are the witness here, not the trace table: a channel can answer
-  // 500 on every request and keep no trace.
-  for (const c of failingNow.values()) {
-    if (coveredByGroup.has(c.channel)) continue
-    signal({
-      key: `failing:${c.channel}`,
-      kind: "failing",
-      severity: 2,
-      tone: "destructive",
-      title: `Failing: ${c.channel}`,
-      detail: `${pct(c.errorPct)} of ${plural(c.ok + c.failed, "request")} failed in the last ${live.traffic?.label ?? "window"}`,
-      to: `/traces?channel=${enc(c.channel)}&status=failed`,
-      links: [{ label: "Map", to: `/system-map?select=${enc(c.channel)}` }],
-      channels: [channelRef(c.channel)],
-    })
-  }
-  for (const [component, state] of live.components ?? []) {
+      to: entityRoute("channel", q.channel_id || l.channelIdByName.get(q.channel)) ?? mapPath(q.channel),
+      links: [{ label: "Map", to: mapPath(q.channel) }],
+      channels: [channelRef(q.channel, l, q.channel_id)],
+    }),
+  )
+}
+
+function loadIncidents(live: LiveSignals, l: Lookups): Incident[] {
+  return [
+    ...(live.connectors ?? []).map((c) => {
+      const page = entityRoute("connector", c.connector_id || l.connectorIdByName.get(c.connector))
+      return signal({
+        key: `connector:${c.connector}`,
+        kind: "connector",
+        severity: 1,
+        tone: "destructive",
+        title: `Connector failed to load: ${c.connector}`,
+        detail: c.reason ? `${c.stage}: ${c.reason}` : "Every task using it is failing",
+        to: page ? `${page}?test=1` : "/connectors",
+      })
+    }),
+    ...(live.plugins ?? []).map((p) =>
+      signal({
+        key: `plugin:${p.plugin}@${p.version}`,
+        kind: "plugin",
+        severity: 1,
+        tone: "destructive",
+        title: `Plugin not loaded: ${p.plugin} v${p.version}`,
+        detail: `${p.stage}: ${p.reason}`,
+        to: entityRoute("plugin", p.plugin) ?? "/plugins",
+      }),
+    ),
+    ...(live.models ?? []).map((m) =>
+      signal({
+        key: `model:${m.model}@${m.version}`,
+        kind: "model",
+        severity: 1,
+        tone: "destructive",
+        title: `Model not serving: ${m.model} v${m.version}`,
+        detail: `${m.stage}: ${m.reason}`,
+        to: entityRoute("model", m.model) ?? "/models",
+      }),
+    ),
+  ]
+}
+
+/** Failing channels no failure group already covers. The counters are the witness: a 500 may keep no trace. */
+function failingIncidents(traffic: TrafficSignal | null | undefined, covered: Set<string>, l: Lookups): Incident[] {
+  if (!traffic) return []
+  return traffic.channels
+    .filter((c) => c.failed > 0 && isFailing(c.errorPct) && !covered.has(c.channel))
+    .map((c) =>
+      signal({
+        key: `failing:${c.channel}`,
+        kind: "failing",
+        severity: 2,
+        tone: "destructive",
+        title: `Failing: ${c.channel}`,
+        detail: `${formatPct(c.errorPct)} of ${plural(c.ok + c.failed, "request")} failed in the last ${traffic.label}`,
+        to: failedTracesPath(c.channel),
+        links: [{ label: "Map", to: mapPath(c.channel) }],
+        channels: [channelRef(c.channel, l)],
+      }),
+    )
+}
+
+function componentIncidents(components: [string, string][]): Incident[] {
+  return components.map(([component, state]) =>
     signal({
       key: `component:${component}`,
       kind: "component",
@@ -698,70 +657,72 @@ export function buildIncidents({
       title: `${component} is ${state}`,
       detail: COMPONENT_DETAIL[component] ?? "Reported by /health",
       to: componentRoute(component) ?? `/engine#component-${component}`,
-      links: [],
-    })
-  }
-  for (const t of live.tasks ?? []) {
-    if (t.restarts === 0 && t.state === "running") continue
-    signal({
-      key: `task:${t.name}`,
-      kind: "task",
-      severity: 5,
-      tone: t.state !== "running" && t.required ? "destructive" : "warning",
-      title:
-        t.state === "running"
-          ? `Background task restarted ${t.restarts}×: ${t.name}`
-          : `Background task ${t.state}: ${t.name}`,
-      detail:
-        t.state === "running"
-          ? "Up now, and has been failing"
-          : t.required
-            ? "A required task stopped for good — /readyz fails"
-            : "Not required; the rest of the node keeps serving",
-      to: "/engine#component-background_tasks",
-      links: [],
-    })
-  }
-  // One incident per connector: three channels tripping on one backend are
-  // one outage, not three.
+    }),
+  )
+}
+
+function taskIncidents(tasks: BackgroundTaskReport[]): Incident[] {
+  return tasks
+    .filter((t) => t.restarts > 0 || t.state !== "running")
+    .map((t) =>
+      signal({
+        key: `task:${t.name}`,
+        kind: "task",
+        severity: 5,
+        tone: t.state !== "running" && t.required ? "destructive" : "warning",
+        title:
+          t.state === "running"
+            ? `Background task restarted ${t.restarts}×: ${t.name}`
+            : `Background task ${t.state}: ${t.name}`,
+        detail:
+          t.state === "running"
+            ? "Up now, and has been failing"
+            : t.required
+              ? "A required task stopped for good — /readyz fails"
+              : "Not required; the rest of the node keeps serving",
+        to: "/engine#component-background_tasks",
+      }),
+    )
+}
+
+/** One incident per connector: three channels tripping on one backend are one outage. */
+function breakerIncidents(rows: BreakerRow[], l: Lookups): Incident[] {
   const byConnector = new Map<string, BreakerRow[]>()
-  for (const b of live.breakers ?? []) {
-    const list = byConnector.get(b.connector) ?? []
-    list.push(b)
-    byConnector.set(b.connector, list)
-  }
-  for (const [connector, rows] of byConnector) {
-    const named = rows.filter((r) => r.channel)
-    signal({
+  for (const b of rows) byConnector.set(b.connector, [...(byConnector.get(b.connector) ?? []), b])
+  return [...byConnector].map(([connector, list]) => {
+    const named = list.filter((r) => r.channel)
+    const state = list.every((r) => r.state === list[0].state) ? list[0].state.replace("_", "-") : "open"
+    return signal({
       key: `breaker:${connector}`,
       kind: "breaker",
       severity: 6,
       tone: "warning",
-      title: `Circuit breaker ${rows.every((r) => r.state === rows[0].state) ? rows[0].state.replace("_", "-") : "open"}: ${connector}`,
+      title: `Circuit breaker ${state}: ${connector}`,
       detail: `${named.length ? `${plural(named.length, "channel")} · ` : ""}this replica only`,
-      to: rows.length === 1 ? `/circuit-breakers?key=${enc(rows[0].key)}` : "/circuit-breakers",
-      links: [],
-      channels: named.map((r) => channelRef(r.channel)),
+      to: list.length === 1 ? `/circuit-breakers?key=${enc(list[0].key)}` : "/circuit-breakers",
+      channels: named.map((r) => channelRef(r.channel, l)),
     })
-  }
-  if ((live.dlqExhausted ?? 0) > 0) {
+  })
+}
+
+function dlqIncidents(exhausted: number): Incident[] {
+  if (exhausted <= 0) return []
+  return [
     signal({
       key: "dlq:exhausted",
       kind: "dlq",
       severity: 6,
       tone: "destructive",
-      title: `${plural(live.dlqExhausted ?? 0, "DLQ entry", "DLQ entries")} exhausted`,
+      title: `${plural(exhausted, "DLQ entry", "DLQ entries")} exhausted`,
       detail: "Async failures that ran out of retries — requeue or purge them",
       to: "/trace-dlq?exhausted=true",
-      links: [],
-    })
-  }
-  const backlog = live.cronBacklog
-  if (
-    backlog &&
-    backlog.pending > 0 &&
-    (backlog.oldestSec != null ? backlog.oldestSec >= BACKLOG_AGE_SEC : backlog.pending >= BACKLOG_COUNT)
-  ) {
+    }),
+  ]
+}
+
+function backlogIncidents(backlog: LiveSignals["cronBacklog"]): Incident[] {
+  if (!backlog || cronBacklog(backlog.pending, backlog.oldestSec) !== "backlog") return []
+  return [
     signal({
       key: "backlog:cron",
       kind: "backlog",
@@ -773,17 +734,39 @@ export function buildIncidents({
           ? `The oldest has waited ${Math.round(backlog.oldestSec / 60)} min for a worker`
           : "Occurrences are produced faster than they run",
       to: "/schedules?status=pending",
-      links: [],
-    })
-  }
+    }),
+  ]
+}
 
-  return sortIncidents(out)
+export function buildIncidents({
+  now,
+  groups,
+  evidence,
+  live,
+  channelIdByName = new Map(),
+  connectorIdByName = new Map(),
+}: IncidentInput): Incident[] {
+  const l: Lookups = { now, channelIdByName, connectorIdByName }
+  const failingNow = new Set(
+    (live.traffic?.channels ?? []).filter((c) => c.failed > 0 && isFailing(c.errorPct)).map((c) => c.channel),
+  )
+  const failures = failureIncidents(groups, evidence, failingNow, now)
+  return sortIncidents([
+    ...failures.incidents,
+    ...quarantineIncidents(live.quarantined ?? [], l),
+    ...loadIncidents(live, l),
+    ...failingIncidents(live.traffic, failures.covered, l),
+    ...componentIncidents(live.components ?? []),
+    ...taskIncidents(live.tasks ?? []),
+    ...breakerIncidents(live.breakers ?? [], l),
+    ...dlqIncidents(live.dlqExhausted ?? 0),
+    ...backlogIncidents(live.cronBacklog),
+  ])
 }
 
 /**
  * Open before resolved; then severity; then destructive before warning; then
- * the most recent — a live signal, which has no failure time, is happening
- * now and counts as newest; then by title.
+ * most recent, a live signal counting as now; then by title.
  */
 export function sortIncidents(list: Incident[]): Incident[] {
   const recency = (i: Incident) => i.lastSeen ?? Number.MAX_SAFE_INTEGER
@@ -806,17 +789,12 @@ export const ACK_STORAGE_KEY = "orion-incidents-ack"
 /** incident key → when it was acknowledged (ms). */
 export type AckMap = Readonly<Record<string, number>>
 
-export function parseAcks(raw: string | null): AckMap {
-  if (!raw) return {}
-  try {
-    const v: unknown = JSON.parse(raw)
-    if (!v || typeof v !== "object" || Array.isArray(v)) return {}
-    const out: Record<string, number> = {}
-    for (const [k, t] of Object.entries(v)) if (typeof t === "number" && Number.isFinite(t)) out[k] = t
-    return out
-  } catch {
-    return {}
-  }
+/** Keep only `key → finite number` from whatever storage held. */
+export function sanitizeAcks(value: unknown): AckMap {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  const out: Record<string, number> = {}
+  for (const [k, t] of Object.entries(value)) if (typeof t === "number" && Number.isFinite(t)) out[k] = t
+  return out
 }
 
 /** Drop acks older than a week, so the key does not grow without bound. */
@@ -828,8 +806,7 @@ export function pruneAcks(acks: AckMap, now: number, maxAgeMs = ACK_MAX_AGE_MS):
 
 /**
  * Acknowledged, and nothing has failed since. A live signal has no failure
- * time, so its ack holds for as long as the signal does; a failure group
- * re-opens when it fails again after the ack.
+ * time, so its ack holds for as long as the signal does.
  */
 export function isAcked(incident: Pick<Incident, "key" | "lastSeen">, acks: AckMap): boolean {
   const at = acks[incident.key]

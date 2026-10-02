@@ -1,11 +1,9 @@
 import { Link } from "react-router"
-import { copyText } from "@/lib/clipboard"
 import {
   ArrowRight,
   ArrowUpRight,
   GitBranch,
   History,
-  Link2,
   Pencil,
   Play,
   Plug,
@@ -15,7 +13,6 @@ import {
   ShieldAlert,
   Unplug,
   Waypoints,
-  X,
   ZapOff,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -29,8 +26,9 @@ import { useTriggerChannel } from "@/hooks/use-channels"
 import { cn, formatDate, formatRelative } from "@/lib/utils"
 import { middleTruncate } from "@/lib/domains"
 import { edgeLoad, hubId } from "@/lib/dependency-graph"
-import { changeText, type ChangeNote } from "@/components/graph/change-pins"
-import type { ConnectorChannelTraffic } from "@/hooks/use-ops-metrics"
+import { changeText, type ChangeNote } from "@/lib/change-pins"
+import { InspectorHeader, InspectorStat } from "@/components/graph/inspector-parts"
+import type { ConnectorTrafficWindow } from "@/hooks/use-ops-metrics"
 import type { ConnectorUse, SystemGraph, SystemNode } from "@/lib/system-graph"
 import type { ChannelTraffic, MetricsState, TrafficSeries } from "@/hooks/use-metrics"
 import type { MapFaults, NodeFault } from "@/lib/faults"
@@ -44,23 +42,6 @@ import {
   healthOf,
   type EffectiveLoad,
 } from "@/lib/traffic-encoding"
-
-function Stat({
-  label,
-  value,
-  className,
-}: {
-  label: string
-  value: string
-  className?: string
-}) {
-  return (
-    <div>
-      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={cn("font-mono text-sm tabular-nums", className)}>{value}</p>
-    </div>
-  )
-}
 
 function ChannelLink({
   name,
@@ -107,7 +88,7 @@ export function MapInspector({
   onSelect,
   onClose,
   showHops = true,
-  connectorEdges,
+  connectorTraffic,
   onSelectHub,
   changes,
   metricsState = "live",
@@ -131,7 +112,7 @@ export function MapInspector({
   /** The blast-radius hop control belongs to the calls lens. */
   showHops?: boolean
   /** Measured channel → connector calls, for the figures beside each connector. */
-  connectorEdges?: ReadonlyMap<string, ConnectorChannelTraffic>
+  connectorTraffic?: Pick<ConnectorTrafficWindow, "byEdge" | "spanSec">
   /** On the dependencies lens a connector row selects that hub on the canvas. */
   onSelectHub?: (hubId: string) => void
   /** Recent audit changes touching this channel, newest first. */
@@ -153,45 +134,21 @@ export function MapInspector({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-start justify-between gap-2 p-4 pb-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
-            <Radio className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <p className="break-all font-display text-sm font-semibold">{node.name}</p>
-          </div>
-          <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+      <InspectorHeader
+        icon={<Radio className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+        name={node.name}
+        subtitle={
+          <p className="truncate font-mono">
             {node.schedule
               ? `cron ${node.schedule}`
               : node.topic
                 ? `kafka ${node.topic}`
                 : `${node.methods.join(" ") || node.channelType} ${node.route ?? ""}`}
           </p>
-        </div>
-        <div className="-mr-1 flex shrink-0 items-center">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => {
-              const url = `${window.location.origin}/system-map?select=${encodeURIComponent(node.id)}`
-              void copyText(url, "Link", url)
-            }}
-            aria-label="Copy a link to this channel on the map"
-            title="Copy link to this view"
-            className="text-muted-foreground"
-          >
-            <Link2 />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={onClose}
-            aria-label="Close inspector"
-            className="text-muted-foreground"
-          >
-            <X />
-          </Button>
-        </div>
-      </div>
+        }
+        select={node.id}
+        onClose={onClose}
+      />
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4">
         {node.unresolved ? (
@@ -260,8 +217,8 @@ export function MapInspector({
           {windowed > 0 && traffic ? (
             <>
               <div className="grid grid-cols-3 gap-3">
-                <Stat label="rate" value={`${compactNumber(traffic.ratePerMin)}/m`} />
-                <Stat
+                <InspectorStat label="rate" value={`${compactNumber(traffic.ratePerMin)}/m`} />
+                <InspectorStat
                   label={level === "notice" ? "rejected" : "errors"}
                   value={
                     level === "notice"
@@ -270,7 +227,7 @@ export function MapInspector({
                   }
                   className={healthText[level]}
                 />
-                <Stat label="p95" value={formatMs(traffic.p95Ms)} />
+                <InspectorStat label="p95" value={formatMs(traffic.p95Ms)} />
               </div>
 
               <TrafficSparklines series={series} height={28} compact className="mt-3" />
@@ -464,8 +421,8 @@ export function MapInspector({
                 {node.connectors.map((name) => {
                   const use = connectorsByName.get(name)
                   const failed = mapFaults.failedConnectors.has(name)
-                  const l = connectorEdges
-                    ? edgeLoad([node.id], { kind: "connector", name }, connectorEdges)
+                  const l = connectorTraffic
+                    ? edgeLoad([node.id], { kind: "connector", name }, connectorTraffic.byEdge, connectorTraffic.spanSec > 0)
                     : null
                   return (
                     <button
@@ -490,7 +447,7 @@ export function MapInspector({
                         )}
                       >
                         {l?.measured
-                          ? `${compactNumber(l.calls)} calls${l.errorPct ? ` · ${formatPct(l.errorPct)}` : ""}`
+                          ? `${compactNumber(l.calls)} ${l.windowed ? "calls" : "total"}${l.errorPct ? ` · ${formatPct(l.errorPct)}` : ""}`
                           : failed
                             ? "failed"
                             : "ref"}

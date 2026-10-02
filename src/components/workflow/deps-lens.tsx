@@ -2,27 +2,32 @@ import { useMemo } from "react"
 import { Link } from "react-router"
 import { useQueries } from "@tanstack/react-query"
 import { Network } from "lucide-react"
-import { pluginsApi } from "@/api/plugins"
-import { modelsApi } from "@/api/models"
-import type { Channel, Workflow, WorkflowDependencies } from "@/api/types"
+import type { Channel, Workflow } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
-import { DependencyMap, type MapCard, type MapResource } from "@/components/workflow/dependency-map"
 import { LensInsights } from "@/components/workflow/lens-insights"
-import { LensTable } from "@/components/workflow/lens-table"
+import { Dash, LensTable, type LensColumn } from "@/components/workflow/lens-table"
+import { OpChip } from "@/components/workflow/op-chip"
+import { WorkflowDependencyMap, type MapCard, type MapResource } from "@/components/workflow/workflow-dependency-map"
 import { useEntityIndex } from "@/hooks/use-entity-index"
-import { useWorkflowCost } from "@/hooks/use-ops-metrics"
+import { useFunctionIndex } from "@/hooks/use-functions"
+import { modelDependenciesQuery } from "@/hooks/use-models"
+import { pluginDependenciesQuery } from "@/hooks/use-plugins"
+import { useWorkflowDependencies } from "@/hooks/use-workflows"
+import { entityRoute } from "@/lib/audit-routes"
+import { RETRY_EFFECT_LABEL } from "@/lib/function-effects"
 import { cronTransport } from "@/lib/cron"
-import { shortDigest } from "@/lib/utils"
+import { formatMs } from "@/lib/traffic-encoding"
+import { plural, shortDigest } from "@/lib/utils"
 import {
-  costView,
   depsInsights,
-  dominantOp,
-  formatMs,
+  effectTone,
   formatOps,
   mergeServerResources,
   resourceColumns,
+  resourceKey,
   taskRows,
+  type CostView,
   type LensSection,
   type ResourceColumn,
 } from "@/lib/workflow-lens"
@@ -36,44 +41,33 @@ function channelLine(c: Channel): string {
   return `${methods} ${c.route_pattern ?? `/${c.name}`} · ${c.channel_type}`
 }
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
-
 export function DepsLens({
   workflow,
   runsOn,
   sections,
-  deps,
-  depsError,
+  cost,
 }: {
   workflow: Workflow
   runsOn: Channel[]
   sections: LensSection[]
-  deps: WorkflowDependencies | undefined
-  depsError: unknown
+  /** The measured cost, or null before the first run. */
+  cost: CostView | null
 }) {
+  // The server's own walk: what the rows cannot see (unknown functions,
+  // computed call targets) and the plugin digests this node resolves to.
+  const { data: deps, error: depsError } = useWorkflowDependencies(workflow.workflow_id)
   const { index, graph, connectors } = useEntityIndex()
-  const cost = useWorkflowCost(workflow.workflow_id)
-  const view = useMemo(() => (cost.runs > 0 ? costView(sections, cost) : null), [sections, cost])
+  const fnIndex = useFunctionIndex()
+  const columns = useMemo(() => mergeServerResources(resourceColumns(sections), deps, fnIndex), [sections, deps, fnIndex])
 
-  const columns = useMemo(() => mergeServerResources(resourceColumns(sections), deps), [sections, deps])
-  const pluginIds = columns.filter((c) => c.ref.kind === "plugin").map((c) => c.ref.name)
-  const modelIds = columns.filter((c) => c.ref.kind === "model" && !c.ref.dynamic).map((c) => c.ref.name)
+  const named = (kind: "plugin" | "model") =>
+    columns.filter((c) => c.ref.kind === kind && c.ref.name).map((c) => c.ref.name!)
+  const pluginIds = named("plugin")
+  const modelIds = named("model")
 
   // Who else each plugin and model serves — what an archive or a failed load reaches.
-  const pluginDeps = useQueries({
-    queries: pluginIds.map((id) => ({
-      queryKey: ["plugins", id, "dependencies"],
-      queryFn: () => pluginsApi.dependencies(id),
-      retry: false,
-    })),
-  })
-  const modelDeps = useQueries({
-    queries: modelIds.map((id) => ({
-      queryKey: ["models", id, "dependencies"],
-      queryFn: () => modelsApi.dependencies(id),
-      retry: false,
-    })),
-  })
+  const pluginDeps = useQueries({ queries: pluginIds.map((id) => ({ ...pluginDependenciesQuery(id), retry: false })) })
+  const modelDeps = useQueries({ queries: modelIds.map((id) => ({ ...modelDependenciesQuery(id), retry: false })) })
 
   const pluginUsers = new Map<string, string[]>()
   pluginIds.forEach((id, i) => {
@@ -85,41 +79,36 @@ export function DepsLens({
     const d = modelDeps[i]?.data
     if (d) modelUsers.set(id, d.workflows.map((w) => w.workflow_id))
   })
-  const pluginVersions = new Map((deps?.plugins ?? []).map((p) => [p.id, p.version]))
   const connectorUsers = new Map(graph.connectors.map((c) => [c.name, c.users.length]))
   const registryLoaded = !!connectors
 
-  const others = (users: string[] | undefined) =>
-    users ? users.filter((w) => w !== workflow.workflow_id).length : null
+  const others = (users: string[] | undefined) => (users ? users.filter((w) => w !== workflow.workflow_id).length : null)
   const sharedLine = (n: number | null) =>
     n == null ? "" : n === 0 ? " · only this workflow" : ` · ${plural(n, "other workflow")}`
 
   const resourceCard = (c: ResourceColumn): MapResource => {
-    const base = { key: c.key, opsLabel: formatOps(c.ops), op: dominantOp(c.ops), weight: Math.max(1, c.steps.length) }
+    const base = { key: c.key, opsLabel: formatOps(c.ops), tone: c.tone, weight: Math.max(1, c.steps.length) }
     const { kind, name } = c.ref
-    if (c.ref.dynamic) {
-      return { ...base, title: `${kind} computed per message`, subtitle: "the target is an expression", tone: "muted" }
+    if (!name) {
+      return { ...base, title: `${kind} computed per message`, subtitle: "the target is an expression", state: "muted" }
     }
     if (kind === "connector") {
       const conn = index.connectorsByName.get(name)
-      if (registryLoaded && !conn) {
-        return { ...base, title: name, subtitle: "not in the connector registry", tone: "bad" }
-      }
+      if (registryLoaded && !conn) return { ...base, title: name, subtitle: "not in the connector registry", state: "bad" }
       const users = connectorUsers.get(name) ?? 0
       return {
         ...base,
         title: name,
         subtitle: `${conn?.connector_type ?? "connector"}${users > 0 ? ` · shared by ${plural(users, "channel")}` : ""}`,
-        href: conn ? `/connectors/${conn.id}` : undefined,
+        href: entityRoute("connector", conn?.id) ?? undefined,
       }
     }
     if (kind === "plugin") {
-      const v = pluginVersions.get(name)
       return {
         ...base,
-        title: `${name}${v != null ? ` v${v}` : ""}`,
+        title: `${name}${c.ref.version != null ? ` v${c.ref.version}` : ""}`,
         subtitle: `plugin${sharedLine(others(pluginUsers.get(name)))}`,
-        href: `/plugins/${encodeURIComponent(name)}`,
+        href: entityRoute("plugin", name) ?? undefined,
       }
     }
     if (kind === "model") {
@@ -127,12 +116,12 @@ export function DepsLens({
         ...base,
         title: name,
         subtitle: `model${sharedLine(others(modelUsers.get(name)))}`,
-        href: `/models/${encodeURIComponent(name)}`,
+        href: entityRoute("model", name) ?? undefined,
       }
     }
     const ch = index.channelsByName.get(name)
-    if (registryLoaded && !ch) return { ...base, title: name, subtitle: "channel_call · not in the registry", tone: "bad" }
-    return { ...base, title: name, subtitle: "channel_call", href: ch ? `/channels/${ch.channel_id}` : undefined }
+    if (registryLoaded && !ch) return { ...base, title: name, subtitle: "channel_call · not in the registry", state: "bad" }
+    return { ...base, title: name, subtitle: "channel_call", href: entityRoute("channel", ch?.channel_id) ?? undefined }
   }
 
   const stepsIn = (phase: LensSection["phase"]) => taskRows(sections.filter((s) => s.phase === phase)).length
@@ -146,16 +135,16 @@ export function DepsLens({
           key: c.channel_id,
           title: c.name,
           subtitle: `${channelLine(c)}${c.status !== "active" ? ` · ${c.status}` : ""}`,
-          href: `/channels/${c.channel_id}`,
-          tone: c.status === "active" ? "default" : "muted",
+          href: entityRoute("channel", c.channel_id) ?? undefined,
+          state: c.status === "active" ? "default" : "muted",
         }))
-      : [{ key: "none", title: "no channel", subtitle: "nothing reaches this workflow", tone: "muted" }]
+      : [{ key: "none", title: "no channel", subtitle: "nothing reaches this workflow", state: "muted" }]
 
   const workflowCard: MapCard = {
     key: workflow.workflow_id,
     title: workflow.name,
     subtitle: shape,
-    detail: view ? `mean ${formatMs(view.meanMs)} · ${view.runs.toLocaleString("en")} runs` : undefined,
+    detail: cost ? `mean ${formatMs(cost.meanMs)} · ${plural(cost.runs, "run")}` : undefined,
   }
 
   const insights = depsInsights({
@@ -164,10 +153,31 @@ export function DepsLens({
     workflowId: workflow.workflow_id,
     workflowName: workflow.name,
     pluginUsers,
-    pluginVersions,
     connectorUsers: registryLoaded ? connectorUsers : undefined,
-    cost: view,
+    cost,
   })
+
+  const tableColumns: LensColumn[] = [
+    ...columns.map(
+      (c): LensColumn => ({
+        key: c.key,
+        head: c.ref.name ?? `${c.ref.kind} (computed)`,
+        headClassName: "font-mono text-xs",
+        cell: (row) =>
+          row.effect.resource && resourceKey(row.effect.resource) === c.key ? (
+            <OpChip tone={effectTone(row.effect)} title={`On a retry: ${RETRY_EFFECT_LABEL[row.effect.retry]}`}>
+              {row.effect.op}
+            </OpChip>
+          ) : null,
+      }),
+    ),
+    {
+      key: "writes",
+      head: "Writes",
+      cell: (row) =>
+        row.writes.length ? <span className="font-mono text-xs text-muted-foreground">{row.writes.join(", ")}</span> : <Dash />,
+    },
+  ]
 
   const unresolved = deps?.unresolved_functions ?? []
   const mapLink = runsOn[0] ? `/system-map?select=${encodeURIComponent(runsOn[0].name)}` : "/system-map"
@@ -175,7 +185,7 @@ export function DepsLens({
 
   return (
     <div className="space-y-4">
-      <DependencyMap
+      <WorkflowDependencyMap
         channels={channelCards}
         workflow={workflowCard}
         resources={resources}
@@ -196,9 +206,7 @@ export function DepsLens({
       {unresolved.length > 0 && (
         <Callout variant="destructive">
           <div>
-            <p className="font-medium">
-              {plural(unresolved.length, "function")} this node&apos;s registry does not know
-            </p>
+            <p className="font-medium">{plural(unresolved.length, "function")} this node&apos;s registry does not know</p>
             <p className="mt-1 text-xs">
               {unresolved.map((fn) => (
                 <code key={fn} className="mr-2 font-mono">
@@ -218,7 +226,7 @@ export function DepsLens({
         </Callout>
       )}
 
-      <LensTable lens="deps" sections={sections} loop={workflow.loop} columns={columns} caption="What each step touches" />
+      <LensTable workflow={workflow} sections={sections} columns={tableColumns} caption="What each step touches" />
 
       <LensInsights insights={insights} label="Dependency read-outs" />
 

@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
-import { PopoverMenu } from "@/components/admin/popover-menu"
+import { PopoverMenu } from "@/components/ui/popover-menu"
 import { Globe, Menu, Moon, Search, Sun } from "lucide-react"
 
 type EngineState = "healthy" | "degraded" | "unreachable" | "checking"
@@ -105,7 +105,7 @@ export function Header({
         <PopoverMenu
           label="Display preferences"
           role="group"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-background/50 text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+          variant="ghost"
           panelClassName="w-64 space-y-3 p-3"
           trigger={() => (resolvedTheme === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />)}
         >

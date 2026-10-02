@@ -12,6 +12,7 @@ import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { formatDate, formatDuration, serverSpan, cn } from "@/lib/utils"
 import { traceStatusBadgeClass } from "@/lib/status"
 import { firstTaskPayload } from "@/lib/trace-payload"
+import { traceWorkflowId } from "@/lib/trace-timeline"
 import { TraceSteps } from "@/components/traces/trace-steps"
 import { copyText } from "@/lib/clipboard"
 import {
@@ -103,6 +104,8 @@ export function TraceDetailPage() {
   // The request as the first task saw it — the closest thing to the original
   // input the trace keeps. Re-sending it is how a failure gets reproduced.
   const firstPayload = firstTaskPayload(trace)
+  // The workflow the run's own steps name; the channel may have been re-pointed since.
+  const workflowId = traceWorkflowId(trace, channel)
   const canResend = !!trace.channel && trace.mode !== "cron" && firstPayload !== null
   const copyId = () => void copyText(trace.id, "Trace id")
 
@@ -203,10 +206,10 @@ export function TraceDetailPage() {
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            {channel?.workflow_id && (
+            {workflowId && (
               <Button variant="outline" size="sm" asChild>
-                <Link to={`/workflows/${channel.workflow_id}`} title="The workflow this channel runs">
-                  <GitBranch className="h-3.5 w-3.5" /> Workflow {channel.workflow_id}
+                <Link to={`/workflows/${encodeURIComponent(workflowId)}`} title="The workflow this run executed">
+                  <GitBranch className="h-3.5 w-3.5" /> Workflow {workflowId}
                 </Link>
               </Button>
             )}

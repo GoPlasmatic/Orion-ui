@@ -7,7 +7,7 @@ import {
   groupFailures,
   isAcked,
   needsAttention,
-  parseAcks,
+  sanitizeAcks,
   pruneAcks,
   type RecoveryEvidence,
 } from "@/lib/incidents"
@@ -126,6 +126,42 @@ describe("groupFailures — the QA Redis outage", () => {
     expect(redisGroup?.latestOccurrenceId).toBe("occ-1")
     const misfire = out.find((g) => g.occurrenceStatus === "skipped_misfire")
     expect(misfire?.title).toBe("Scheduled runs skipped — misfire")
+  })
+
+  it("groups occurrences without a trace by their status, one trace absorbing one occurrence", () => {
+    const base: CronOccurrenceSummary = {
+      id: "o",
+      channel_id: "id-soma-clock-pair",
+      channel_name: "soma-clock-pair",
+      trigger: "cron",
+      scheduled_for: iso(T0 + 1_000),
+      status: "failed",
+      attempt: 1,
+      started_at: iso(T0 + 1_000),
+      completed_at: iso(T0 + 1_500),
+      created_at: iso(T0),
+    }
+    const out = groupFailures({
+      traces: QA_TRACES,
+      occurrences: [
+        { ...base, id: "twin" },
+        // A second failed run near the same trace: the trace already has its occurrence.
+        { ...base, id: "orphan", started_at: iso(T0 + 1_200) },
+        { ...base, id: "held-1", status: "skipped_singleton" },
+        { ...base, id: "held-2", status: "skipped_singleton", channel_name: "soma-clock-reap" },
+        // A completed run is not a failure.
+        { ...base, id: "ok", status: "completed" },
+      ],
+      now,
+    })
+    const byStatus = new Map(out.map((g) => [g.occurrenceStatus, g]))
+    expect(byStatus.get(null)?.failures).toBe(4)
+    expect(byStatus.get("failed")?.title).toBe("Scheduled runs failed")
+    expect(byStatus.get("failed")?.latestOccurrenceId).toBe("orphan")
+    const held = byStatus.get("skipped_singleton")
+    expect(held?.title).toBe("Scheduled runs skipped — key still held")
+    expect(held?.channels.map((c) => c.name).sort()).toEqual(["soma-clock-pair", "soma-clock-reap"])
+    expect(out).toHaveLength(3)
   })
 })
 
@@ -252,6 +288,19 @@ describe("buildIncidents — resolution", () => {
   })
 })
 
+describe("buildIncidents — cron backlog", () => {
+  const backlogKeys = (pending: number, oldestSec: number | null) =>
+    buildIncidents({ now: T0, groups: [], evidence: noEvidence, live: { cronBacklog: { pending, oldestSec } } }).map(
+      (i) => i.key,
+    )
+
+  it("uses the shared verdict: queued is not a backlog", () => {
+    expect(backlogKeys(2, 10)).toEqual([])
+    expect(backlogKeys(2, 600)).toEqual(["backlog:cron"])
+    expect(backlogKeys(12, null)).toEqual(["backlog:cron"])
+  })
+})
+
 describe("acknowledgement", () => {
   const now = T0 + 39 * MIN
   const [inc] = buildIncidents({
@@ -277,8 +326,9 @@ describe("acknowledgement", () => {
   })
 
   it("parses defensively and forgets old acks", () => {
-    expect(parseAcks("not json")).toEqual({})
-    expect(parseAcks('{"a": 1, "b": "x"}')).toEqual({ a: 1 })
+    expect(sanitizeAcks("not an object")).toEqual({})
+    expect(sanitizeAcks([1, 2])).toEqual({})
+    expect(sanitizeAcks({ a: 1, b: "x", c: Number.NaN })).toEqual({ a: 1 })
     expect(pruneAcks({ old: now - 8 * 24 * 60 * MIN, fresh: now }, now)).toEqual({ fresh: now })
   })
 })

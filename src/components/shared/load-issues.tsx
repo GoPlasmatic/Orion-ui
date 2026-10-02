@@ -1,4 +1,5 @@
 import { Link } from "react-router"
+import { plural } from "@/lib/utils"
 import type { EngineLoadIssues } from "@/api/types"
 import { countLoadIssues } from "@/api/types"
 import { Callout } from "@/components/ui/callout"
@@ -138,8 +139,7 @@ function IssueGroup({
   return (
     <Callout variant="destructive">
       <p className="font-medium">
-        {count} {noun}
-        {count === 1 ? "" : "s"} {verb} on this node
+        {plural(count, noun)} {verb} on this node
       </p>
       <ul className="mt-1 space-y-1 text-xs">{children}</ul>
       <p className="mt-2 text-xs">{footnote}</p>

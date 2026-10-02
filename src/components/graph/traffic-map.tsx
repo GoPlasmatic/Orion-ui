@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import {
   Background,
   BaseEdge,
@@ -10,7 +10,6 @@ import {
   ReactFlow,
   ReactFlowProvider,
   getSmoothStepPath,
-  useReactFlow,
   useStore,
   type Edge,
   type EdgeProps,
@@ -24,9 +23,10 @@ import { faultsFor, type MapFaults } from "@/lib/faults"
 import { CLUSTER_HEADER, layoutSystemGraph, type Cluster, type Lane } from "@/lib/map-layout"
 import { neighbourhood, type SystemGraph, type SystemNode } from "@/lib/system-graph"
 import { middleTruncate, sharedPrefix } from "@/lib/domains"
-import { pinTitle, type ChangePins } from "@/components/graph/change-pins"
+import { pinTitle, type ChangePins } from "@/lib/change-pins"
 import { FitControl } from "@/components/graph/map-controls"
-import { fitOptions } from "@/components/graph/map-fit"
+import { COLLAPSE_CLUSTER_AT, COLLAPSE_MAP_AT, LOD_ZOOM, MINIMAP_AT } from "@/lib/map-fit"
+import { useMapFraming } from "@/components/graph/use-map-framing"
 import type { ChannelTraffic, TrafficWindow } from "@/hooks/use-metrics"
 import {
   COMPACT_H,
@@ -91,28 +91,6 @@ function TrafficEdge({
 
 /** Height reserved above each lane for its heading. */
 const LANE_HEADER = 40
-
-/**
- * Channels on the canvas before a minimap earns its corner. Below this the
- * overview fit already shows everything; above it the operator is zoomed in
- * on one lane and needs to know where the rest went.
- */
-const MINIMAP_AT = 15
-
-/**
- * Below this zoom a node stops trying to be a card and becomes a dot with a
- * name large enough to survive the scale. The card's footprint does not change
- * — the layout is zoom-independent — only what is drawn inside it.
- */
-const LOD_ZOOM = 0.55
-
-/**
- * Clusters collapse to one summary box by default only when the map is big
- * enough for it to matter and the cluster is a real crowd. On an eleven-channel
- * system a collapsed cluster would hide most of the map.
- */
-const COLLAPSE_MAP_AT = 30
-const COLLAPSE_CLUSTER_AT = 6
 
 /**
  * Label budgets, in characters, for a card and for the overview rendering —
@@ -285,7 +263,6 @@ function TrafficMapInner({
   nextFire,
   pins,
 }: TrafficMapProps) {
-  const { fitView } = useReactFlow()
   // A boolean selector: the component re-renders when the level of detail
   // flips, not on every frame of a pan or zoom.
   const dotLod = useStore((s) => s.transform[2] < LOD_ZOOM)
@@ -412,27 +389,8 @@ function TrafficMapInner({
     () => `${shown.map((n) => n.id).join("|")}#${[...clusterOverrides.entries()].join(";")}`,
     [shown, clusterOverrides],
   )
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => fitView(fitOptions(reducedMotion)))
-    return () => cancelAnimationFrame(frame)
-  }, [fitKey]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Travel to a node named from outside the canvas, keeping the current zoom so
-  // the move reads as a pan rather than a jump. Scheduled a frame later, like
-  // the overview fit above, so that when both fire on the same render — the
-  // page opened on `?select=` — this one runs second and wins.
-  useEffect(() => {
-    if (!revealToken || !selectedId || !layout.positions.has(selectedId)) return
-    const frame = requestAnimationFrame(() =>
-      fitView({
-        nodes: [{ id: selectedId }],
-        duration: reducedMotion ? 0 : 500,
-        maxZoom: 1,
-        minZoom: 0.5,
-      }),
-    )
-    return () => cancelAnimationFrame(frame)
-  }, [revealToken]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Travel to a node named from outside the canvas, once it has a position.
+  useMapFraming(fitKey, revealToken, selectedId, !!selectedId && layout.positions.has(selectedId))
 
   /** Largest value in the current size metric — the top of the scale. */
   const maxSize = useMemo(() => {

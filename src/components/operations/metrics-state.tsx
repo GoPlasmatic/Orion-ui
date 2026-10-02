@@ -1,24 +1,9 @@
 import { Callout } from "@/components/ui/callout"
 import type { MetricsState } from "@/hooks/use-metrics"
+import { METRICS_STATE_TEXT } from "@/lib/metrics-state"
 import { formatDate, formatRelative, cn } from "@/lib/utils"
 
-/**
- * What the page says about the metrics feed, one sentence per state.
- *
- * QA showed "metrics offline" and "Enable [metrics]…" for the ~7 s the first
- * 900 kB scrape took to answer. Loading is not off: only `off` — the server
- * answered and there is nothing to read — may tell an operator to change the
- * configuration.
- */
-const METRICS_PILL: Record<MetricsState, string> = {
-  loading: "loading metrics",
-  warming: "first sample · rates in ~10 s",
-  live: "live",
-  off: "metrics off",
-  error: "metrics unreachable",
-}
-
-/** The header's status line: a live dot, or the state in words. */
+/** The header's status line: a live dot, or the state in the shared words. */
 export function MetricsStatePill({
   state,
   lastUpdated,
@@ -40,7 +25,7 @@ export function MetricsStatePill({
       ? `last scrape failed · showing ${updated}`
       : state === "live" && updated
         ? `live · updated ${updated}`
-        : METRICS_PILL[state]
+        : METRICS_STATE_TEXT[state].short
   const pulsing = state === "live" && !paused && !stale
   return (
     <span
@@ -49,10 +34,8 @@ export function MetricsStatePill({
       title={lastUpdated != null ? `Last sample ${formatDate(lastUpdated)}` : undefined}
     >
       <span className="relative flex h-2 w-2 items-center justify-center" aria-hidden="true">
-        {pulsing && (
-          // The global prefers-reduced-motion rule stops this ping.
-          <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-success/60" />
-        )}
+        {/* The global prefers-reduced-motion rule stops this ping. */}
+        {pulsing && <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-success/60" />}
         <span
           className={cn(
             "relative inline-flex h-1.5 w-1.5 rounded-full",
@@ -75,27 +58,14 @@ export function MetricsStatePill({
 
 /**
  * The callout that stands in for the golden signals when there is nothing to
- * draw: `off` (configuration) and `error` (no sample at all). Loading,
- * warming and live render the tiles themselves, so this returns null for them.
+ * draw (`off`, or `error` with no sample). Other states render the tiles.
  */
 export function MetricsStateNotice({ state, className }: { state: MetricsState; className?: string }) {
-  if (state === "off") {
-    return (
-      <Callout variant="muted" className={className}>
-        Metrics are off on this engine. Enable <code className="font-mono">[metrics]</code> in the
-        Orion configuration to see throughput, error share, latency, saturation and the per-channel
-        figures. Incidents, schedules and the trace DLQ below do not depend on it.
-      </Callout>
-    )
-  }
-  if (state === "error") {
-    return (
-      <Callout variant="warning" className={className}>
-        Metrics unreachable: the scrape of <code className="font-mono">/metrics</code> failed and no
-        earlier sample is held. It is retried every 10 s. Incidents, schedules and the trace DLQ
-        below do not depend on it.
-      </Callout>
-    )
-  }
-  return null
+  if (state !== "off" && state !== "error") return null
+  const { sentence, tone } = METRICS_STATE_TEXT[state]
+  return (
+    <Callout variant={tone === "muted" ? "muted" : tone} className={className}>
+      {sentence} Incidents, schedules and the trace DLQ below do not depend on it.
+    </Callout>
+  )
 }

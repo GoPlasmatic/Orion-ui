@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router"
 import { middleTruncate } from "@/lib/domains"
 import { cn } from "@/lib/utils"
-import type { StepOp } from "@/lib/workflow-lens"
+import type { EffectTone } from "@/lib/workflow-lens"
 
 export interface MapCard {
   key: string
@@ -10,13 +10,14 @@ export interface MapCard {
   /** A third line — the centre card's measured figures. */
   detail?: string
   href?: string
-  tone?: "default" | "bad" | "muted"
+  state?: "default" | "bad" | "muted"
 }
 
 export interface MapResource extends MapCard {
   /** `3 read · 1 write`, drawn on the edge. */
   opsLabel: string
-  op: StepOp
+  /** The loudest use — a write a retry repeats outranks a read. */
+  tone: EffectTone
   /** How many steps use it — the edge's weight. */
   weight: number
 }
@@ -31,31 +32,28 @@ const RIGHT = { x: 566, w: 190 }
 const MAX_LEFT = 4
 const MAX_RIGHT = 8
 
-// Edge colour is chart geometry: reads and inference in the primary series,
-// anything a retry would repeat in the warning ink, calls in the neutral series.
-const EDGE: Record<StepOp, string> = {
+// Edge colour is chart geometry: reads in the primary series, anything a
+// retry would repeat in the warning ink, the rest in the neutral series.
+const EDGE: Record<EffectTone, string> = {
   read: "stroke-chart-1",
-  infer: "stroke-chart-1",
-  presign: "stroke-chart-5",
-  call: "stroke-chart-5",
   write: "stroke-warning",
-  incr: "stroke-warning",
-  publish: "stroke-warning",
-  send: "stroke-warning",
+  neutral: "stroke-chart-5",
+  gate: "stroke-chart-5",
 }
 
 function overflow<T extends MapCard>(list: T[], max: number, noun: string, make: (card: MapCard) => T): T[] {
   if (list.length <= max) return list
   const more = list.length - (max - 1)
-  return [...list.slice(0, max - 1), make({ key: "__more", title: `+${more} more ${noun}`, subtitle: "see the table below", tone: "muted" })]
+  return [...list.slice(0, max - 1), make({ key: "__more", title: `+${more} more ${noun}`, subtitle: "see the table below", state: "muted" })]
 }
 
 /**
- * Runs-on channels → this workflow → every resource its steps touch, one SVG
+ * The workflow page's dependency map (not the System Map's
+ * `components/graph/dependency-map.tsx`): runs-on channels → this workflow → every resource its steps touch, one SVG
  * scaled to the container's width. Cards navigate; the edge to each resource
  * carries the op counts and is weighted by how many steps use it.
  */
-export function DependencyMap({
+export function WorkflowDependencyMap({
   channels,
   workflow,
   resources,
@@ -68,7 +66,7 @@ export function DependencyMap({
 }) {
   const navigate = useNavigate()
   const left = overflow(channels, MAX_LEFT, "channels", (c) => c)
-  const right = overflow(resources, MAX_RIGHT, "resources", (c) => ({ ...c, opsLabel: "", op: "call" as const, weight: 1 }))
+  const right = overflow(resources, MAX_RIGHT, "resources", (c) => ({ ...c, opsLabel: "", tone: "neutral" as const, weight: 1 }))
   const rows = Math.max(left.length, right.length, 2)
   const H = rows * ROW + 8
   const top = (n: number) => (H - n * ROW) / 2 + (ROW - CARD_H) / 2
@@ -104,17 +102,17 @@ export function DependencyMap({
           width={w}
           height={h}
           rx={primary ? 10 : 8}
-          strokeWidth={primary || c.tone === "bad" ? 1.5 : 1}
-          strokeDasharray={c.tone === "muted" ? "4 3" : undefined}
+          strokeWidth={primary || c.state === "bad" ? 1.5 : 1}
+          strokeDasharray={c.state === "muted" ? "4 3" : undefined}
           className={cn(
             primary ? "fill-muted stroke-primary" : "fill-card",
-            !primary && (c.tone === "bad" ? "stroke-destructive" : "stroke-border"),
+            !primary && (c.state === "bad" ? "stroke-destructive" : "stroke-border"),
           )}
         />
         <text x={x + 12} y={y + (primary ? 21 : 18)} fontSize={primary ? 12 : 11} className={cn("fill-foreground", primary ? "font-semibold" : "font-medium")}>
           {middleTruncate(c.title, primary ? 30 : 26)}
         </text>
-        <text x={x + 12} y={y + (primary ? 38 : 33)} fontSize={10} className={c.tone === "bad" ? "fill-destructive" : "fill-muted-foreground"}>
+        <text x={x + 12} y={y + (primary ? 38 : 33)} fontSize={10} className={c.state === "bad" ? "fill-destructive" : "fill-muted-foreground"}>
           {middleTruncate(c.subtitle, primary ? 34 : 32)}
         </text>
         {c.detail && (
@@ -147,13 +145,13 @@ export function DependencyMap({
               d={`M${x1} ${y1} C ${x1 + 40} ${y1}, ${x2 - 40} ${y2}, ${x2} ${y2}`}
               fill="none"
               strokeWidth={1.5}
-              strokeDasharray={c.tone === "muted" ? "4 3" : undefined}
-              markerEnd={c.tone === "muted" ? undefined : "url(#wl-arrow)"}
+              strokeDasharray={c.state === "muted" ? "4 3" : undefined}
+              markerEnd={c.state === "muted" ? undefined : "url(#wl-arrow)"}
               className="stroke-border-strong"
             />
           )
         })}
-        {left.length > 0 && left[0].tone !== "muted" && (
+        {left.length > 0 && left[0].state !== "muted" && (
           <text x={LEFT.x + LEFT.w + 14} y={midY + MID_H / 2 - 8} fontSize={10} className="fill-muted-foreground">
             runs
           </text>
@@ -173,8 +171,8 @@ export function DependencyMap({
                 d={`M${x1} ${y1} C ${x1 + 50} ${y1}, ${x2 - 50} ${y2}, ${x2} ${y2}`}
                 fill="none"
                 strokeWidth={1.5 + Math.min(r.weight, 4) * 0.9}
-                strokeDasharray={r.tone === "muted" ? "5 4" : undefined}
-                className={cn(r.tone === "bad" ? "stroke-destructive" : EDGE[r.op], "opacity-80")}
+                strokeDasharray={r.state === "muted" ? "5 4" : undefined}
+                className={cn(r.state === "bad" ? "stroke-destructive" : EDGE[r.tone], "opacity-80")}
               />
               <text x={x2 - 8} y={y2 - 6} fontSize={10} textAnchor="end" className="fill-muted-foreground">
                 {r.opsLabel}

@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { LoadIssuesReport } from "@/components/shared/load-issues"
 import { componentStateBadgeClass, isComponentFault } from "@/lib/status"
 import { componentRoute } from "@/lib/health"
-import { cn, formatBytes, formatDate, shortDigest } from "@/lib/utils"
+import { cn, formatBytes, formatDate, shortDigest, plural } from "@/lib/utils"
 import { Info } from "lucide-react"
 
 /** `cron.last_reconcile_at` is unix seconds, unlike every other admin-plane timestamp; tolerate an ISO string too. */
@@ -250,7 +250,7 @@ export function HealthComponents({
                   {p.plugin} v{p.version}
                 </Link>
                 <span className="text-muted-foreground">
-                  {p.functions.length} function{p.functions.length === 1 ? "" : "s"}
+                  {plural(p.functions.length, "function")}
                   {p.compile_ms != null && ` · compiled in ${p.compile_ms}ms`}
                 </span>
               </li>

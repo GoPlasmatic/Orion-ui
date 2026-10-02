@@ -1,15 +1,8 @@
-import { useState } from "react"
 import type { CronOccurrenceSummary } from "@/api/types"
-import { Button } from "@/components/ui/button"
-import { ConfirmDialog } from "@/components/shared/confirm-dialog"
+import { ConfirmButton } from "@/components/shared/confirm-button"
 import { useCancelOccurrence } from "@/hooks/use-cron"
+import { isCancellable } from "@/lib/cron"
 import { Ban } from "lucide-react"
-
-/**
- * What `POST admin/cron/occurrences/{id}/cancel` accepts (1.10): an attempt
- * not yet settled. A finished one answers 409, so the action is not offered.
- */
-const CANCELLABLE: ReadonlySet<string> = new Set(["pending", "claimed", "running"])
 
 /**
  * Cancel for one occurrence, with the confirmation that says what cancelling
@@ -17,7 +10,7 @@ const CANCELLABLE: ReadonlySet<string> = new Set(["pending", "claimed", "running
  * slot it held frees within two scheduler heartbeats — so the next run of the
  * key can start before this one's work has necessarily stopped.
  *
- * Renders nothing for a status the server would refuse.
+ * Renders nothing for a status the server would refuse (409 once settled).
  */
 export function CancelOccurrenceButton({
   occurrence,
@@ -26,56 +19,37 @@ export function CancelOccurrenceButton({
   occurrence: Pick<CronOccurrenceSummary, "id" | "status" | "channel_name">
   size?: "xs" | "sm"
 }) {
-  const [confirming, setConfirming] = useState(false)
   const cancel = useCancelOccurrence()
-
-  if (!CANCELLABLE.has(occurrence.status)) return null
+  if (!isCancellable(occurrence.status)) return null
 
   return (
-    <>
-      <Button
-        variant="outline"
-        size={size}
-        disabled={cancel.isPending}
-        onClick={(e) => {
-          e.stopPropagation()
-          setConfirming(true)
-        }}
-        title="Stop this attempt and settle it as failed"
-      >
-        <Ban className={size === "sm" ? "h-3.5 w-3.5" : undefined} />
-        {cancel.isPending ? "Cancelling..." : "Cancel"}
-      </Button>
-      {confirming && (
-        // The dialog renders in place, inside a table row that opens the
-        // occurrence on click; keep its clicks from reaching the row.
-        <div onClick={(e) => e.stopPropagation()} className="contents">
-          <ConfirmDialog
-            title="Cancel occurrence"
-            confirmLabel="Cancel occurrence"
-            destructive
-            pending={cancel.isPending}
-            description={
-              <>
-                <p>
-                  The {occurrence.status} attempt of{" "}
-                  <span className="font-medium text-foreground">{occurrence.channel_name}</span> is
-                  settled as <code className="font-mono">failed</code>, and its trace with it.
-                </p>
-                <p>
-                  The lease is released: the singleton slot it holds frees within two scheduler
-                  heartbeats, so the next run of the key can start. Work the workflow already did
-                  (a write, a call out) is not undone. A failed occurrence can be retried later.
-                </p>
-              </>
-            }
-            onConfirm={() =>
-              cancel.mutate(occurrence.id, { onSettled: () => setConfirming(false) })
-            }
-            onCancel={() => setConfirming(false)}
-          />
-        </div>
-      )}
-    </>
+    <ConfirmButton
+      icon={Ban}
+      label="Cancel"
+      pendingLabel="Cancelling..."
+      pending={cancel.isPending}
+      size={size}
+      title="Stop this attempt and settle it as failed"
+      dialog={{
+        title: "Cancel occurrence",
+        confirmLabel: "Cancel occurrence",
+        destructive: true,
+        description: (
+          <>
+            <p>
+              The {occurrence.status} attempt of{" "}
+              <span className="font-medium text-foreground">{occurrence.channel_name}</span> is
+              settled as <code className="font-mono">failed</code>, and its trace with it.
+            </p>
+            <p>
+              The lease is released: the singleton slot it holds frees within two scheduler
+              heartbeats, so the next run of the key can start. Work the workflow already did (a
+              write, a call out) is not undone. A failed occurrence can be retried later.
+            </p>
+          </>
+        ),
+      }}
+      onConfirm={(close) => cancel.mutate(occurrence.id, { onSettled: close })}
+    />
   )
 }

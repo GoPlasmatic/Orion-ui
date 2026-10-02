@@ -10,11 +10,12 @@ import {
 } from "@/hooks/use-metrics"
 import { useMapTelemetry } from "@/hooks/use-faults"
 import { useConnectorTraffic } from "@/hooks/use-ops-metrics"
-import { useFunctions } from "@/hooks/use-functions"
+import { useFunctionIndex } from "@/hooks/use-functions"
 import {
   CALLS_SHARE,
   buildDependencyGraph,
   callShare,
+  mapSearch,
   parseHubId,
 } from "@/lib/dependency-graph"
 import type { DomainMode } from "@/lib/domains"
@@ -36,7 +37,7 @@ import { TrafficMap } from "@/components/graph/traffic-map"
 import { DependencyMap } from "@/components/graph/dependency-map"
 import { HealthGrid } from "@/components/graph/health-grid"
 import { HubInspector } from "@/components/graph/hub-inspector"
-import { useChangePins } from "@/components/graph/change-pins"
+import { useChangePins } from "@/hooks/use-change-pins"
 import { InspectorPlaceholder, MapInspector } from "@/components/graph/map-inspector"
 import { HUB_THRESHOLD } from "@/components/graph/traffic-node"
 import {
@@ -294,12 +295,7 @@ export function SystemMapPage() {
   // next fire: what the counters cannot show, drawn on the nodes they touch.
   const { faults, nextFire } = useMapTelemetry(graph)
   const pins = useChangePins(graph)
-  const { data: catalogue } = useFunctions()
-  const pluginOfFunction = useMemo(() => {
-    const out = new Map<string, string>()
-    for (const f of catalogue ?? []) if (f.source === "plugin" && f.plugin) out.set(f.name, f.plugin.id)
-    return out
-  }, [catalogue])
+  const functions = useFunctionIndex()
 
   const connectorsByName = useMemo(
     () => new Map(graph.connectors.map((c) => [c.name, c])),
@@ -347,8 +343,8 @@ export function SystemMapPage() {
           return [k.slice(0, bar), k.slice(bar + 1)] as const
         })
       : []
-    return buildDependencyGraph(graph, index, { visible, mode: domainMode, pluginOfFunction, measured })
-  }, [graph, index, visible, domainMode, pluginOfFunction, measuredKey])
+    return buildDependencyGraph(graph, index, { visible, mode: domainMode, functions, measured })
+  }, [graph, index, visible, domainMode, functions, measuredKey])
 
   const viewNodes = useMemo(
     () => graph.nodes.filter((n) => visible.has(n.id) && !n.unresolved),
@@ -359,27 +355,15 @@ export function SystemMapPage() {
    * Search highlights rather than filters: the hits stay lit and everything
    * else dims, so the canvas holds still while a name is typed instead of
    * re-laying out on every keystroke. Null when nothing is typed. On the
-   * dependencies lens a connector, plugin or model name is a hit too.
+   * dependencies lens a connector, plugin or model name is a hit too, and a
+   * domain named with its prefix (`?q=soma-clock`, the Operations domain
+   * cards' link) lights exactly that domain.
    */
-  const matches = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    if (!term) return null
-    const hits = new Set(
-      graph.nodes
-        .filter(
-          (n) =>
-            visible.has(n.id) &&
-            (n.name.toLowerCase().includes(term) ||
-              (n.route ?? "").toLowerCase().includes(term) ||
-              (n.topic ?? "").toLowerCase().includes(term) ||
-              (n.workflowName ?? "").toLowerCase().includes(term) ||
-              n.tags.some((t) => t.toLowerCase().includes(term))),
-        )
-        .map((n) => n.id),
-    )
-    if (lens === "deps") for (const h of dg.hubs) if (h.name.toLowerCase().includes(term)) hits.add(h.id)
-    return hits
-  }, [graph.nodes, visible, search, lens, dg.hubs])
+  const visibleNodes = useMemo(() => graph.nodes.filter((n) => visible.has(n.id)), [graph.nodes, visible])
+  const matches = useMemo(
+    () => mapSearch(search, visibleNodes, dg.domainIndex, lens === "deps" ? dg.hubs : []),
+    [search, visibleNodes, dg.domainIndex, dg.hubs, lens],
+  )
 
   const selected = selectedId ? (graph.byId.get(selectedId) ?? null) : null
   const selectedHub =
@@ -456,7 +440,7 @@ export function SystemMapPage() {
       onSelect={(node) => revealChannel(node.id)}
       onClose={() => setSelectedId(null)}
       showHops={lens === "calls"}
-      connectorEdges={connectorTraffic.byEdge}
+      connectorTraffic={connectorTraffic}
       onSelectHub={revealHub}
       changes={pins.get(selected.id)}
       metricsState={traffic.state}

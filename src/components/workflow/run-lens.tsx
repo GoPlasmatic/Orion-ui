@@ -1,105 +1,52 @@
 import { useMemo } from "react"
 import { Link } from "react-router"
-import { useQueries } from "@tanstack/react-query"
-import { tracesApi } from "@/api/traces"
-import type { Channel, Trace, TraceDetail, Workflow } from "@/api/types"
+import type { Channel, TraceDetail, Workflow } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
 import { Skeleton } from "@/components/ui/skeleton"
 import { LensInsights } from "@/components/workflow/lens-insights"
-import { LensTable } from "@/components/workflow/lens-table"
-import { useTrace } from "@/hooks/use-traces"
-import { useWorkflowCost } from "@/hooks/use-ops-metrics"
+import { Dash, LensTable, RunStatusLabel, type LensColumn } from "@/components/workflow/lens-table"
+import { useNewestTraceWithSteps, useTrace } from "@/hooks/use-traces"
+import { entityRoute } from "@/lib/audit-routes"
 import { traceStatusBadgeClass } from "@/lib/status"
-import { buildTimeline, executionTrace, formatMicros } from "@/lib/trace-timeline"
-import { formatDate, formatWhen, serverTime } from "@/lib/utils"
-import { costView, runInsights, runOverlay, type LensSection } from "@/lib/workflow-lens"
+import { buildTimeline, formatMicros, stepDataGap, traceWorkflowId, type StepDataGap } from "@/lib/trace-timeline"
+import { formatDate, formatWhen } from "@/lib/utils"
+import { runInsights, runOverlay, type CostView, type LensSection } from "@/lib/workflow-lens"
 
-/** How many channels, and how many of each one's newest traces, to look through. */
-const MAX_CHANNELS = 3
-const PER_LIST = 3
-const MAX_CANDIDATES = 5
-
-const hasSteps = (t: TraceDetail | undefined) => (executionTrace(t)?.steps.length ?? 0) > 0
-
-/**
- * The newest trace with step data through the channels running this workflow
- * — failed runs first, since a channel with `errors_only` keeps steps for
- * nothing else. Looks at a few rows per channel and reads each one's detail
- * (the list is payload-free) until one carries `task_trace_json` steps.
- */
-function useNewestTraceWithSteps(channels: Channel[], enabled: boolean) {
-  const names = channels.slice(0, MAX_CHANNELS).map((c) => c.name)
-  const lists = useQueries({
-    queries: names.flatMap((channel) =>
-      [{ channel, status: "failed", limit: PER_LIST }, { channel, limit: PER_LIST }].map((params) => ({
-        queryKey: ["traces", params],
-        queryFn: () => tracesApi.list(params),
-        enabled,
-      })),
-    ),
-  })
-  const listsLoading = lists.some((q) => q.isLoading)
-
-  const newestFirst = (a: Trace, b: Trace) => (serverTime(b.created_at) ?? 0) - (serverTime(a.created_at) ?? 0)
-  const all = lists.flatMap((q) => q.data?.data ?? [])
-  const candidates: string[] = []
-  for (const t of [
-    ...all.filter((t) => t.status === "failed").sort(newestFirst),
-    ...all.filter((t) => t.status !== "failed").sort(newestFirst),
-  ]) {
-    if (!candidates.includes(t.id)) candidates.push(t.id)
-  }
-  candidates.splice(MAX_CANDIDATES)
-
-  const details = useQueries({
-    queries: candidates.map((id) => ({
-      queryKey: ["traces", id],
-      queryFn: () => tracesApi.get(id),
-      enabled,
-    })),
-  })
-
-  // The first candidate, in order, whose detail has steps; loading while an
-  // earlier one is still in flight, so the pick does not jump.
-  let picked: TraceDetail | null = null
-  let loading = listsLoading
-  for (const q of details) {
-    if (q.isLoading) {
-      loading = true
-      break
-    }
-    if (hasSteps(q.data)) {
-      picked = q.data!
-      break
-    }
-  }
-  return { trace: picked, loading: enabled && loading && !picked, looked: candidates.length }
+/** Why there is no run to lay over the steps, worded for this page. */
+const GAP_TEXT: Record<StepDataGap, string> = {
+  unsettled: "The run has not finished yet, so it has no steps to show.",
+  no_channel: "Its channel does not run this workflow now, so why it kept no steps cannot be read from here.",
+  details_off: "The channel does not record step data: tracing.task_details is off.",
+  errors_only: "The channel keeps step data for failed runs only (errors_only), and none failed recently.",
+  failed_before_steps: "The run failed before its first step.",
+  ran_nothing: "The run executed no step — a condition or the rollout gate skipped it.",
 }
 
 export function RunLens({
   workflow,
   runsOn,
   sections,
+  cost,
   traceId,
   onClearTrace,
 }: {
   workflow: Workflow
   runsOn: Channel[]
   sections: LensSection[]
+  /** Per-step baselines for "against its p95"; null before the first run. */
+  cost: CostView | null
   traceId: string
   onClearTrace: () => void
 }) {
   const pinned = useTrace(traceId)
   const newest = useNewestTraceWithSteps(runsOn, !traceId)
-  const cost = useWorkflowCost(workflow.workflow_id)
 
   const trace = traceId ? (pinned.data ?? null) : newest.trace
   const loading = traceId ? pinned.isLoading : newest.loading
   const timeline = useMemo(() => (trace ? buildTimeline(trace, workflow) : null), [trace, workflow])
   const overlay = useMemo(() => (timeline ? runOverlay(sections, timeline) : null), [sections, timeline])
-  const view = useMemo(() => (cost.runs > 0 ? costView(sections, cost) : null), [sections, cost])
 
   if (loading) {
     return (
@@ -126,12 +73,49 @@ export function RunLens({
     )
   }
 
+  const channelOf = (t: TraceDetail) => runsOn.find((c) => c.channel_id === t.channel_id || c.name === t.channel)
+
   if (!trace || !timeline || !overlay) {
-    return <NoStepData runsOn={runsOn} trace={trace} pinned={!!traceId} onClearTrace={onClearTrace} />
+    // A pinned trace says why it has no steps itself; with none pinned, the
+    // channels' tracing config is the reason.
+    let gap: StepDataGap | null
+    if (trace) gap = stepDataGap(trace, channelOf(trace))
+    else if (runsOn.length === 0) gap = "no_channel"
+    else if (!newest.anyRecording) gap = "details_off"
+    else gap = runsOn.some((c) => c.config?.tracing?.task_details && c.config.tracing.errors_only) ? "errors_only" : null
+    return <NoStepData runsOn={runsOn} trace={trace} gap={gap} onClearTrace={traceId ? onClearTrace : undefined} />
   }
 
-  const foreign = trace.channel && runsOn.length > 0 && !runsOn.some((c) => c.name === trace.channel)
-  const insights = runInsights(sections, overlay, timeline, view, trace.error)
+  const ranWorkflow = traceWorkflowId(trace, channelOf(trace))
+  const foreign = ranWorkflow != null && ranWorkflow !== workflow.workflow_id
+  const insights = runInsights(sections, overlay, timeline, cost, trace.error)
+
+  const columns: LensColumn[] = [
+    { key: "status", head: "This run", cell: (row) => <RunStatusLabel status={overlay.get(row.id)?.status ?? "not-reached"} /> },
+    {
+      key: "took",
+      head: "took",
+      numeric: true,
+      cell: (row) => {
+        const c = overlay.get(row.id)
+        if (c?.durationUs == null) return <Dash />
+        return (
+          <>
+            {formatMicros(c.durationUs)}
+            {c.executions > 1 && <span className="text-muted-foreground"> · {c.executions}×</span>}
+          </>
+        )
+      },
+    },
+    {
+      key: "wrote",
+      head: "Wrote",
+      cell: (row) => {
+        const paths = overlay.get(row.id)?.changes ?? []
+        return paths.length ? <span className="font-mono text-xs text-muted-foreground">{paths.join(", ")}</span> : <Dash />
+      },
+    },
+  ]
 
   return (
     <div className="space-y-4">
@@ -162,8 +146,7 @@ export function RunLens({
 
       {foreign && (
         <Callout variant="warning">
-          This trace ran through {trace.channel}, which does not run this workflow now. Steps it does not mention read
-          as not reached.
+          This trace ran {ranWorkflow}, not this workflow. Steps it does not mention read as not reached.
         </Callout>
       )}
       {timeline.truncated && (
@@ -172,7 +155,13 @@ export function RunLens({
         </Callout>
       )}
 
-      <LensTable lens="run" sections={sections} loop={workflow.loop} overlay={overlay} caption={`Trace ${trace.id.slice(0, 8)} over the steps`} />
+      <LensTable
+        workflow={workflow}
+        sections={sections}
+        columns={columns}
+        caption={`Trace ${trace.id.slice(0, 8)} over the steps`}
+        rowTone={(row) => (overlay.get(row.id)?.status === "failed" ? "bad" : undefined)}
+      />
 
       <LensInsights insights={insights} label="Last run read-outs" />
     </div>
@@ -182,54 +171,55 @@ export function RunLens({
 function NoStepData({
   runsOn,
   trace,
-  pinned,
+  gap,
   onClearTrace,
 }: {
   runsOn: Channel[]
   trace: TraceDetail | null
-  pinned: boolean
-  onClearTrace: () => void
+  gap: StepDataGap | null
+  onClearTrace?: () => void
 }) {
-  if (pinned) {
-    return (
-      <Callout variant="muted">
-        <div className="space-y-2">
-          <p>
-            Trace <code className="font-mono">{trace?.id.slice(0, 8)}</code> kept no step data — its channel does not
-            record <code className="font-mono">tracing.task_details</code>, or kept them for failed runs only.
+  const ch = runsOn[0]
+  const route = ch ? entityRoute("channel", ch.channel_id) : null
+  // With no channel the opening sentence already says it all.
+  const reason = !trace && !ch ? "" : gap ? GAP_TEXT[gap] : "None of its recent runs kept step data."
+  return (
+    <Callout variant="muted">
+      <div className="space-y-2">
+        <p>
+          {trace ? (
+            <>
+              Trace <code className="font-mono">{trace.id.slice(0, 8)}</code> kept no step data.
+            </>
+          ) : ch ? (
+            <>
+              No recent trace through{" "}
+              {route ? (
+                <Link to={route} className="font-mono">
+                  {ch.name}
+                </Link>
+              ) : (
+                ch.name
+              )}{" "}
+              carries step data, so there is no run to lay over the steps.
+            </>
+          ) : (
+            "No channel runs this workflow, so there is no run to show."
+          )}{" "}
+          {reason}
+        </p>
+        {ch && (gap === "details_off" || gap === "errors_only") && (
+          <p className="text-xs">
+            Turn on <code className="font-mono">task_details</code> in the channel&apos;s tracing settings to see where a
+            run&apos;s time goes; with <code className="font-mono">errors_only</code> a slow run that succeeded keeps no
+            steps.
           </p>
+        )}
+        {onClearTrace && (
           <Button size="xs" variant="outline" onClick={onClearTrace}>
             Look for the newest run with step data
           </Button>
-        </div>
-      </Callout>
-    )
-  }
-  if (runsOn.length === 0) {
-    return <Callout variant="muted">No channel runs this workflow, so there is no run to show.</Callout>
-  }
-  const ch = runsOn[0]
-  const tracing = ch.config?.tracing
-  const reason = !tracing?.task_details
-    ? "It does not record step data: tracing.task_details is off."
-    : tracing.errors_only
-      ? "It keeps step data for failed runs only (errors_only), and none of its recent runs failed."
-      : "None of its recent runs kept step data."
-  return (
-    <Callout variant="muted">
-      <div className="space-y-1.5">
-        <p>
-          No recent trace through{" "}
-          <Link to={`/channels/${ch.channel_id}`} className="font-mono">
-            {ch.name}
-          </Link>{" "}
-          carries step data, so there is no run to lay over the steps. {reason}
-        </p>
-        <p className="text-xs">
-          Turn on <code className="font-mono">task_details</code> in the channel&apos;s tracing settings to see where a
-          run&apos;s time goes; with <code className="font-mono">errors_only</code> a slow run that succeeded keeps no
-          steps.
-        </p>
+        )}
       </div>
     </Callout>
   )

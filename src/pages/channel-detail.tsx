@@ -28,7 +28,7 @@ import { RetrySafetyWarning } from "@/components/shared/retry-safety-warning"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { NeighbourhoodMap } from "@/components/graph/neighbourhood-map"
 import { ResponseCacheCard } from "@/components/admin/response-cache-card"
-import { formatDate } from "@/lib/utils"
+import { formatDate, plural } from "@/lib/utils"
 import { CalendarClock, Network, Pencil, Play, Send } from "lucide-react"
 
 /** One label / value line in a configuration card. */
@@ -226,8 +226,7 @@ export function ChannelDetailPage() {
                             className="text-muted-foreground"
                             title="How many runs of the key are admitted at once. Each holds its slot for the whole attempt and reads it as metadata.trigger.singleton_slot."
                           >
-                            {" "}· {concurrencySlots(schedule)} slot
-                            {concurrencySlots(schedule) === 1 ? "" : "s"}
+                            {" "}· {plural(concurrencySlots(schedule) ?? 1, "slot")}
                           </span>
                           <span className="block font-mono text-xs text-muted-foreground">
                             {schedule.concurrency.key ?? channel.channel_id}

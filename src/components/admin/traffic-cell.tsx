@@ -1,12 +1,14 @@
 import type { MetricsState } from "@/hooks/use-metrics"
-import { compactNumber, formatMs, formatPct, healthDot, type HealthLevel } from "@/lib/traffic-encoding"
-import { cn } from "@/lib/utils"
+import { METRICS_STATE_TEXT, metricsShort } from "@/lib/metrics-state"
+import { healthDot, trafficLine, type HealthLevel } from "@/lib/traffic-encoding"
+import { cn, plural } from "@/lib/utils"
 
 /**
- * One row's live traffic in a list cell: a health dot, the rate, the error
- * share and p95, or why there is nothing to show — `idle` (no requests in the
- * window), a warming feed, or metrics that are off. Shared by the channel and
- * connector lists so the two read the same.
+ * One row's live traffic in a list cell: a health dot and the shared
+ * `trafficLine` (rate · error share · p95), or why there is nothing to show —
+ * `idle` (no requests in the window), or the feed's own state in the words
+ * every page uses (`METRICS_STATE_TEXT`). Shared by the channel and connector
+ * lists so the two read the same.
  */
 export function TrafficCell({
   state,
@@ -26,36 +28,33 @@ export function TrafficCell({
   windowed: number | null | undefined
   spanLabel?: string
 }) {
-  if (state === "off" || state === "error") {
+  if (state === "off" || state === "error" || state === "loading") {
     return (
-      <span className="text-muted-foreground" title={state === "off" ? "Metrics are off on this server" : "The metrics scrape failed"}>
-        —
+      <span className="text-xs text-muted-foreground" title={METRICS_STATE_TEXT[state].sentence}>
+        {state === "loading" ? "…" : "—"}
       </span>
     )
   }
-  if (state === "loading") return <span className="text-xs text-muted-foreground">…</span>
   if (!windowed) {
+    const warming = state === "warming"
     return (
       <span
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
-        title={state === "warming" ? "Waiting for a second sample" : `No requests ${spanLabel ?? "in the window"}`}
+        title={warming ? METRICS_STATE_TEXT.warming.sentence : `No requests ${spanLabel ?? "in the window"}`}
       >
         <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", healthDot.idle)} />
-        {state === "warming" ? "warming" : "idle"}
+        {warming ? metricsShort("warming") : "idle"}
       </span>
     )
   }
+  const line = trafficLine({ ratePerMin, errorPct, p95Ms })
   return (
     <span
       className="inline-flex items-center gap-1.5 whitespace-nowrap font-mono text-xs tabular-nums"
-      title={`${windowed.toLocaleString()} requests ${spanLabel ?? ""} · ${formatPct(errorPct)} errors · p95 ${formatMs(p95Ms)}`}
+      title={`${plural(windowed, "request")} ${spanLabel ?? ""} · ${line}`}
     >
       <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", healthDot[level])} />
-      <span>{compactNumber(ratePerMin)}/min</span>
-      <span className="text-muted-foreground">·</span>
-      <span>{formatPct(errorPct)}</span>
-      <span className="text-muted-foreground">·</span>
-      <span>{formatMs(p95Ms)}</span>
+      {line}
     </span>
   )
 }

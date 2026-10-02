@@ -74,30 +74,30 @@ export const WORKFLOW: Pick<Workflow, "tasks" | "loop"> = {
   },
   tasks: [
     task("pairing", "map"),
-    task("insert", "db_write", { connector: "soma-db" }, "Insert the match and its seats"),
+    task("insert", "db_write", { connector: "soma-db", sql: "INSERT INTO matches (id) VALUES ($1)" }, "Insert the match and its seats"),
     task("held", "filter"),
     task("bump_work.bump", "cache_incr", { connector: "soma-cache", key: "gen:work" }, "Move a generation"),
     task("after", "log"),
   ],
 }
 
-const fn = (name: string, kind: string, extra: Partial<FunctionSchema> = {}): FunctionSchema => ({
-  name,
-  description: "",
-  category: "connector",
-  source: "orion",
-  retry_safety: { kind },
-  ...extra,
-})
+const fn = (
+  name: string,
+  category: string,
+  retry_safety: FunctionSchema["retry_safety"],
+  extra: Partial<FunctionSchema> = {},
+): FunctionSchema => ({ name, description: "", category, source: "orion", retry_safety, ...extra })
 
 export const CATALOGUE: FunctionSchema[] = [
-  fn("db_read", "read"),
-  fn("db_write", "unsafe_write"),
-  fn("cache_incr", "unsafe_write"),
-  fn("filter", "pure", { source: "engine" }),
-  fn("map", "pure", { source: "engine" }),
-  fn("log", "pure", { source: "engine" }),
-  fn("tb.pairing.pair", "pure", {
+  // As 1.12 serves them: `db_write` and `http_call` depend on their input.
+  fn("db_read", "connector", { kind: "read" }),
+  fn("db_write", "connector", { kind: "depends_on", input: "sql" }),
+  fn("http_call", "connector", { kind: "depends_on", input: "method" }),
+  fn("cache_incr", "connector", { kind: "unsafe_write" }),
+  fn("filter", "control", { kind: "pure" }, { source: "engine" }),
+  fn("map", "data", { kind: "pure" }, { source: "engine" }),
+  fn("log", "utility", { kind: "pure" }, { source: "engine" }),
+  fn("tb.pairing.pair", "plugin", { kind: "pure" }, {
     source: "plugin",
     plugin: { id: "tb.pairing", version: 2, digest: "sha256:ab", abi: "1.0" },
   }),

@@ -15,7 +15,10 @@ vi.mock("@/hooks/use-workflows", () => ({
 vi.mock("@/hooks/use-ops-metrics", () => ({
   useWorkflowCost: () => ({ state: "live", tasks: COSTS }),
 }))
-vi.mock("@/hooks/use-functions", () => ({ useFunctions: () => ({ data: CATALOGUE }) }))
+vi.mock("@/hooks/use-functions", async () => {
+  const { functionIndex } = await import("@/lib/function-effects")
+  return { useFunctionIndex: () => functionIndex(CATALOGUE) }
+})
 vi.mock("@/hooks/use-connectors", () => ({
   useConnectors: () => ({ data: { data: [{ id: "c-cache", name: "soma-cache" }] } }),
 }))
@@ -46,6 +49,14 @@ describe("TraceSteps", () => {
     expect(within(detail).getByRole("link", { name: /Open soma-cache/ })).toHaveAttribute("href", "/connectors/c-cache")
     expect(screen.getByText(/Snapshots from step 11 \(bump_work.bump\) on were dropped/)).toBeInTheDocument()
     expect(screen.getByText("Not reached: after.")).toBeInTheDocument()
+  })
+
+  it("links the workflow the run's steps name, not the channel's current one", () => {
+    renderAt("/traces/x", trace, { ...channel({ task_details: true }), workflow_id: "re-pointed" } as Channel)
+    expect(screen.getByRole("link", { name: /Show on workflow/ })).toHaveAttribute(
+      "href",
+      `/workflows/soma-clock-pair-run?lens=run&trace=${TRACE.id}`,
+    )
   })
 
   it("reads the selection from ?step=", () => {

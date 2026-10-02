@@ -1,8 +1,7 @@
 import { Button } from "@/components/ui/button"
 import type { EntityStatus, ValidationResponse } from "@/api/types"
 import { Play, Archive, GitBranch, ShieldCheck } from "lucide-react"
-import { useState } from "react"
-import { ConfirmDialog } from "@/components/shared/confirm-dialog"
+import { ConfirmButton } from "@/components/shared/confirm-button"
 import { ValidationResults } from "@/components/shared/validation-results"
 import { MoreActions } from "@/components/admin/more-actions"
 
@@ -52,12 +51,10 @@ export function LifecycleActions({
   activateRefusedReason,
   entityName,
 }: LifecycleActionsProps) {
-  const [confirmArchive, setConfirmArchive] = useState(false)
-
   // One primary action, and it follows the lifecycle: a draft's next step is
   // Activate, an active entity's is a new version to change it. Archive is a
-  // secondary outline button; Delete sits in the overflow menu behind
-  // type-to-confirm (`MoreActions`).
+  // secondary outline button that asks first; Delete — the only delete path —
+  // sits in the overflow menu behind type-to-confirm (`MoreActions`).
   return (
     <>
       <div className="flex items-center gap-2">
@@ -68,10 +65,20 @@ export function LifecycleActions({
           </Button>
         )}
         {status === "active" && onArchive && (
-          <Button size="sm" variant="outline" onClick={() => setConfirmArchive(true)} disabled={isPending}>
-            <Archive className="h-3.5 w-3.5" />
-            Archive
-          </Button>
+          <ConfirmButton
+            icon={Archive}
+            label="Archive"
+            disabled={isPending}
+            dialog={{
+              title: "Archive",
+              description:
+                "This will remove it from the engine and stop handling traffic. Are you sure?",
+            }}
+            onConfirm={(close) => {
+              close()
+              onArchive()
+            }}
+          />
         )}
         {status === "draft" && onActivate && (
           <Button
@@ -102,18 +109,6 @@ export function LifecycleActions({
         <div className="mt-3">
           <ValidationResults result={preflight} validLabel="Ready to activate." />
         </div>
-      )}
-
-      {confirmArchive && onArchive && (
-        <ConfirmDialog
-          title="Archive"
-          description="This will remove it from the engine and stop handling traffic. Are you sure?"
-          onConfirm={() => {
-            onArchive()
-            setConfirmArchive(false)
-          }}
-          onCancel={() => setConfirmArchive(false)}
-        />
       )}
     </>
   )

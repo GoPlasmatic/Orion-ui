@@ -21,7 +21,7 @@ import { WorkflowImportWizard } from "@/components/shared/workflow-import-wizard
 import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { EntityTable } from "@/components/shared/entity-table"
 import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter-bar"
-import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
+import { formatDate, formatWhen, downloadJson, plural } from "@/lib/utils"
 import { Download, GitBranch, Plus, Upload } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, Workflow>()
@@ -92,7 +92,7 @@ function buildColumns(runsOn: ReadonlyMap<string, Channel[]>) {
             className="text-xs text-muted-foreground"
             title={channels.map((c) => `${c.name} (${c.status})`).join(", ")}
           >
-            {channels.length} channel{channels.length === 1 ? "" : "s"}
+            {plural(channels.length, "channel")}
             {active !== channels.length ? ` · ${active} active` : ""}
           </span>
         )
@@ -150,7 +150,7 @@ export function WorkflowsPage() {
   const exportAll = useExport(async () => {
     const workflows = await workflowsApi.export(query)
     downloadJson(workflows, "orion-workflows")
-    return `Exported ${workflows.length} workflow${workflows.length !== 1 ? "s" : ""}`
+    return `Exported ${plural(workflows.length, "workflow")}`
   })
 
   const table = useTable({
