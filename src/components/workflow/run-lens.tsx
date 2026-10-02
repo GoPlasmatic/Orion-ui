@@ -20,7 +20,7 @@ const GAP_TEXT: Record<StepDataGap, string> = {
   no_channel: "Its channel does not run this workflow now, so why it kept no steps cannot be read from here.",
   details_off: "The channel does not record step data: tracing.task_details is off.",
   errors_only: "The channel keeps step data for failed runs only (errors_only), and none failed recently.",
-  failed_before_steps: "The run failed before its first step.",
+  failed_unrecorded: "The run failed and kept no steps — before its first step, or its error ended the run unrecorded.",
   ran_nothing: "The run executed no step — a condition or the rollout gate skipped it.",
 }
 

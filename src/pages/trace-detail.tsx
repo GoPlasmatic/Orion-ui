@@ -10,6 +10,8 @@ import { JsonViewer } from "@/components/shared/json-viewer"
 import { ErrorState } from "@/components/shared/error-state"
 import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { formatDate, formatDuration, serverSpan, cn } from "@/lib/utils"
+import { buildTimeline } from "@/lib/trace-timeline"
+import type { TraceDetail } from "@/api/types"
 import { traceStatusBadgeClass } from "@/lib/status"
 import { firstTaskPayload } from "@/lib/trace-payload"
 import { traceWorkflowId } from "@/lib/trace-timeline"
@@ -165,7 +167,7 @@ export function TraceDetailPage() {
               )
             )}
             <span className="text-sm tabular-nums text-muted-foreground">
-              {formatDuration(trace.duration_ms ?? serverSpan(trace.started_at, trace.completed_at))}
+              {formatDuration(runDurationMs(trace))}
             </span>
             <span className="ml-auto flex items-center gap-1 font-mono text-xs text-muted-foreground">
               {trace.id}
@@ -306,4 +308,18 @@ function Meta({ label, value }: { label: string; value: string }) {
       <dd className="mt-0.5">{value}</dd>
     </div>
   )
+}
+
+/**
+ * How long the run took. The row's `duration_ms` (or its two instants) is the
+ * answer — except on a sync trace, which 1.12 stamps at persist time, so the
+ * row reads well under a millisecond for a run whose steps took 800 ms. When
+ * the steps say the run was longer, the steps win.
+ */
+function runDurationMs(trace: TraceDetail): number | null {
+  const row = trace.duration_ms ?? serverSpan(trace.started_at, trace.completed_at)
+  const steps = buildTimeline(trace)
+  const fromSteps = steps ? steps.totalUs / 1000 : null
+  if (fromSteps == null) return row
+  return row == null ? fromSteps : Math.max(row, fromSteps)
 }

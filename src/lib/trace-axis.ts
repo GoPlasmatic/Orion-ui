@@ -27,6 +27,8 @@ export interface AxisTick {
   us: number
   pct: number
   label: string
+  /** Which way the label runs from its tick: away from a break's hatch. */
+  align: "start" | "center" | "end"
 }
 
 export interface TimeAxis {
@@ -166,7 +168,7 @@ function splitSegments(timeline: Timeline): AxisSegment[] | null {
 
 /** Round values inside each segment, thinned so no two labels collide. */
 function buildTicks(segments: AxisSegment[], x: (us: number) => number, totalUs: number): AxisTick[] {
-  const raw: AxisTick[] = [{ us: 0, pct: 0, label: "0" }]
+  const raw: AxisTick[] = [{ us: 0, pct: 0, label: "0", align: "start" }]
   for (const s of segments) {
     const width = s.endPct - s.startPct
     const n = Math.max(1, Math.round(width / 15))
@@ -174,21 +176,36 @@ function buildTicks(segments: AxisSegment[], x: (us: number) => number, totalUs:
     const first = Math.ceil(s.fromUs / step) * step
     for (let us = first === 0 ? step : first; us <= s.toUs + 1e-6; us += step) {
       if (us >= totalUs) break
-      raw.push({ us, pct: x(us), label: formatTick(us) })
+      raw.push({ us, pct: x(us), label: formatTick(us), align: "center" })
     }
     // The break value itself is worth naming even when it is not a multiple.
     if (s.toUs < totalUs && !raw.some((t) => t.us === s.toUs)) {
-      raw.push({ us: s.toUs, pct: x(s.toUs), label: formatTick(s.toUs) })
+      raw.push({ us: s.toUs, pct: x(s.toUs), label: formatTick(s.toUs), align: "center" })
     }
   }
   raw.sort((a, b) => a.pct - b.pct)
-  const end: AxisTick = { us: totalUs, pct: 100, label: formatMicros(totalUs) }
+  // A label centred on a break edge would sit on the hatch: one just before a
+  // break runs leftwards from its tick, one just after runs rightwards.
+  const EDGE = 3
+  for (let i = 1; i < segments.length; i++) {
+    const before = segments[i - 1].endPct
+    const after = segments[i].startPct
+    for (const t of raw) {
+      if (t.pct > before - EDGE && t.pct <= before) t.align = "end"
+      else if (t.pct >= after && t.pct < after + EDGE) t.align = "start"
+      else if (t.pct > before && t.pct < after) t.align = "center"
+    }
+  }
+  const end: AxisTick = { us: totalUs, pct: 100, label: formatMicros(totalUs), align: "end" }
   const MIN_GAP = 7
   const kept: AxisTick[] = []
   for (const t of raw) {
     if (100 - t.pct < MIN_GAP) continue
     const prev = kept[kept.length - 1]
-    if (prev && t.pct - prev.pct < MIN_GAP) continue
+    // An end-aligned label and the start-aligned one after the break point
+    // away from each other, so they may sit closer.
+    const gap = prev && prev.align === "end" && t.align === "start" ? 2 : MIN_GAP
+    if (prev && t.pct - prev.pct < gap) continue
     kept.push(t)
   }
   kept.push(end)

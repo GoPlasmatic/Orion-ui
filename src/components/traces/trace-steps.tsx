@@ -130,8 +130,8 @@ function gapText(gap: StepDataGap, trace: TraceDetail, channelName: string | und
           fail. A slow run that succeeds keeps no steps.
         </>
       )
-    case "failed_before_steps":
-      return "The run failed before its first step: refused at admission, by validation or before the workflow was chosen."
+    case "failed_unrecorded":
+      return "The run failed and kept no steps: either before its first step (refused at admission or by validation), or the error ended it before the engine recorded them. The error above names what failed."
     case "ran_nothing":
       return (
         <>

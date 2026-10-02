@@ -1,3 +1,4 @@
+import { METRICS_STATE_TEXT, metricsShort } from "@/lib/metrics-state"
 import { useMemo } from "react"
 import { Link } from "react-router"
 import { ArrowUpRight } from "lucide-react"
@@ -32,7 +33,8 @@ export function ChannelTrafficCard({ channelName }: { channelName: string }) {
   const series = traffic.seriesFor(channelName)
   const windowLabel = trafficWindowLabel(DEFAULT_TRAFFIC_WINDOW)
   const level = healthOf(t)
-  const metricsOff = !traffic.isLoading && !traffic.available
+  // No sample to show: loading, off or unreachable — each says so in its own words.
+  const noSample = traffic.state === "loading" || traffic.state === "off" || traffic.state === "error"
 
   return (
     <Card>
@@ -40,15 +42,14 @@ export function ChannelTrafficCard({ channelName }: { channelName: string }) {
         <CardTitle className="flex items-center justify-between text-sm">
           Traffic
           <span className="text-xs font-normal text-muted-foreground">
-            {metricsOff ? "metrics off" : traffic.hasRate ? `last ${windowLabel}` : "waiting for a second sample"}
+            {traffic.state === "live" ? `last ${windowLabel}` : metricsShort(traffic.state)}
           </span>
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {metricsOff ? (
+        {noSample ? (
           <p className="text-sm text-muted-foreground">
-            Metrics are off on this server (<code className="font-mono">[metrics]</code>), so
-            there is no rate, error share or latency to show. Traces below still record every run.
+            {METRICS_STATE_TEXT[traffic.state].sentence} Traces below still record every run.
           </p>
         ) : !t || t.windowed === 0 ? (
           <div className="text-sm text-muted-foreground">

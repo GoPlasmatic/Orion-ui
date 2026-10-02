@@ -149,3 +149,15 @@ describe("trace helpers", () => {
     expect(loopBinding({ loop: { max: 3 } })).toBeNull()
   })
 })
+
+describe("a sync trace stamped at persist time", () => {
+  it("measures from the first step when the row's start comes after it", () => {
+    // Sync rows on 1.12: started_at == completed_at, both after the steps ran.
+    const persisted = "2026-10-02T05:41:24.300000"
+    const t = buildTimeline({ ...TRACE, status: "completed", error: undefined, started_at: persisted, completed_at: persisted })!
+    expect(t.steps[0].startUs).toBe(0)
+    expect(t.steps.every((s) => (s.startUs ?? 0) >= 0)).toBe(true)
+    expect(t.totalUs).toBeGreaterThanOrEqual(t.engineEndUs)
+    expect(t.admissionUs).toBe(0)
+  })
+})

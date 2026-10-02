@@ -384,7 +384,7 @@ export function useChannelTraffic(windowSec: number, paused = false): TrafficWin
   const errorStatus = query.error instanceof ApiError ? query.error.status : null
   return useMemo(() => {
     const core = windowCore(cur, windowSec)
-    const state = metricsState(core, query.isLoading, query.isError, errorStatus)
+    const state = metricsState(core, query.isPending, query.isError, errorStatus)
     return {
       ...core,
       isLoading: query.isLoading,
@@ -392,7 +392,7 @@ export function useChannelTraffic(windowSec: number, paused = false): TrafficWin
       state,
       spanLabel: SPAN_LABEL[state](core.spanSec),
     }
-  }, [cur, windowSec, query.isLoading, query.isError, errorStatus])
+  }, [cur, windowSec, query.isLoading, query.isPending, query.isError, errorStatus])
 }
 
 type WindowCore = Omit<TrafficWindow, "isLoading" | "isError" | "spanLabel" | "state">
@@ -412,6 +412,9 @@ const SPAN_LABEL: Record<MetricsState, (spanSec: number) => string> = {
  */
 export function metricsState(
   core: { available: boolean; hasRate: boolean },
+  // `isPending`, not `isLoading`: a first fetch whose retry is paused (the tab
+  // is in the background) is pending without fetching, and it has not
+  // answered — it must not read as "metrics off".
   isLoading: boolean,
   isError: boolean,
   errorStatus: number | null,

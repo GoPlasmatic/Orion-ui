@@ -166,10 +166,12 @@ export function traceWorkflowId(
 /**
  * Why a trace has no steps to show, as a reason a page can word: the run has
  * not settled; the channel is unknown; `tracing.task_details` is off; it keeps
- * failures only and this run did not fail; it failed before its first step; or
+ * failures only and this run did not fail; it failed without a recorded step
+ * (before the first one, or — observed on 1.12 for an IO error — the error
+ * ended the run before the engine kept its steps); or
  * it ran nothing (a condition or rollout gate skipped it).
  */
-export type StepDataGap = "unsettled" | "no_channel" | "details_off" | "errors_only" | "failed_before_steps" | "ran_nothing"
+export type StepDataGap = "unsettled" | "no_channel" | "details_off" | "errors_only" | "failed_unrecorded" | "ran_nothing"
 
 export function stepDataGap(
   trace: Pick<TraceDetail, "status">,
@@ -180,7 +182,7 @@ export function stepDataGap(
   const tracing = channel.config?.tracing
   if (!tracing?.task_details) return "details_off"
   if (tracing.errors_only && trace.status !== "failed") return "errors_only"
-  if (trace.status === "failed") return "failed_before_steps"
+  if (trace.status === "failed") return "failed_unrecorded"
   return "ran_nothing"
 }
 
@@ -199,7 +201,13 @@ export function buildTimeline(
 
   const stepStarts = et.steps.map((s) => parseInstantUs(s.started_at))
   const firstStepUs = stepStarts.find((v): v is number => v != null) ?? null
-  const origin = parseInstantUs(trace.started_at) ?? firstStepUs ?? 0
+  // The trace row's own instants are not always the run's: a sync trace is
+  // stamped when it is persisted, after its steps ran, with started_at equal to
+  // completed_at (observed on 1.12). So the timeline starts at whichever is
+  // earlier, the row's start or its first step, and never runs backwards.
+  const rowStart = parseInstantUs(trace.started_at)
+  const origin =
+    rowStart != null && firstStepUs != null ? Math.min(rowStart, firstStepUs) : (rowStart ?? firstStepUs ?? 0)
 
   const steps: TimelineStep[] = et.steps.map((s, index) => {
     const taskId = s.task_id ?? `step ${index + 1}`
@@ -251,6 +259,8 @@ export function buildTimeline(
     gaps++
   }
   const completed = parseInstantUs(trace.completed_at)
+  // A completion stamped before the last step ended (the sync case above) says
+  // nothing about settle time, so it does not shorten the run.
   const totalUs = Math.max(engineEndUs, completed != null ? completed - origin : engineEndUs)
 
   // Groups, in step order.

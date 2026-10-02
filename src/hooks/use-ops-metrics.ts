@@ -43,7 +43,7 @@ function useWindowed(windowSec: number, paused = false) {
   const base = cur ? windowBase(cur, windowSec) : null
   const state = metricsState(
     { available: !!cur && cur.lines.length > 0, hasRate: !!base },
-    query.isLoading,
+    query.isPending,
     query.isError,
     errorStatus,
   )
@@ -77,7 +77,7 @@ function useFeed() {
   const errorStatus = query.error instanceof ApiError ? query.error.status : null
   const state = metricsState(
     { available: !!cur && cur.lines.length > 0, hasRate: true },
-    query.isLoading,
+    query.isPending,
     query.isError,
     errorStatus,
   )

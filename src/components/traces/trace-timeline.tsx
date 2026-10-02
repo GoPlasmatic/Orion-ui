@@ -426,7 +426,7 @@ export function TraceTimeline({ timeline, effects, costs, selected, onSelect, mo
                       key={`${t.us}-${i}`}
                       className={cn(
                         "absolute top-0 whitespace-nowrap",
-                        i === 0 ? "" : i === axis.ticks.length - 1 ? "-translate-x-full" : "-translate-x-1/2",
+                        t.align === "start" ? "" : t.align === "end" ? "-translate-x-full" : "-translate-x-1/2",
                       )}
                       style={{ left: `${t.pct}%` }}
                     >
