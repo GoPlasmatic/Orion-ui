@@ -95,17 +95,18 @@ test("the request left a trace", async ({ page }) => {
 })
 
 test("backups can be created and listed", async ({ page }) => {
-  await page.goto("/engine")
+  // Backups sit on the Engine page's Maintenance tab since the 1.12 revamp.
+  await page.goto("/engine?tab=maintenance")
   await page.getByRole("button", { name: "Create Backup" }).click()
   await expect(page.getByText(/orion_backup_/).first()).toBeVisible({ timeout: 10_000 })
 })
 
 test("workflow dependencies come from the server, not client-side parsing", async ({ page }) => {
-  await page.goto(`/workflows/${workflowId}`)
-  await page.getByRole("tab", { name: "Dependencies" }).click()
-  // The seeded pipeline is a single map task, so it references no connectors —
-  // the panel must say so rather than render empty.
-  await expect(page.getByText("No connector-backed tasks.")).toBeVisible()
+  // Dependencies is a lens over the diagram since the 1.12 revamp, kept in ?lens=.
+  await page.goto(`/workflows/${workflowId}?lens=deps`)
+  // The seeded pipeline is a single map task, so it references nothing — the
+  // lens must say so rather than render an empty map.
+  await expect(page.getByText("Touches nothing outside the message")).toBeVisible()
 })
 
 test("a connector can be created and probed", async ({ page }) => {
@@ -228,7 +229,8 @@ test("a triggered run leaves a trace with mode cron", async ({ page }) => {
 test("archiving the cron channel stops it", async ({ page }) => {
   await page.goto(`/channels/${cronChannelId}`)
   await page.getByRole("button", { name: "Archive" }).click()
-  await page.getByRole("button", { name: "Confirm" }).click()
+  // The dialog's confirm button names the action rather than saying "Confirm".
+  await page.getByRole("dialog").getByRole("button", { name: "Archive" }).click()
   await expect(page.getByRole("button", { name: "Archive" })).toHaveCount(0)
 })
 
