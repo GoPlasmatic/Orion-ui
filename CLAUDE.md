@@ -28,8 +28,8 @@ install with either fails. `@xyflow/react` is pinned *exactly* to the version
 The `overrides` block is deliberate too. Both entries force a *patch* bump inside the same minor
 line on a transitive dependency its parent pins to an exact version — which is why `npm audit fix`
 is a no-op on them and an override is the only lever. `monaco-editor` (via
-`@monaco-editor/react` <- `@goplasmatic/dataflow-ui`) pins `dompurify` at `3.4.8`, vulnerable
-through `3.4.12`; `@redocly/openapi-core` (via `openapi-typescript`) pins `js-yaml` at `4.3.1`,
+`@monaco-editor/react` <- `@goplasmatic/dataflow-ui`) pins `dompurify` below `3.4.16`, which is
+vulnerable through `3.4.15` (override moved to `3.4.16` on 2026-10-02); `@redocly/openapi-core` (via `openapi-typescript`) pins `js-yaml` at `4.3.1`,
 vulnerable through that version. Each override is scoped to the pinning parent rather than
 declared globally, so nothing else in the tree is forced onto a version it did not ask for. Drop
 an entry once its parent ships a release that depends on the patched version itself.
@@ -71,7 +71,7 @@ Orion UI is a React 19 dashboard for the Orion workflow engine. It uses Vite 8, 
 
 ### Core Domain
 
-Targets the Orion **v1.9.0** API (dataflow-rs 3.13 / datalogic-rs 5.5). Five primitives with a
+Targets the Orion **v1.12.0** API (dataflow-rs 3.15 / datalogic-rs 5.7). Five primitives with a
 Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 
 - **Channels** — Service endpoints (sync/async, REST/HTTP/Kafka/**cron**). Config covers `auth`
@@ -101,8 +101,9 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   contiguous run, plus `terminal` to end the workflow after a step. Full authoring via
   `workflow-form.tsx` (visual condition editor + steps JSON with a client-side shape lint and
   task/guard-clause snippets + server-side Validate), plus import wizard, dry-run test, export,
-  canary rollout (`PATCH /{id}/rollout`), and a **Dependencies** tab backed by
-  `GET admin/workflows/{id}/dependencies`. Uses `@goplasmatic/dataflow-ui` `WorkflowVisualizer`
+  canary rollout (`PATCH /{id}/rollout`), and four **lenses** over the diagram — Structure (the
+  visualizer), Dependencies (backed by `GET admin/workflows/{id}/dependencies`), Cost (per-task
+  share of a run from metrics) and Last run (a trace's steps overlaid). Uses `@goplasmatic/dataflow-ui` `WorkflowVisualizer`
   and `@goplasmatic/datalogic-ui` `DataLogicEditor`.
 - **Connectors** — External system connections: `http`, `kafka`, `db`, `cache`, `es`, `storage`,
   **`smtp`**. Full CRUD + Validate + **Test** (reachability probe) + export. Keyed by `id` (a UUID,
@@ -147,6 +148,33 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   faults.
 
 ### v1.x wire contracts worth remembering
+
+- **1.10–1.12 additions.** `POST admin/cron/occurrences/{id}/cancel` settles a `pending` |
+  `claimed` | `running` occurrence as failed (409 once finished; `lib/cron.ts::isCancellable`).
+  `POST admin/cache/namespaces/{ns}/invalidate` answers `{namespace, stores}`; a channel names
+  its namespaces in `cache.namespaces` (1–8, `a-z0-9_-.:`) and may set `cache.coalesce_misses`.
+  There is **no namespace listing** — `lib/cache-namespaces.ts` reads them off the channel
+  registry. `oauth2_login` (1.11) is the flat form *or* `providers` keyed by slug (routes and
+  `redirect_uri` then carry `{provider}`), with `issuer` (OIDC discovery), `kind`,
+  `userinfo_url`, `identity` and `providers_from_instance`; `lib/oauth2-login.ts` lints it.
+  Audit gained `cancel` / `invalidate` / `cache_namespace` (`lib/audit-vocabulary.ts`).
+- **A workflow's steps are `loop.setup` then `tasks` (1.10).** Every server walk covers the
+  loop's setup; `workflowSteps(workflow)` is the client's. A task may carry `for_each`. Counting
+  or reference-walking `workflow.tasks` alone misses whatever the setup reads.
+- **Trace steps (dataflow-rs 3.15).** Under `tracing.task_details` each executed step carries
+  `started_at` (RFC 3339, ns, `Z`), `duration_us`, `changes`, `loop_counter`, `element_index`;
+  the trace may be `truncated` (snapshots dropped, timings kept). `result` is only `executed` |
+  `skipped` — **a step that errored is `executed`**; the failure is named in the trace's error
+  prose (`lib/trace-error.ts::parseEngineError`). Observed quirks the timeline absorbs
+  (`lib/trace-timeline.ts`): a **sync** trace row is stamped at persist time (`started_at ==
+  completed_at`, after the steps, `duration_ms` ≈ 0), so the steps' span wins; a failure the
+  engine reports as an IO error can keep **no** steps; a sync request that times out or fails
+  with a 5xx persists **no trace at all**. With `errors_only`, a successful run keeps nothing.
+- **Function effects come from the catalogue.** `lib/function-effects.ts::stepEffect` reads
+  `category: "connector"`, `source: "plugin"` + `plugin`, and `retry_safety`, resolving
+  `depends_on` from a literal input (`http_call` method, `data_write`/`mongo_write` op,
+  `db_write` sql). It is the one answer to "what does this step touch" and "does a retry repeat
+  it" — the trace timeline, the workflow lenses, the map and the retry guard all use it.
 
 - **A reload's 200 is not proof that anything is serving (1.9).** A reload never fails because
   one entity did not load: the entity is quarantined and everything else serves. `POST
@@ -442,7 +470,7 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   Input/Textarea/Select — change it there, not per field. `Select` renders a wrapper div so it can
   overlay a themed chevron: `className` sizes the *control* (as callers already expected),
   `selectClassName` reaches the `<select>` itself.
-- **`src/components/shared/`** — Shared composed components: `StatusBadge`, `LifecycleActions` (incl. the activation pre-flight), `VersionHistory`, `JsonViewer`, `PageHeader`, `ConfirmDialog`, `PaginationFooter`, `ValidationResults`, `ImportDialog`/`ImportSummary`, `ChannelAuthEditor`, `ConnectorTestDialog`, `WorkflowDependencies`, `FilterBar` (with `FilterTextInput` and `UnknownOption`), `EmptyState`/`NoMatches`, `ErrorState` (the one
+- **`src/components/shared/`** — Shared composed components: `StatusBadge`, `LifecycleActions` (incl. the activation pre-flight), `VersionHistory`, `JsonViewer`, `PageHeader`, `ConfirmDialog`, `PaginationFooter`, `ValidationResults`, `ImportDialog`/`ImportSummary`, `ChannelAuthEditor`, `ConnectorTestDialog`, `Fact`/`InlineFact`, `ConfirmButton`, `FilterBar` (with `FilterTextInput` and `UnknownOption`), `EmptyState`/`NoMatches`, `ErrorState` (the one
   way a page reports a failed load — reads status, code, field details and request id off
   `ApiError`, with Retry) and `ErrorBoundary`.
 - **`src/components/layout/`** — `AppLayout`, `Sidebar`, `Header`. `AppLayout` owns the two
@@ -456,8 +484,8 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   form, through the zone preference), `parseJson()` (safe parse; returns the *raw string* on failure, not null), `downloadJson()` (the shared export blob helper), and `parseServerDate()` / `serverTime()`: **the admin plane serialises `chrono::NaiveDateTime` — `2026-09-05T12:13:55`, no zone — and every such value is UTC.** `new Date()` reads a zoneless string as local time, so go through these for anything time-based; `formatDate` already does.
 - **`src/lib/use-pagination.ts`** — `usePagination()` + `PAGE_SIZE`, paired with `PaginationFooter`. Lives in `lib/` because the fast-refresh lint rule forbids non-component exports from component files.
 - **`src/lib/time-zone.ts`** + `time-zone-provider.tsx` / `use-time-zone.ts` — the display
-  zone (`local` | `utc`, `localStorage["orion-timezone"]`), chosen on Engine → Display (the card
-  also holds theme, incl. "Follow the system"). A module variable is what
+  zone (`local` | `utc`, `localStorage["orion-timezone"]`), chosen in the header's Display menu
+  (which also holds theme, incl. "Follow the system"). A module variable is what
   `formatDate` reads, so non-React code sees the same value; the provider is what re-renders on
   a change. Every absolute time in the app goes through `formatDate`, which is how one
   preference reaches every page.
@@ -473,6 +501,35 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   string still being typed (an error node to the parser, not a `String`). `onRun` binds
   Mod-Enter above the default keymap (which would insert a blank line): the console sends on it
   and the workflow dry run runs on it.
+- **The 1.12 revamp's single sources.** Pages ask these rather than re-deriving:
+  `lib/function-effects.ts` (above), `lib/trace-error.ts`, `lib/trace-timeline.ts` (steps →
+  phases, iterations, gaps, the failing step; `traceWorkflowId`, `stepDataGap`),
+  `lib/trace-axis.ts` (split/linear time axis), `lib/trace-step-uses.ts`,
+  `lib/metrics-state.ts` (the copy for every `MetricsState`), `lib/audit-vocabulary.ts` (filter
+  labels and past-tense verbs), `lib/cron.ts` (`isInFlight`, `isCancellable`, `cronBacklog` —
+  the dashboard tile and the incident list share it), `lib/audit-routes.ts::entityRoute`,
+  `lib/domains.ts` (channels grouped by shared name prefix or tag, `shortName`,
+  `middleTruncate`), `lib/traffic-encoding.ts` (`formatMs`, `formatPct`, `formatRatio`,
+  `trafficLine`), `lib/utils.ts::plural`, `shared/fact.tsx`, `shared/confirm-button.tsx`,
+  `ui/popover-menu.tsx`.
+- **Pages' own modules.** Trace timeline: `components/traces/` (`TraceSteps`, `TraceTimeline`,
+  `StepDetail`). Workflow lenses: `components/workflow/` + `lib/workflow-lens.ts` (rows,
+  cost view, read-outs). System Map: `lib/dependency-graph.ts` (domains → connector/plugin/model
+  hubs, measured edges, blast radius, `mapSearch`), `lib/health-grid.ts`, `lib/change-pins.ts`
+  + `hooks/use-change-pins.ts`, `lib/map-fit.ts`, `components/graph/`. Operations:
+  `lib/incidents.ts` (failures grouped by error signature, resolved by later success, acked
+  per browser in `orion-incidents-ack`), `components/operations/`. Caches:
+  `pages/caches.tsx`, `lib/cache-namespaces.ts`. Admin: `components/admin/`.
+- **Metrics pipeline.** `/metrics` is fetched and parsed in a worker (`api/metrics.worker.ts`,
+  low fetch priority) that replies with a transferred `Float64Array` and sends series
+  descriptors only when the set changes; `api/metrics.ts` interns them so the 60-sample ring
+  buffer shares labels across samples, indexes each snapshot by family once (`family()`), and
+  memoises `deltaSnapshot` per pair. `useChannelTraffic(...).state` is `loading` | `off` |
+  `error` | `warming` | `live` — **pending is loading** (a retry paused in a background tab has
+  not answered), and only a 404 or an empty exposition is `off`. `hooks/use-ops-metrics.ts`
+  reads connectors per channel (`useConnectorTraffic`), per-task cost (`useWorkflowCost`, a task
+  summed across the function labels it ran under), the subsystems (`useSubsystemMetrics`) and
+  cache hits (`useCacheHitsByChannel`).
 - **`src/lib/onboarding.ts`** + `shared/getting-started.tsx` — the first-run checklist the
   dashboard leads with while the engine serves no channel (`isFirstRun`, `firstRunSteps`, five
   steps ticking from the live counts); dismissed per browser
@@ -541,7 +598,7 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   workflow's *active* version (`useActiveWorkflow` in `use-workflows.ts`), because that is what a
   retry runs — the latest version is the draft while one is open. Rendered in the DLQ entry and
   bulk dialogs, on an occurrence page and on a cron channel's occurrences tab.
-- **`src/lib/trace-payload.ts`** — `extractSteps` and `firstTaskPayload`: the request as the first
+- **`src/lib/trace-payload.ts`** — `firstTaskPayload` (on `executionTrace`): the request as the first
   task saw it, the closest thing to the original input a trace keeps (the read carries no raw
   request). "Re-send in console", the console's "Last trace's input" and the dry run's "Use last
   trace's input" all read it.
@@ -674,15 +731,19 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
 
 ```
 /                   -> OperationsPage
-/system-map         -> SystemMapPage (view state in the URL: ?select=<channel name>&q=&tag=
-                                      &lifecycle=all&window=&size=&colour=&hops=1|2|all)
-/channels           -> ChannelsPage
+/system-map         -> SystemMapPage (view state in the URL: ?lens=deps|calls|grid (absent:
+                                      auto) &group=prefix|tag:<a,b> &select=<channel name |
+                                      connector:<name>> &q=&tag=&lifecycle=all&window=&size=
+                                      &colour=&hops=1|2|all)
+/channels           -> ChannelsPage (?q= name search in the browser; ?status absent = active,
+                                     ?status=all for everything)
 /channels/new       -> ChannelFormPage (create; ?protocol=cron preselects a schedule)
 /channels/:id       -> ChannelDetailPage
 /channels/:id/edit  -> ChannelFormPage (edit; draft only)
 /workflows          -> WorkflowsPage
 /workflows/new      -> WorkflowFormPage (create)
-/workflows/:id      -> WorkflowDetailPage
+/workflows/:id      -> WorkflowDetailPage (?lens=structure|deps|cost|run, ?trace=<id> pins
+                                          the run the Last run lens overlays)
 /workflows/:id/edit -> WorkflowFormPage (edit; draft only)
 /plugins            -> PluginsPage
 /plugins/new        -> PluginFormPage (upload)
@@ -697,7 +758,9 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
 /connectors/:id     -> ConnectorDetailPage (?test=1 opens the probe dialog)
 /connectors/:id/edit-> ConnectorFormPage (edit)
 /traces             -> TracesPage (?channel= and ?status= pre-filter)
-/traces/:id         -> TraceDetailPage (accepts ?token= for async trace polling)
+/traces/:id         -> TraceDetailPage (accepts ?token= for async trace polling; ?step=<index>
+                                       selects a timeline step)
+/caches             -> CachesPage (?namespace= highlights one; where audit rows link)
 /trace-dlq          -> TraceDlqPage
 /schedules          -> SchedulesPage (accepts ?channel_id= to pre-filter the ledger)
 /schedules/occurrences/:id -> OccurrenceDetailPage
@@ -705,8 +768,8 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
 /audit              -> AuditPage
 /console            -> ConsolePage (?channel=<name> preselects it and seeds its REST route)
 /packages           -> PackagesPage (read-only)
-/engine             -> EnginePage (#component-<name> scrolls the health report to that row;
-                                   the Display card: theme, time zone)
+/engine             -> EnginePage (?tab=health|cluster|maintenance; #component-<name> scrolls
+                                   the health report to that row)
 /settings           -> redirect to /engine, keeping search and hash (the page's name until 2026-09-05)
 *                   -> NotFoundPage
 ```
@@ -718,7 +781,8 @@ the `<Outlet />` in an `ErrorBoundary` keyed on the path, so a page that throws 
 registry and runs the `g` + key shortcuts.
 
 A new page needs two registrations: a route in `src/app.tsx` and an entry in `src/lib/nav.ts`,
-which feeds the sidebar (grouped Build / Observe / Govern, with live counts from
+which feeds the sidebar (grouped Monitor / Build / Control / Govern, Plugins and Models hidden
+while their runtime is off and none exist, with live counts from
 `useNavCounts`), the palette's "Go to" group, the `g` + key shortcuts and the fallback tab
 title. A list page names the tab through `PageHeader`; a detail page through `Breadcrumbs`
 (`lib/page-title.ts` lets the page win over the shell).
@@ -731,7 +795,7 @@ Dev server proxies `/api`, `/health`, `/healthz`, `/readyz`, `/metrics` to `proc
 
 ### Visualization Libraries
 
-- **`@goplasmatic/dataflow-ui`** — `WorkflowVisualizer` renders workflow task pipelines with tree/flow/graph views and optional debug tracing. CSS imported in `main.tsx`.
+- **`@goplasmatic/dataflow-ui`** (3.15) — `WorkflowVisualizer` renders workflow task pipelines with tree/flow/graph views and optional debug tracing; it draws `loop.setup` and `for_each`, which `lib/workflow-mapper.ts` passes through. It has **no initial or controlled selection** prop, so the Structure lens (`components/workflow/structure-lens.tsx`) selects the workflow row by position after mount — a stopgap until [GoPlasmatic/dataflow-rs#70](https://github.com/GoPlasmatic/dataflow-rs/issues/70) ships. CSS imported in `main.tsx`.
 - **`@goplasmatic/datalogic-ui`** — `DataLogicEditor` renders JSONLogic expressions as interactive flow diagrams. Read-only (`editable={false}`) in viewers; editable with `onChange` in the workflow form's condition editor and the channel config's validation / key-logic / JWT authorization-logic fields (via the shared `LogicField` in `config-field.tsx`). CSS imported in `main.tsx`.
 - **`@xyflow/react`** is pinned exactly (no caret) to the version `@goplasmatic/dataflow-ui`
   declares as an *exact* dependency. A root range that resolves past it makes npm nest a
