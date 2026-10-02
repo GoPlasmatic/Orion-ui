@@ -48,17 +48,6 @@ export function stepResultBadgeClass(result: string | undefined): string {
   return (result && stepResultClass[result]) || NEUTRAL
 }
 
-// Solid dot color for the step-flow timeline.
-const stepResultDot: Record<string, string> = {
-  executed: "bg-success",
-  skipped: "bg-muted-foreground/40",
-  error: "bg-destructive",
-}
-
-export function stepResultDotClass(result: string | undefined): string {
-  return (result && stepResultDot[result]) || "bg-muted-foreground/40"
-}
-
 // Circuit breaker state: closed / open / half_open (also tolerates "half-open")
 export const breakerStateClass: Record<string, string> = {
   closed: GOOD,
