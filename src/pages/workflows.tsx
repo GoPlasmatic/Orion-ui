@@ -7,7 +7,7 @@ import { workflowsApi } from "@/api/workflows"
 import { useTable, createColumnHelper } from "@tanstack/react-table"
 import { listTableFeatures } from "@/lib/table"
 import { useListState } from "@/lib/use-list-state"
-import { countLeafSteps } from "@/lib/workflow-steps"
+import { countLeafSteps, workflowSteps } from "@/lib/workflow-steps"
 import type { Channel, Workflow, EntityStatus } from "@/api/types"
 import { ENTITY_STATUSES } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
@@ -106,12 +106,15 @@ function buildColumns(runsOn: ReadonlyMap<string, Channel[]>) {
       header: "Tasks",
       // Leaf count, not `tasks.length`: a task group is one array element holding
       // a whole span, so the raw length under-reports a grouped workflow.
-      cell: (info) => <span className="text-muted-foreground">{countLeafSteps(info.getValue())}</span>,
+      // A loop's setup steps count too — the engine runs them.
+      cell: (info) => (
+        <span className="text-muted-foreground">{countLeafSteps(workflowSteps(info.row.original))}</span>
+      ),
     }),
     columnHelper.accessor("updated_at", {
       header: "Updated",
       cell: (info) => (
-        <span className="text-muted-foreground" title={formatDate(info.getValue())}>
+        <span className="whitespace-nowrap text-muted-foreground" title={formatDate(info.getValue())}>
           {formatWhen(info.getValue())}
         </span>
       ),

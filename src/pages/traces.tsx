@@ -17,7 +17,7 @@ import { TraceAnalytics } from "@/components/traces/trace-analytics"
 import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { EntityTable } from "@/components/shared/entity-table"
 import { FilterBar, FilterTextInput, UnknownOption, FILTER_W } from "@/components/shared/filter-bar"
-import { formatDate, formatDuration, formatRelative } from "@/lib/utils"
+import { formatDate, formatDuration, formatRelative, serverSpan } from "@/lib/utils"
 import { traceStatusBadgeClass } from "@/lib/status"
 import { Activity, Pause, Play } from "lucide-react"
 
@@ -68,11 +68,13 @@ const columns = columnHelper.columns([
       </span>
     ),
   }),
-  columnHelper.accessor("duration_ms", {
+  // A cron row carries no `duration_ms`; its two instants still say how long
+  // it took.
+  columnHelper.accessor((t) => t.duration_ms ?? serverSpan(t.started_at, t.completed_at), {
     id: "duration",
     header: "Duration",
     cell: (info) => (
-      <span className="text-muted-foreground">{formatDuration(info.getValue())}</span>
+      <span className="tabular-nums text-muted-foreground">{formatDuration(info.getValue())}</span>
     ),
   }),
 ])

@@ -27,6 +27,7 @@ import { VersionCompare } from "@/components/shared/version-compare"
 import { RetrySafetyWarning } from "@/components/shared/retry-safety-warning"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { NeighbourhoodMap } from "@/components/graph/neighbourhood-map"
+import { ResponseCacheCard } from "@/components/admin/response-cache-card"
 import { formatDate } from "@/lib/utils"
 import { CalendarClock, Network, Pencil, Play, Send } from "lucide-react"
 
@@ -185,6 +186,9 @@ export function ChannelDetailPage() {
             <ChannelTrafficCard channelName={channel.name} />
             <ChannelRecentTraces channelName={channel.name} />
           </div>
+          {channel.config.cache?.enabled && (
+            <ResponseCacheCard channelName={channel.name} cache={channel.config.cache} />
+          )}
           {schedule && (
             <Card>
               <CardHeader className="pb-3">
@@ -499,6 +503,10 @@ export function ChannelDetailPage() {
                           ? channel.config.cache.cache_key_fields.join(", ")
                           : "whole payload"}
                     </Row>
+                    {channel.config.cache.namespaces && channel.config.cache.namespaces.length > 0 && (
+                      <Row label="Namespaces" mono>{channel.config.cache.namespaces.join(", ")}</Row>
+                    )}
+                    <Row label="Coalesce misses">{channel.config.cache.coalesce_misses ? "On" : "Off"}</Row>
                   </div>
                 </CardContent>
               </Card>

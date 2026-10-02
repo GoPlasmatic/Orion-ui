@@ -3,6 +3,9 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { NAV_SECTIONS, type NavItem } from "@/lib/nav"
 import { useNavCounts } from "@/hooks/use-attention"
+import { useEngineStatus } from "@/hooks/use-engine"
+import { usePlugins } from "@/hooks/use-plugins"
+import { useModels } from "@/hooks/use-models"
 
 /** How a count reads: what needs a hand is red, what is merely backed up is amber. */
 const BADGE_TONE: Record<NonNullable<NavItem["badge"]>, string> = {
@@ -13,10 +16,35 @@ const BADGE_TONE: Record<NonNullable<NavItem["badge"]>, string> = {
 }
 
 const BADGE_NAME: Record<NonNullable<NavItem["badge"]>, string> = {
-  alerts: "items need attention",
+  alerts: "open incidents",
   dlq: "exhausted entries",
   breakers: "open breakers",
   schedules: "pending occurrences",
+}
+
+/** A capability reads off as `false` (the 1.9 wire) or `"off"`; absent is unknown, not off. */
+const isOff = (v: unknown) => v === false || v === "off"
+
+/**
+ * The nav items to leave out: Plugins and Models while their runtime is off
+ * on this node *and* none exists. A runtime that is off with entities stored
+ * keeps its item — those rows quarantine what names them, which is something
+ * to go and look at. Plugins answer every route with 400 while off, which
+ * reads as "none" here; models keep answering reads. Until both answers are
+ * in, nothing is hidden, so the sidebar does not flicker an item away.
+ */
+function useHiddenNavItems(): Set<string> {
+  const capabilities = useEngineStatus().data?.capabilities
+  const pluginsOff = isOff(capabilities?.plugins)
+  const modelsOff = isOff(capabilities?.models)
+  const plugins = usePlugins({ limit: 1 }, pluginsOff)
+  const models = useModels({ limit: 1 }, modelsOff)
+  const hidden = new Set<string>()
+  const none = (q: { data?: { data: unknown[] }; isError: boolean }) =>
+    q.isError || (q.data != null && q.data.data.length === 0)
+  if (pluginsOff && none(plugins)) hidden.add("plugins")
+  if (modelsOff && none(models)) hidden.add("models")
+  return hidden
 }
 
 /**
@@ -34,6 +62,11 @@ export function Sidebar({
   onNavigate?: () => void
 }) {
   const counts = useNavCounts()
+  const hidden = useHiddenNavItems()
+  const sections = NAV_SECTIONS.map((section) => ({
+    ...section,
+    items: section.items.filter((item) => !item.capability || !hidden.has(item.capability)),
+  }))
 
   return (
     <aside
@@ -60,7 +93,7 @@ export function Sidebar({
         )}
       </NavLink>
       <nav className="flex-1 space-y-3 overflow-y-auto p-2 md:p-3" aria-label="Main">
-        {NAV_SECTIONS.map((section, i) => (
+        {sections.map((section, i) => (
           <div key={section.label ?? i} className="space-y-1">
             {section.label &&
               (collapsed ? (

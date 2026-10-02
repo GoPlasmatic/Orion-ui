@@ -4,69 +4,85 @@ import { ApiError } from "@/api/client"
 // returns plain text (not JSON), so this bypasses the JSON-only `api` client.
 // Orion-specific KPI semantics live in `@/hooks/use-metrics`, not here.
 
-export interface MetricLine {
-  name: string
-  labels: Record<string, string>
-  value: number
-}
-
-export interface MetricsSnapshot {
-  t: number
-  lines: MetricLine[]
-}
+export type { MetricLine, MetricsSnapshot } from "./prometheus"
+export { parsePrometheus } from "./prometheus"
+import { parsePrometheus, parseValue, type MetricLine, type MetricsSnapshot } from "./prometheus"
 
 export type LabelFilter = Record<string, string>
 
-const LABEL_RE = /(\w+)="((?:[^"\\]|\\.)*)"/g
-
-function parseValue(raw: string): number {
-  if (raw === "+Inf") return Infinity
-  if (raw === "-Inf") return -Infinity
-  if (raw === "NaN") return NaN
-  return Number(raw)
-}
-
-export function parsePrometheus(text: string, t: number = Date.now()): MetricsSnapshot {
-  const lines: MetricLine[] = []
-  for (const raw of text.split("\n")) {
-    const line = raw.trim()
-    if (!line || line.startsWith("#")) continue
-
-    let name: string
-    let labelStr = ""
-    let rest: string
-    const brace = line.indexOf("{")
-    if (brace !== -1) {
-      const close = line.lastIndexOf("}")
-      if (close === -1) continue
-      name = line.slice(0, brace)
-      labelStr = line.slice(brace + 1, close)
-      rest = line.slice(close + 1).trim()
-    } else {
-      const sp = line.indexOf(" ")
-      if (sp === -1) continue
-      name = line.slice(0, sp)
-      rest = line.slice(sp + 1).trim()
-    }
-
-    const value = parseValue(rest.split(/\s+/)[0])
-    const labels: Record<string, string> = {}
-    if (labelStr) {
-      LABEL_RE.lastIndex = 0
-      let m: RegExpExecArray | null
-      while ((m = LABEL_RE.exec(labelStr)) !== null) {
-        labels[m[1]] = m[2].replace(/\\"/g, '"').replace(/\\n/g, "\n").replace(/\\\\/g, "\\")
-      }
-    }
-    lines.push({ name, labels, value })
-  }
-  return { t, lines }
-}
-
+/**
+ * Fetch and parse `/metrics`, off the main thread where the platform allows.
+ *
+ * On a busy server the scrape is large — QA's 148 channels serialise to ~900 KB
+ * and 7.5k series, most of them per-task histogram buckets — and it is read on
+ * every page every 10 s. In a worker the text never reaches the main thread,
+ * only the parsed lines do. Under test (jsdom has no Worker) and on any failure
+ * to start one, the same work runs inline.
+ *
+ * The request goes out at `priority: "low"`: a scrape is background telemetry,
+ * and it was observed holding up the page's own admin reads.
+ */
 export async function fetchMetrics(): Promise<MetricsSnapshot> {
-  const res = await fetch("/metrics", { headers: { Accept: "text/plain" } })
+  const viaWorker = metricsWorker()
+  if (viaWorker) {
+    try {
+      return await viaWorker()
+    } catch (e) {
+      if (e instanceof ApiError) throw e
+      // A worker that failed to load (CSP, an old browser) falls back inline.
+      workerBroken = true
+    }
+  }
+  const res = await fetch("/metrics", {
+    headers: { Accept: "text/plain" },
+    priority: "low",
+  } as RequestInit)
   if (!res.ok) throw new ApiError(res.status, res.statusText || "Failed to fetch metrics")
   return parsePrometheus(await res.text())
+}
+
+type WorkerReply =
+  | { id: number; ok: true; t: number; lines: MetricLine[] }
+  | { id: number; ok: false; status: number; message: string }
+
+let worker: Worker | null = null
+let workerBroken = false
+let nextId = 0
+const pending = new Map<number, { resolve: (s: MetricsSnapshot) => void; reject: (e: unknown) => void }>()
+
+function metricsWorker(): (() => Promise<MetricsSnapshot>) | null {
+  if (workerBroken || typeof Worker === "undefined" || import.meta.env.MODE === "test") return null
+  if (!worker) {
+    try {
+      worker = new Worker(new URL("./metrics.worker.ts", import.meta.url), { type: "module" })
+    } catch {
+      workerBroken = true
+      return null
+    }
+    worker.onmessage = (ev: MessageEvent<WorkerReply>) => {
+      const reply = ev.data
+      const waiter = pending.get(reply.id)
+      if (!waiter) return
+      pending.delete(reply.id)
+      if (reply.ok) waiter.resolve({ t: reply.t, lines: reply.lines })
+      else if (reply.status > 0) waiter.reject(new ApiError(reply.status, reply.message))
+      else waiter.reject(new Error(reply.message))
+    }
+    worker.onerror = () => {
+      workerBroken = true
+      for (const w of pending.values()) w.reject(new Error("metrics worker failed"))
+      pending.clear()
+      worker?.terminate()
+      worker = null
+    }
+  }
+  const w = worker
+  return () =>
+    new Promise<MetricsSnapshot>((resolve, reject) => {
+      const id = ++nextId
+      pending.set(id, { resolve, reject })
+      w.postMessage({ id, url: new URL("/metrics", location.href).toString() })
+    })
 }
 
 function matches(line: MetricLine, name: string, filter?: LabelFilter): boolean {

@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/table"
 import { formatDate, formatDuration } from "@/lib/utils"
 import { statusChartColor } from "@/lib/status"
+import { middleTruncate } from "@/lib/domains"
 
 const tooltipStyle = {
   background: "var(--popover)",
@@ -21,6 +22,15 @@ const tooltipStyle = {
   borderRadius: 8,
   fontSize: 12,
 }
+
+// Channel names on the bar charts' category axis. Recharts clips a tick that
+// overflows the axis from the *left*, which cut `soma-admin-runner-keys-list`
+// down to its tail and made sibling channels indistinguishable; cutting the
+// middle keeps the prefix and the part that differs. The tooltip still names
+// the channel in full.
+const CHANNEL_AXIS_W = 150
+const CHANNEL_TICK_CHARS = 22
+const channelTick = (name: string) => middleTruncate(String(name), CHANNEL_TICK_CHARS)
 
 function bucketLabel(ms: number): string {
   if (ms < 60 * 60_000) return `${ms / 60_000} min`
@@ -139,7 +149,8 @@ export function TraceAnalytics() {
                     <YAxis
                       type="category"
                       dataKey="channel"
-                      width={120}
+                      width={CHANNEL_AXIS_W}
+                      tickFormatter={channelTick}
                       tickLine={false}
                       axisLine={false}
                       tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
@@ -183,7 +194,8 @@ export function TraceAnalytics() {
                     <YAxis
                       type="category"
                       dataKey="channel"
-                      width={120}
+                      width={CHANNEL_AXIS_W}
+                      tickFormatter={channelTick}
                       tickLine={false}
                       axisLine={false}
                       tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}

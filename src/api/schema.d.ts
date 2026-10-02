@@ -36,6 +36,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/cache/namespaces/{namespace}/invalidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The operator's `cache_invalidate`: bump one namespace in every
+         *     response-cache store, so each channel declaring it misses on its next
+         *     request. For the change a workflow does not make — a board flipped by hand,
+         *     a row fixed in the database.
+         */
+        post: operations["invalidate_namespace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/channels": {
         parameters: {
             query?: never;
@@ -318,6 +340,22 @@ export interface paths {
         get: operations["get_occurrence"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/cron/occurrences/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancel_occurrence"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1165,6 +1203,18 @@ export interface components {
             /** Format: int64 */
             size_bytes: number;
         };
+        /** @description `POST /api/v1/admin/cache/namespaces/{namespace}/invalidate`. */
+        CacheInvalidatedResponse: {
+            /** @description The namespace whose version was bumped. */
+            namespace: string;
+            /**
+             * Format: int64
+             * @description How many response-cache stores the bump reached: the default store,
+             *     each in-memory store on the node that answered, and each Redis cache
+             *     connector. A shared Redis carries the bump to every node.
+             */
+            stores: number;
+        };
         /** @description A channel a generation refused to serve. */
         ChannelLoadIssueResponse: {
             /** @description The channel's name — what the quarantine is keyed by. */
@@ -1693,6 +1743,28 @@ export interface components {
          *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
          *     of the 48 2xx responses had no `content` block at all.
          */
+        DataEnvelope_CacheInvalidatedResponse: {
+            /** @description `POST /api/v1/admin/cache/namespaces/{namespace}/invalidate`. */
+            data: {
+                /** @description The namespace whose version was bumped. */
+                namespace: string;
+                /**
+                 * Format: int64
+                 * @description How many response-cache stores the bump reached: the default store,
+                 *     each in-memory store on the node that answered, and each Redis cache
+                 *     connector. A shared Redis carries the bump to every node.
+                 */
+                stores: number;
+            };
+        };
+        /**
+         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
+         *
+         *     Generic so each resource gets a described response without a hand-written
+         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
+         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
+         *     of the 48 2xx responses had no `content` block at all.
+         */
         DataEnvelope_ChannelResponse: {
             /**
              * @description API-friendly representation of a Channel with parsed JSON fields.
@@ -1957,7 +2029,7 @@ export interface components {
                  *     that predates it.
                  */
                 generation: number;
-                load_issues?: null | components["schemas"]["EngineLoadIssues"];
+                load_issues?: components["schemas"]["EngineLoadIssues"] | null;
                 reloaded: boolean;
                 /** Format: int64 */
                 workflows_count: number;
@@ -1976,7 +2048,7 @@ export interface components {
             data: {
                 /** Format: int64 */
                 active_workflows: number;
-                capabilities?: null | components["schemas"]["EngineCapabilities"];
+                capabilities?: components["schemas"]["EngineCapabilities"] | null;
                 /** @description Distinct channel names across the loaded workflows. */
                 channels: string[];
                 /**
@@ -1984,7 +2056,7 @@ export interface components {
                  * @description The id of the generation this node serves.
                  */
                 generation: number;
-                load_issues?: null | components["schemas"]["EngineLoadIssues"];
+                load_issues?: components["schemas"]["EngineLoadIssues"] | null;
                 /** Format: int64 */
                 uptime_seconds: number;
                 version: string;
@@ -2106,7 +2178,7 @@ export interface components {
                 digest: string;
                 /** @description The artifact format the manifest declares (`onnx`). */
                 format: string;
-                health?: null | components["schemas"]["ModelHealth"];
+                health?: components["schemas"]["ModelHealth"] | null;
                 /** @description The input tensor names, in the manifest's order. */
                 inputs: string[];
                 manifest: unknown;
@@ -2121,7 +2193,7 @@ export interface components {
                  *     is the identity, and the signature only attests to it.
                  */
                 signature?: string | null;
-                stats?: null | components["schemas"]["ModelStats"];
+                stats?: components["schemas"]["ModelStats"] | null;
                 status: string;
                 tags: unknown;
                 updated_at: string;
@@ -2140,7 +2212,7 @@ export interface components {
         DataEnvelope_PackageDetail: {
             /** @description `GET /api/v1/admin/packages/{name}` — one package's receipts. */
             data: {
-                current?: null | components["schemas"]["PackageReceiptResponse"];
+                current?: components["schemas"]["PackageReceiptResponse"] | null;
                 name: string;
                 /** @description Every receipt for this package, newest first. */
                 versions: components["schemas"]["PackageReceiptResponse"][];
@@ -2163,7 +2235,7 @@ export interface components {
                  */
                 content_hash: string;
                 created_at: string;
-                inventory?: null | components["schemas"]["PackageInventory"];
+                inventory?: components["schemas"]["PackageInventory"] | null;
                 name: string;
                 /** @description Who recorded this receipt (admin key id, or `anonymous`). */
                 principal: string;
@@ -2232,7 +2304,7 @@ export interface components {
                  */
                 digest: string;
                 functions: string[];
-                health?: null | components["schemas"]["PluginHealth"];
+                health?: components["schemas"]["PluginHealth"] | null;
                 manifest: unknown;
                 plugin_id: string;
                 /** @description The author's own version string from the manifest, informational. */
@@ -2539,7 +2611,7 @@ export interface components {
                 digest: string;
                 /** @description The artifact format the manifest declares (`onnx`). */
                 format: string;
-                health?: null | components["schemas"]["ModelHealth"];
+                health?: components["schemas"]["ModelHealth"] | null;
                 /** @description The input tensor names, in the manifest's order. */
                 inputs: string[];
                 manifest: unknown;
@@ -2554,7 +2626,7 @@ export interface components {
                  *     is the identity, and the signature only attests to it.
                  */
                 signature?: string | null;
-                stats?: null | components["schemas"]["ModelStats"];
+                stats?: components["schemas"]["ModelStats"] | null;
                 status: string;
                 tags: unknown;
                 updated_at: string;
@@ -2586,7 +2658,7 @@ export interface components {
                  */
                 digest: string;
                 functions: string[];
-                health?: null | components["schemas"]["PluginHealth"];
+                health?: components["schemas"]["PluginHealth"] | null;
                 manifest: unknown;
                 plugin_id: string;
                 /** @description The author's own version string from the manifest, informational. */
@@ -2798,7 +2870,7 @@ export interface components {
              *     that predates it.
              */
             generation: number;
-            load_issues?: null | components["schemas"]["EngineLoadIssues"];
+            load_issues?: components["schemas"]["EngineLoadIssues"] | null;
             reloaded: boolean;
             /** Format: int64 */
             workflows_count: number;
@@ -2807,7 +2879,7 @@ export interface components {
         EngineStatusResponse: {
             /** Format: int64 */
             active_workflows: number;
-            capabilities?: null | components["schemas"]["EngineCapabilities"];
+            capabilities?: components["schemas"]["EngineCapabilities"] | null;
             /** @description Distinct channel names across the loaded workflows. */
             channels: string[];
             /**
@@ -2815,7 +2887,7 @@ export interface components {
              * @description The id of the generation this node serves.
              */
             generation: number;
-            load_issues?: null | components["schemas"]["EngineLoadIssues"];
+            load_issues?: components["schemas"]["EngineLoadIssues"] | null;
             /** Format: int64 */
             uptime_seconds: number;
             version: string;
@@ -3120,7 +3192,7 @@ export interface components {
             digest: string;
             /** @description The artifact format the manifest declares (`onnx`). */
             format: string;
-            health?: null | components["schemas"]["ModelHealth"];
+            health?: components["schemas"]["ModelHealth"] | null;
             /** @description The input tensor names, in the manifest's order. */
             inputs: string[];
             manifest: unknown;
@@ -3135,7 +3207,7 @@ export interface components {
              *     is the identity, and the signature only attests to it.
              */
             signature?: string | null;
-            stats?: null | components["schemas"]["ModelStats"];
+            stats?: components["schemas"]["ModelStats"] | null;
             status: string;
             tags: unknown;
             updated_at: string;
@@ -3222,7 +3294,7 @@ export interface components {
          *     synchronous half learned about the object.
          */
         ModelValidationResponse: components["schemas"]["ValidationResponse"] & {
-            head?: null | components["schemas"]["ArtifactHead"];
+            head?: components["schemas"]["ArtifactHead"] | null;
         };
         /**
          * @description How an `/import` treats an item whose conflict key is already stored.
@@ -3236,7 +3308,7 @@ export interface components {
         OnConflict: "fail" | "skip" | "new_version";
         /** @description `GET /api/v1/admin/packages/{name}` — one package's receipts. */
         PackageDetail: {
-            current?: null | components["schemas"]["PackageReceiptResponse"];
+            current?: components["schemas"]["PackageReceiptResponse"] | null;
             name: string;
             /** @description Every receipt for this package, newest first. */
             versions: components["schemas"]["PackageReceiptResponse"][];
@@ -3262,7 +3334,7 @@ export interface components {
              */
             content_hash: string;
             created_at: string;
-            inventory?: null | components["schemas"]["PackageInventory"];
+            inventory?: components["schemas"]["PackageInventory"] | null;
             name: string;
             /** @description Who recorded this receipt (admin key id, or `anonymous`). */
             principal: string;
@@ -3455,7 +3527,7 @@ export interface components {
                 digest: string;
                 /** @description The artifact format the manifest declares (`onnx`). */
                 format: string;
-                health?: null | components["schemas"]["ModelHealth"];
+                health?: components["schemas"]["ModelHealth"] | null;
                 /** @description The input tensor names, in the manifest's order. */
                 inputs: string[];
                 manifest: unknown;
@@ -3470,7 +3542,7 @@ export interface components {
                  *     is the identity, and the signature only attests to it.
                  */
                 signature?: string | null;
-                stats?: null | components["schemas"]["ModelStats"];
+                stats?: components["schemas"]["ModelStats"] | null;
                 status: string;
                 tags: unknown;
                 updated_at: string;
@@ -3496,7 +3568,7 @@ export interface components {
                  */
                 content_hash: string;
                 created_at: string;
-                inventory?: null | components["schemas"]["PackageInventory"];
+                inventory?: components["schemas"]["PackageInventory"] | null;
                 name: string;
                 /** @description Who recorded this receipt (admin key id, or `anonymous`). */
                 principal: string;
@@ -3535,7 +3607,7 @@ export interface components {
                  */
                 digest: string;
                 functions: string[];
-                health?: null | components["schemas"]["PluginHealth"];
+                health?: components["schemas"]["PluginHealth"] | null;
                 manifest: unknown;
                 plugin_id: string;
                 /** @description The author's own version string from the manifest, informational. */
@@ -3708,7 +3780,7 @@ export interface components {
              */
             digest: string;
             functions: string[];
-            health?: null | components["schemas"]["PluginHealth"];
+            health?: components["schemas"]["PluginHealth"] | null;
             manifest: unknown;
             plugin_id: string;
             /** @description The author's own version string from the manifest, informational. */
@@ -3819,7 +3891,7 @@ export interface components {
              *     equality against later PUTs of the same version; never parsed.
              */
             content_hash: string;
-            inventory?: null | components["schemas"]["PackageInventory"];
+            inventory?: components["schemas"]["PackageInventory"] | null;
             /** @description `staged` before the artifact's entities are activated, `applied` after. */
             state: components["schemas"]["PackageState"];
             /** @description Package version this receipt records, e.g. `1.4.0`. */
@@ -3979,14 +4051,14 @@ export interface components {
         };
         UpdateConnectorRequest: {
             config?: unknown;
-            connector_type?: null | components["schemas"]["ConnectorType"];
+            connector_type?: components["schemas"]["ConnectorType"] | null;
             enabled?: boolean | null;
             name?: string | null;
             tags?: string[] | null;
         };
         /** @description `PUT /models/{id}`: every field optional, absent means keep. */
         UpdateModelRequest: {
-            artifact?: null | components["schemas"]["ModelArtifactRef"];
+            artifact?: components["schemas"]["ModelArtifactRef"] | null;
             manifest?: unknown;
             signature?: string | null;
             tags?: string[] | null;
@@ -4261,6 +4333,65 @@ export interface operations {
                 };
             };
             /** @description Backup unavailable (non-SQLite backend, or cluster mode — use managed-DB snapshots/PITR) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    invalidate_namespace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A namespace channels declare in `cache.namespaces` */
+                namespace: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Namespace invalidated. Entries stored under the old version are no longer served, on every node sharing the store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CacheInvalidatedResponse"];
+                };
+            };
+            /** @description Not a valid namespace name */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5737,6 +5868,74 @@ export interface operations {
             };
             /** @description No such occurrence */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_occurrence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Occurrence id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Occurrence settled `failed`. A running attempt stops at its next heartbeat, and its singleton slot is free within two heartbeat intervals, whether or not its node is still alive */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CronOccurrenceResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such occurrence */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The occurrence has already finished */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

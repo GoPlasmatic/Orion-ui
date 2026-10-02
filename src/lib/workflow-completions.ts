@@ -13,7 +13,10 @@ import { propertyName, propertyValue } from "@/lib/json-path"
  * it answers at the moment the question is asked — inside
  * `"function": { "name": "…" }` it offers the names, inside that function's
  * `"input": { … }` it offers the fields the schema declares, with kind,
- * required and description.
+ * required and description — topped up from `INPUT_HINTS` for fields a
+ * server older than the console does not describe. It also knows the two
+ * shapes the catalogue cannot: a `map` mapping (`mode: append | extend`,
+ * 1.12) and a workflow `loop` (whose `setup` holds steps).
  */
 
 interface KeyOption {
@@ -39,6 +42,72 @@ const TASK_KEYS: KeyOption[] = [
 const FUNCTION_KEYS: KeyOption[] = [
   { label: "name", detail: "string · required", info: "A catalogue function name; completion lists them.", value: '""' },
   { label: "input", detail: "object", info: "The function's input, checked against its schema at create time.", value: "{}" },
+]
+
+/**
+ * A workflow `loop` (dataflow-rs 3.14): `setup` steps run once, then `tasks`
+ * is the body. Unknown keys are a 400 UNKNOWN_FIELD since 1.10.
+ */
+const LOOP_KEYS: KeyOption[] = [
+  { label: "setup", detail: "array · steps", info: "Steps run once before the body; tasks and groups, exactly like `tasks`.", value: "[]" },
+  { label: "over", detail: "JSONLogic", info: "A list to iterate; each element is bound at `as`. Without it the body repeats while the workflow condition holds, up to `max`.", value: '{ "var": "" }' },
+  { label: "as", detail: "string", info: "Where each element of `over` is bound.", value: '"temp_data.it"' },
+  { label: "counter", detail: "string", info: "Where the iteration index is written.", value: '"temp_data.i"' },
+  { label: "max", detail: "number", info: "Upper bound on iterations.", value: "100" },
+  { label: "scratch", detail: "string", info: "Per-iteration space, cleared between passes.", value: '"temp_data.s"' },
+]
+
+/** One `map` mapping (engine built-in, so the catalogue carries no input schema for it). */
+const MAPPING_KEYS: KeyOption[] = [
+  { label: "path", detail: "string · required", info: "Target path, dotted (`data.user.name`).", value: '""' },
+  { label: "logic", detail: "JSONLogic", info: "The value to write. A mapping has `logic` or `\"unset\": true`, never both.", value: "{}" },
+  { label: "mode", detail: '"set" | "append" | "extend"', info: "How a non-null result is written: `append` pushes it onto the array at `path`, `extend` pushes each element of an array result (1.12). Needs `logic`; not on a context root.", value: '"append"' },
+  { label: "on_null", detail: '"skip" | "unset"', info: "What a null result does: keep the path (default) or remove it.", value: '"unset"' },
+  { label: "unset", detail: "boolean", info: "Remove the key at `path`.", value: "true" },
+]
+
+/**
+ * Input fields a server may not describe yet — functions newer than the
+ * catalogue answering, or fields it added in a later minor. The catalogue's
+ * own entry wins a name; these fill only what it leaves out.
+ */
+const INPUT_HINTS: Record<string, KeyOption[]> = {
+  cache_read: [
+    { label: "keys", detail: "array", info: "Several keys in one round trip (at most 1000); the result is an array in the same order, null for a miss. One of `key` and `keys`.", value: "[]" },
+  ],
+  cache_delete: [
+    { label: "connector", detail: "string · required", info: "Name of the cache connector to delete from.", value: '""' },
+    { label: "keys", detail: "array · required", info: "Exact keys to delete (at most 1000). A missing key is not an error.", value: "[]" },
+    { label: "output", detail: "string", info: 'Where `{"deleted": n}` is stored.', value: '""' },
+  ],
+  cache_incr: [
+    { label: "connector", detail: "string · required", info: "Name of the cache connector holding the counter.", value: '""' },
+    { label: "key", detail: "string · required", info: "Counter key; a missing key counts as 0 and is created.", value: '""' },
+    { label: "by", detail: "number", info: "Amount to add, a whole number; negative decrements. Default 1.", value: "1" },
+    { label: "ttl_secs", detail: "number", info: "Expiry, applied only when this call creates the key.", value: "60" },
+    { label: "output", detail: "string", info: "Where the new value is stored.", value: '""' },
+  ],
+  cache_invalidate: [
+    { label: "namespaces", detail: "array · required", info: "Response-cache namespaces to invalidate (at most 64), as channels declare them in `cache.namespaces`. No connector: it bumps the namespace counters.", value: "[]" },
+    { label: "output", detail: "string", info: 'Where `{"namespaces": n, "stores": m}` is stored.', value: '""' },
+  ],
+  model_infer: [
+    { label: "select", detail: "JSONLogic", info: "In place of the manifest's `result`, evaluated over the outputs by name and `input` (1.12). Exclusive with `raw`.", value: "{}" },
+  ],
+  storage_presign: [
+    { label: "content_length", detail: "number", info: "PUT only: the exact number of bytes the uploader must send, signed into the URL (1.12). At least 1.", value: "0" },
+  ],
+}
+
+/** The value spellings a key takes inside a string, by the object it sits in. */
+const MAPPING_MODES: Completion[] = [
+  { label: "append", detail: "push the result onto the array at path" },
+  { label: "extend", detail: "push each element of an array result" },
+  { label: "set", detail: "the default — replace the value at path" },
+]
+const ON_NULL: Completion[] = [
+  { label: "skip", detail: "the default — keep the path" },
+  { label: "unset", detail: "remove the key at path" },
 ]
 
 /** Nearest ancestor (or self) with the given node name. */
@@ -84,30 +153,46 @@ function existingKeys(obj: SyntaxNode, doc: string): Set<string> {
   return out
 }
 
-/** Whether an Object is a step: an element of a `tasks` array, or of the root array. */
+/** Whether an Object is a step: an element of `tasks`, a loop's `setup`, or the root array. */
 function isStepObject(obj: SyntaxNode, doc: string): boolean {
   const arr = obj.parent
   if (!arr || arr.name !== "Array") return false
   const owner = ownerKey(arr, doc)
-  return owner === "tasks" || arr.parent?.name === "JsonText"
+  return owner === "tasks" || owner === "setup" || arr.parent?.name === "JsonText"
 }
+
+/** Whether an Object is one of a `map` task's `mappings`. */
+function isMappingObject(obj: SyntaxNode, doc: string): boolean {
+  const arr = obj.parent
+  return !!arr && arr.name === "Array" && ownerKey(arr, doc) === "mappings"
+}
+
+const defaultValue = (kind: string) =>
+  kind === "string" ? '""' : kind === "number" ? "0" : kind === "bool" ? "false" : kind === "array" ? "[]" : "{}"
 
 /** The keys an object at this position accepts, given where it sits. */
 function keysFor(obj: SyntaxNode, doc: string, functions: FunctionSchema[]): KeyOption[] {
   const owner = ownerKey(obj, doc)
   if (owner === "function") return FUNCTION_KEYS
+  if (owner === "loop") return LOOP_KEYS
   if (owner === "input") {
     const functionObject = ownerProperty(obj)?.parent
     const fnName = functionObject ? siblingString(functionObject, "name", doc) : null
-    const fn = fnName ? functions.find((f) => f.name === fnName) : undefined
-    if (!fn?.input_fields) return []
-    return fn.input_fields.map((field) => ({
+    if (!fnName) return []
+    const fn = functions.find((f) => f.name === fnName)
+    const declared: KeyOption[] = (fn?.input_fields ?? []).map((field) => ({
       label: field.name,
       detail: `${field.kind}${field.required ? " · required" : ""}${field.secret_at?.length ? " · secret" : ""}`,
       info: field.description,
-      value: field.kind === "string" ? '""' : field.kind === "number" ? "0" : field.kind === "bool" ? "false" : field.kind === "array" ? "[]" : "{}",
+      value: defaultValue(field.kind),
     }))
+    if (fnName === "map" && declared.length === 0) {
+      return [{ label: "mappings", detail: "array · required", info: "`{ path, logic, mode? }` entries, applied in order.", value: "[]" }]
+    }
+    const names = new Set(declared.map((d) => d.label))
+    return [...declared, ...(INPUT_HINTS[fnName] ?? []).filter((h) => !names.has(h.label))]
   }
+  if (isMappingObject(obj, doc)) return MAPPING_KEYS
   if (isStepObject(obj, doc)) return TASK_KEYS
   return []
 }
@@ -168,6 +253,12 @@ export function stepCompletions(
       const to = Math.min(pos, closed ? node.to - 1 : node.to)
       if (key === "name" && obj && ownerKey(obj, doc) === "function") {
         return { from, to, options: functionOptions(functions()), validFor: WORD }
+      }
+      if (key === "mode" && obj && isMappingObject(obj, doc)) {
+        return { from, to, options: MAPPING_MODES, validFor: WORD }
+      }
+      if (key === "on_null" && obj && isMappingObject(obj, doc)) {
+        return { from, to, options: ON_NULL, validFor: WORD }
       }
       if (key === "halt_on") {
         return {

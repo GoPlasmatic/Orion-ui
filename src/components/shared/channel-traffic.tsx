@@ -1,3 +1,4 @@
+import { useMemo } from "react"
 import { Link } from "react-router"
 import { ArrowUpRight } from "lucide-react"
 import { useTraces } from "@/hooks/use-traces"
@@ -18,7 +19,8 @@ import {
   healthOf,
   healthText,
 } from "@/lib/traffic-encoding"
-import { cn, formatDate, formatDuration, formatRelative } from "@/lib/utils"
+import { cn, formatDate, formatDuration, formatRelative, serverSpan } from "@/lib/utils"
+import type { Trace } from "@/api/types"
 
 /**
  * The channel's own traffic, on its own page. The dashboard and the map knew
@@ -98,13 +100,37 @@ export function ChannelTrafficCard({ channelName }: { channelName: string }) {
   )
 }
 
-/** The channel's last few runs, failures first in colour, one click to each. */
+/** How long a run took: `duration_ms`, or the span between its own timestamps when the row has none. */
+function traceDuration(trace: Trace): number | null {
+  if (trace.duration_ms != null) return trace.duration_ms
+  const span = serverSpan(trace.started_at, trace.completed_at)
+  return span != null && span >= 0 ? span : null
+}
+
+/** How many of the channel's recent failures lead the list. */
+const FAILED_FIRST = 3
+const SHOWN = 6
+
+/**
+ * The channel's last few runs, failures first, one click to each. The recent
+ * failures are fetched on their own: on a busy channel the five newest runs
+ * are almost always successes, and the one failure worth opening scrolled out
+ * of a newest-first list within seconds.
+ */
 export function ChannelRecentTraces({ channelName }: { channelName: string }) {
   const { data, isLoading } = useTraces(
-    { channel: channelName, limit: 5, sort_by: "created_at", sort_order: "desc" },
+    { channel: channelName, limit: SHOWN, sort_by: "created_at", sort_order: "desc" },
     { refetchInterval: 15_000 },
   )
-  const rows = data?.data ?? []
+  const { data: failed } = useTraces(
+    { channel: channelName, status: "failed", limit: FAILED_FIRST, sort_by: "created_at", sort_order: "desc" },
+    { refetchInterval: 15_000 },
+  )
+  const rows = useMemo(() => {
+    const failures = failed?.data ?? []
+    const seen = new Set(failures.map((t) => t.id))
+    return [...failures, ...(data?.data ?? []).filter((t) => !seen.has(t.id))].slice(0, SHOWN)
+  }, [data, failed])
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -149,7 +175,9 @@ export function ChannelRecentTraces({ channelName }: { channelName: string }) {
                   <span title={formatDate(trace.created_at)}>
                     {formatRelative(trace.created_at) ?? formatDate(trace.created_at)}
                   </span>
-                  {trace.duration_ms != null && <span className="ml-2">{formatDuration(trace.duration_ms)}</span>}
+                  {traceDuration(trace) != null && (
+                    <span className="ml-2">{formatDuration(traceDuration(trace) as number)}</span>
+                  )}
                 </span>
               </Link>
             ))}

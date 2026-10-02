@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link, useLocation } from "react-router"
 import {
   bootPackageServing,
@@ -11,6 +11,7 @@ import { LoadIssuesReport } from "@/components/shared/load-issues"
 import { componentStateBadgeClass, isComponentFault } from "@/lib/status"
 import { componentRoute } from "@/lib/health"
 import { cn, formatBytes, formatDate, shortDigest } from "@/lib/utils"
+import { Info } from "lucide-react"
 
 /** `cron.last_reconcile_at` is unix seconds, unlike every other admin-plane timestamp; tolerate an ISO string too. */
 function formatCronInstant(value: number | string | null | undefined): string {
@@ -61,14 +62,29 @@ const COMPONENT_HINTS: Record<string, string> = {
 export function HealthComponents({
   health,
   loadIssues: reported,
+  showLoadIssues = true,
 }: {
   health: HealthResponse | undefined
   loadIssues?: EngineLoadIssues | null
+  /** Off where the page renders the generation's load issues elsewhere (the Engine page's Cluster tab). */
+  showLoadIssues?: boolean
 }) {
   // `/engine#component-<name>` is where the dashboard sends a degraded
   // component that has no page of its own. Client-side navigation does not
   // scroll to a hash by itself, and the rows only exist once health arrives.
   const { hash } = useLocation()
+  // Rows whose explanation is toggled away from its default (open for a
+  // fault, closed otherwise). Each row used to carry a paragraph of docs,
+  // which buried the states under prose; now a healthy row is a name and a
+  // state, and "what this means" is one click (or the tooltip) away.
+  const [explained, setExplained] = useState<ReadonlySet<string>>(() => new Set())
+  const toggleExplained = (name: string) =>
+    setExplained((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
   useEffect(() => {
     if (!hash || !health) return
     document.getElementById(hash.slice(1))?.scrollIntoView({ block: "center" })
@@ -104,36 +120,54 @@ export function HealthComponents({
   return (
     <div className="space-y-4">
       <ul className="divide-y rounded-md border">
-        {components.map(([name, state]) => (
-          <li
-            key={name}
-            id={`component-${name}`}
-            className={cn(
-              "flex items-start justify-between gap-4 px-3 py-2",
-              hash === `#component-${name}` && "bg-accent"
-            )}
-          >
-            <div className="min-w-0">
-              <p className="font-mono text-sm">{name}</p>
-              {COMPONENT_HINTS[name] && (
-                <p className="text-xs text-muted-foreground">{COMPONENT_HINTS[name]}</p>
+        {components.map(([name, state]) => {
+          // A faulted row opens with its explanation; a toggle flips the default.
+          const showHint = explained.has(name) !== isComponentFault(state)
+          return (
+            <li
+              key={name}
+              id={`component-${name}`}
+              className={cn(
+                "flex items-center justify-between gap-4 px-3 py-2",
+                hash === `#component-${name}` && "bg-accent"
               )}
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {isComponentFault(state) && componentRoute(name) && (
-                <Link to={componentRoute(name) as string} className="text-xs underline underline-offset-2">
-                  Inspect
-                </Link>
-              )}
-              <Badge variant="outline" className={componentStateBadgeClass(state)}>
-                {state}
-              </Badge>
-            </div>
-          </li>
-        ))}
+            >
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <p className="font-mono text-sm">{name}</p>
+                  {COMPONENT_HINTS[name] && (
+                    <button
+                      type="button"
+                      onClick={() => toggleExplained(name)}
+                      aria-expanded={showHint}
+                      aria-label={`What ${name} means`}
+                      title={COMPONENT_HINTS[name]}
+                      className="rounded-sm text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+                {COMPONENT_HINTS[name] && showHint && (
+                  <p className="mt-0.5 max-w-prose text-xs text-muted-foreground">{COMPONENT_HINTS[name]}</p>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {isComponentFault(state) && componentRoute(name) && (
+                  <Link to={componentRoute(name) as string} className="text-xs underline underline-offset-2">
+                    Inspect
+                  </Link>
+                )}
+                <Badge variant="outline" className={componentStateBadgeClass(state)}>
+                  {state}
+                </Badge>
+              </div>
+            </li>
+          )
+        })}
       </ul>
 
-      <LoadIssuesReport issues={loadIssues} />
+      {showLoadIssues && <LoadIssuesReport issues={loadIssues} />}
 
       {packages.length > 0 && (
         <div className="rounded-md border p-3 text-sm">

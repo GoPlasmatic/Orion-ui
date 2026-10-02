@@ -8,6 +8,7 @@ import { DetailSkeleton } from "@/components/shared/detail-header"
 import { ErrorState } from "@/components/shared/error-state"
 import { Breadcrumbs } from "@/components/shared/breadcrumbs"
 import { RetrySafetyWarning } from "@/components/shared/retry-safety-warning"
+import { CancelOccurrenceButton } from "@/components/admin/cancel-occurrence"
 import { occurrenceStatusBadgeClass } from "@/lib/status"
 import { isRetryable, occurrenceStatusLabel } from "@/lib/cron"
 import { formatDate, formatDuration, serverSpan } from "@/lib/utils"
@@ -185,6 +186,7 @@ export function OccurrenceDetailPage() {
                 No trace: {inFlight || occ.status === "pending" ? "not yet admitted" : "trace storage did not keep the row — the occurrence is kept either way"}.
               </span>
             )}
+            <CancelOccurrenceButton occurrence={occ} size="sm" />
             {isRetryable(occ.status) && (
               <Button
                 size="sm"

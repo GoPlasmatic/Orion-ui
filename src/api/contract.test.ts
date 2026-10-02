@@ -72,6 +72,7 @@ const { traceDlqApi } = await import("@/api/trace-dlq")
 const { packagesApi } = await import("@/api/packages")
 const { pluginsApi } = await import("@/api/plugins")
 const { cronApi } = await import("@/api/cron")
+const { cacheApi } = await import("@/api/cache")
 const { modelsApi } = await import("@/api/models")
 
 /** Resolve a client path ("admin/workflows/x?y=1" or "/health") to spec-path + query. */
@@ -284,6 +285,9 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
         include_artifacts: true,
       }),
   },
+  cacheApi: {
+    invalidateNamespace: () => cacheApi.invalidateNamespace("posts"),
+  },
   cronApi: {
     listOccurrences: () =>
       cronApi.listOccurrences({
@@ -296,6 +300,7 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
       }),
     getOccurrence: () => cronApi.getOccurrence("occ-1"),
     retryOccurrence: () => cronApi.retryOccurrence("occ-1"),
+    cancelOccurrence: () => cronApi.cancelOccurrence("occ-1"),
     status: () => cronApi.status(),
   },
   modelsApi: {
@@ -356,6 +361,7 @@ const MODULES: Record<string, object> = {
   packagesApi,
   pluginsApi,
   cronApi,
+  cacheApi,
   modelsApi,
 }
 

@@ -39,6 +39,7 @@ import { ModelFormPage } from "@/pages/model-form"
 import { SchedulesPage } from "@/pages/schedules"
 import { OccurrenceDetailPage } from "@/pages/occurrence-detail"
 import { EnginePage } from "@/pages/engine"
+import { CachesPage } from "@/pages/caches"
 import { NotFoundPage } from "@/pages/not-found"
 
 const queryClient = new QueryClient({
@@ -90,6 +91,7 @@ const router = createBrowserRouter(
       <Route path="connectors/new" element={<ConnectorFormPage />} />
       <Route path="connectors/:id" element={<ConnectorDetailPage />} />
       <Route path="connectors/:id/edit" element={<ConnectorFormPage />} />
+      <Route path="caches" element={<CachesPage />} />
       <Route path="circuit-breakers" element={<CircuitBreakersPage />} />
       <Route path="traces" element={<TracesPage />} />
       <Route path="traces/:id" element={<TraceDetailPage />} />

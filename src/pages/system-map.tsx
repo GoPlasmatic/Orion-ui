@@ -9,6 +9,15 @@ import {
   useChannelTraffic,
 } from "@/hooks/use-metrics"
 import { useMapTelemetry } from "@/hooks/use-faults"
+import { useConnectorTraffic } from "@/hooks/use-ops-metrics"
+import { useFunctions } from "@/hooks/use-functions"
+import {
+  CALLS_SHARE,
+  buildDependencyGraph,
+  callShare,
+  parseHubId,
+} from "@/lib/dependency-graph"
+import type { DomainMode } from "@/lib/domains"
 import { faultsFor } from "@/lib/faults"
 import { useUrlFilters } from "@/lib/use-url-filters"
 import { useMediaQuery } from "@/lib/media-query"
@@ -24,6 +33,10 @@ import { PageHeader } from "@/components/shared/page-header"
 import { FilterBar } from "@/components/shared/filter-bar"
 import { EmptyState } from "@/components/shared/empty-state"
 import { TrafficMap } from "@/components/graph/traffic-map"
+import { DependencyMap } from "@/components/graph/dependency-map"
+import { HealthGrid } from "@/components/graph/health-grid"
+import { HubInspector } from "@/components/graph/hub-inspector"
+import { useChangePins } from "@/components/graph/change-pins"
 import { InspectorPlaceholder, MapInspector } from "@/components/graph/map-inspector"
 import { HUB_THRESHOLD } from "@/components/graph/traffic-node"
 import {
@@ -41,7 +54,10 @@ import { cn } from "@/lib/utils"
 import {
   AlertTriangle,
   HelpCircle,
+  LayoutGrid,
   Network,
+  Share2,
+  Waypoints,
   Pause,
   Play,
   Plug,
@@ -65,14 +81,42 @@ import {
  * read a single label.
  *
  * Every view setting lives in the URL — `select`, `q`, `tag`, `lifecycle`,
- * `window`, `size`, `colour` — so a dashboard alert can land on the failing
- * channel, and a link pasted into an incident thread opens the same view.
+ * `window`, `size`, `colour`, `hops`, `lens`, `group` — so a dashboard alert
+ * can land on the failing channel, and a link pasted into an incident thread
+ * opens the same view. `select` names a channel, or on the dependencies lens
+ * a hub (`connector:soma-db`).
  */
 
 type LifecycleFilter = "active" | "all"
 
+/**
+ * Three lenses on one system. `deps` draws domains against the connectors,
+ * plugins and models they share; `calls` the tiered `channel_call` graph;
+ * `grid` every channel as a tile. With no `?lens=` the map picks calls only
+ * when calls are a meaningful share of the system.
+ */
+type Lens = "deps" | "calls" | "grid"
+const LENSES: { value: Lens; label: string; icon: typeof Network }[] = [
+  { value: "deps", label: "Dependencies", icon: Share2 },
+  { value: "calls", label: "Calls", icon: Waypoints },
+  { value: "grid", label: "Health grid", icon: LayoutGrid },
+]
+const isLens = (v: string): v is Lens => LENSES.some((l) => l.value === v)
+
+/**
+ * `?group=` — `prefix` (the default, empty in the URL) or `tag:<a,b>`: a
+ * channel's domain is the first of those tags it carries.
+ */
+function domainModeFromParam(raw: string): DomainMode {
+  if (raw.startsWith("tag:")) {
+    const tags = raw.slice(4).split(",").map((t) => t.trim()).filter(Boolean)
+    if (tags.length > 0) return { by: "tag", tags }
+  }
+  return { by: "prefix" }
+}
+
 /** Every view setting, in the URL. */
-const VIEW_KEYS = ["select", "q", "tag", "lifecycle", "window", "size", "colour", "hops"] as const
+const VIEW_KEYS = ["select", "q", "tag", "lifecycle", "window", "size", "colour", "hops", "lens", "group"] as const
 
 function LegendSwatch({ level, label }: { level: HealthLevel; label: string }) {
   return (
@@ -97,7 +141,32 @@ function MapHelpDialog({ colorMetric, onClose }: { colorMetric: ColorMetric; onC
       </DialogHeader>
       <DialogBody className="text-sm">
         <section className="space-y-1">
-          <p className="font-medium">Lanes and clusters</p>
+          <p className="font-medium">Three lenses</p>
+          <ul className="space-y-1 text-muted-foreground">
+            <li>
+              <span className="font-medium text-foreground">Dependencies:</span> domains (the name
+              segment after the shared prefix, or the tags you group by) on the left, the
+              connectors, plugins and models they use on the right. Edge width is measured calls
+              from <code className="font-mono">orion_connector_requests_total</code>; a thin dashed
+              edge is a reference in the workflow with nothing measured. Click a connector to light
+              up everything that depends on it.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Calls:</span> the{" "}
+              <code className="font-mono">channel_call</code> graph, described below.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Health grid:</span> every channel as a
+              tile under its domain — wider is busier, colour is the colour metric.
+            </li>
+          </ul>
+          <p className="text-muted-foreground">
+            A <span className="font-medium text-info">pin</span> marks a channel or its workflow
+            changed in the last day; hover it for what changed.
+          </p>
+        </section>
+        <section className="space-y-1">
+          <p className="font-medium">Lanes and clusters (calls)</p>
           <p className="text-muted-foreground">
             Entry channels — reached over their route, or started by a schedule — sit in the left
             lane. Each lane to the right is one more <code className="font-mono">channel_call</code>{" "}
@@ -177,7 +246,7 @@ const isSizeMetric = (v: string): v is SizeMetric => SIZE_METRICS.some((m) => m.
 const isColorMetric = (v: string): v is ColorMetric => COLOR_METRICS.some((m) => m.value === v)
 
 export function SystemMapPage() {
-  const { graph, isLoading } = useEntityIndex()
+  const { graph, index, isLoading } = useEntityIndex()
 
   // View state is the URL, replaced rather than pushed on every change so
   // typing a search does not fill the history with one entry per keystroke.
@@ -192,6 +261,14 @@ export function SystemMapPage() {
   // Blast radius: how far the focus reaches from the selection. One hop by
   // default — in a connected system "everything reachable" dims nothing.
   const hops = view.hops === "all" ? Infinity : view.hops === "2" ? 2 : 1
+  const domainMode = useMemo(() => domainModeFromParam(view.group), [view.group])
+
+  // The lens picks itself from the graph unless the URL names one: calls only
+  // when a meaningful share of channels make or receive a channel_call.
+  const share = useMemo(() => callShare(graph), [graph])
+  const autoLens: Lens = share >= CALLS_SHARE ? "calls" : "deps"
+  const lensIsAuto = !isLens(view.lens)
+  const lens: Lens = isLens(view.lens) ? view.lens : autoLens
 
   const [paused, setPaused] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -203,15 +280,26 @@ export function SystemMapPage() {
   const wide = useMediaQuery("(min-width: 1024px)")
 
   const setSelectedId = useCallback((id: string | null) => setView({ select: id ?? "" }), [setView])
-  function revealChannel(id: string) {
-    setSelectedId(id)
+  function reveal(id: string, patch: Record<string, string> = {}) {
+    setView({ select: id, ...patch })
     setRevealToken((t) => t + 1)
   }
+  const revealChannel = (id: string) => reveal(id)
+  // A hub only exists on the dependencies lens; asking for one elsewhere goes there.
+  const revealHub = (id: string) => reveal(id, lens === "deps" ? {} : { lens: "deps" })
 
   const traffic = useChannelTraffic(windowSec, paused)
+  const connectorTraffic = useConnectorTraffic(windowSec, paused)
   // Quarantines, failed connectors and open breakers, and a cron channel's
   // next fire: what the counters cannot show, drawn on the nodes they touch.
   const { faults, nextFire } = useMapTelemetry(graph)
+  const pins = useChangePins(graph)
+  const { data: catalogue } = useFunctions()
+  const pluginOfFunction = useMemo(() => {
+    const out = new Map<string, string>()
+    for (const f of catalogue ?? []) if (f.source === "plugin" && f.plugin) out.set(f.name, f.plugin.id)
+    return out
+  }, [catalogue])
 
   const connectorsByName = useMemo(
     () => new Map(graph.connectors.map((c) => [c.name, c])),
@@ -244,14 +332,39 @@ export function SystemMapPage() {
   }, [graph.nodes, lifecycle, tag])
 
   /**
+   * Channel → connector pairs the exporter has counted, as a stable key: the
+   * set changes when a new pair first appears, not on every poll, so the
+   * dependency graph rebuilds on structure and never on a count.
+   */
+  const measuredKey = useMemo(
+    () => [...connectorTraffic.byEdge.keys()].sort().join("\n"),
+    [connectorTraffic.byEdge],
+  )
+  const dg = useMemo(() => {
+    const measured = measuredKey
+      ? measuredKey.split("\n").map((k) => {
+          const bar = k.indexOf("|")
+          return [k.slice(0, bar), k.slice(bar + 1)] as const
+        })
+      : []
+    return buildDependencyGraph(graph, index, { visible, mode: domainMode, pluginOfFunction, measured })
+  }, [graph, index, visible, domainMode, pluginOfFunction, measuredKey])
+
+  const viewNodes = useMemo(
+    () => graph.nodes.filter((n) => visible.has(n.id) && !n.unresolved),
+    [graph.nodes, visible],
+  )
+
+  /**
    * Search highlights rather than filters: the hits stay lit and everything
    * else dims, so the canvas holds still while a name is typed instead of
-   * re-laying out on every keystroke. Null when nothing is typed.
+   * re-laying out on every keystroke. Null when nothing is typed. On the
+   * dependencies lens a connector, plugin or model name is a hit too.
    */
   const matches = useMemo(() => {
     const term = search.trim().toLowerCase()
     if (!term) return null
-    return new Set(
+    const hits = new Set(
       graph.nodes
         .filter(
           (n) =>
@@ -264,9 +377,13 @@ export function SystemMapPage() {
         )
         .map((n) => n.id),
     )
-  }, [graph.nodes, visible, search])
+    if (lens === "deps") for (const h of dg.hubs) if (h.name.toLowerCase().includes(term)) hits.add(h.id)
+    return hits
+  }, [graph.nodes, visible, search, lens, dg.hubs])
 
   const selected = selectedId ? (graph.byId.get(selectedId) ?? null) : null
+  const selectedHub =
+    lens === "deps" && parseHubId(selectedId) ? (dg.hubById.get(selectedId ?? "") ?? null) : null
 
   // Channels the window says are actually broken, as opposed to merely refusing
   // unauthenticated callers.
@@ -278,17 +395,22 @@ export function SystemMapPage() {
     [traffic.channels],
   )
 
-  const metricsOff = !traffic.isLoading && !traffic.available
   const spanLabel = traffic.spanLabel
   const windowLabel = trafficWindowLabel(windowSec)
   const quarantinedNames = [...faults.quarantined.keys()].filter((name) => graph.byId.has(name))
   const failedConnectors = graph.connectors.filter((c) => faults.failedConnectors.has(c.name))
   const legend = legendFor(colorMetric)
+  // Tags carried by most channels group nothing; "group by tag" uses the rest.
+  const groupingTags = useMemo(
+    () => graph.tags.filter((t) => t.count < graph.nodes.length * 0.9).map((t) => t.tag),
+    [graph.tags, graph.nodes.length],
+  )
+  const tagGroupValue = groupingTags.length > 0 ? `tag:${groupingTags.join(",")}` : ""
 
   if (isLoading) {
     return (
       <div className="flex h-full flex-col gap-4">
-        <PageHeader title="System Map" description="Live traffic across the channel call graph" />
+        <PageHeader title="System Map" description="How the system connects, with live traffic" />
         <Skeleton className="min-h-0 flex-1" />
       </div>
     )
@@ -297,17 +419,28 @@ export function SystemMapPage() {
   if (graph.nodes.length === 0) {
     return (
       <div className="flex h-full flex-col gap-4">
-        <PageHeader title="System Map" description="Live traffic across the channel call graph" />
+        <PageHeader title="System Map" description="How the system connects, with live traffic" />
         <EmptyState
           icon={Network}
           title="Nothing to map yet"
-          description="Create a channel and the map will show it, what it calls, and what it is carrying."
+          description="Create a channel and the map will show it, what it depends on, and what it is carrying."
         />
       </div>
     )
   }
 
-  const inspector = selected ? (
+  const inspector = selectedHub ? (
+    <HubInspector
+      key={selectedHub.id}
+      hub={selectedHub}
+      dg={dg}
+      connectorTraffic={connectorTraffic}
+      spanLabel={spanLabel}
+      failedToLoad={selectedHub.kind === "connector" ? (faults.failedConnectors.get(selectedHub.name) ?? null) : null}
+      onSelectChannel={revealChannel}
+      onClose={() => setSelectedId(null)}
+    />
+  ) : selected ? (
     <MapInspector
       node={selected}
       traffic={traffic.byChannel.get(selected.id)}
@@ -322,15 +455,80 @@ export function SystemMapPage() {
       onHopsChange={(next) => setView({ hops: next === 1 ? "" : next === 2 ? "2" : "all" })}
       onSelect={(node) => revealChannel(node.id)}
       onClose={() => setSelectedId(null)}
+      showHops={lens === "calls"}
+      connectorEdges={connectorTraffic.byEdge}
+      onSelectHub={revealHub}
+      changes={pins.get(selected.id)}
+      metricsState={traffic.state}
     />
   ) : null
+
+  const activity =
+    traffic.state === "live" ? `${traffic.activeCount} carrying traffic · ${spanLabel}` : spanLabel
+  const matchNote = matches
+    ? matches.size === 0
+      ? `nothing matches "${search.trim()}" · `
+      : `${matches.size} match${matches.size === 1 ? "" : "es"} · `
+    : ""
+  const channelsInView = viewNodes.length
+  const footer =
+    lens === "deps"
+      ? `${channelsInView} channels in ${dg.domains.length} domain${dg.domains.length === 1 ? "" : "s"} · ${dg.hubs.length} shared dependenc${dg.hubs.length === 1 ? "y" : "ies"} · ${matchNote}${activity}`
+      : lens === "grid"
+        ? `${channelsInView} channels · ${matchNote}${activity}`
+        : `${visible.size} of ${graph.nodes.length} channels · ${matchNote}${activity}`
+  const autoReason =
+    share === 0
+      ? "no channel calls another"
+      : `${Math.round(share * 100)}% of channels make or receive a call`
 
   return (
     <div className="flex h-full flex-col gap-3">
       <PageHeader
         title="System Map"
-        description="Every live channel, entry points on the left and what they call to the right — dot size is throughput, colour is health"
+        description={
+          lens === "deps"
+            ? "Domains and the connectors they share — edge width is measured calls, colour is health; click a connector for its blast radius"
+            : lens === "grid"
+              ? "Every channel as a tile under its domain — wider is busier, colour is health"
+              : "Every live channel, entry points on the left and what they call to the right — dot size is throughput, colour is health"
+        }
       >
+        <div className="flex items-center gap-2">
+          <div className="flex gap-0.5 rounded-md border p-0.5" role="group" aria-label="Lens">
+            {LENSES.map((l) => {
+              const Icon = l.icon
+              const active = lens === l.value
+              return (
+                <button
+                  key={l.value}
+                  type="button"
+                  onClick={() => setView({ lens: l.value })}
+                  aria-pressed={active}
+                  title={
+                    active && lensIsAuto
+                      ? `Picked automatically: ${autoReason}`
+                      : l.value === autoLens
+                        ? `The automatic choice for this system: ${autoReason}`
+                        : undefined
+                  }
+                  className={cn(
+                    "flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                    active ? "bg-secondary text-secondary-foreground" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">{l.label}</span>
+                  {active && lensIsAuto && (
+                    <span className="rounded bg-background/70 px-1 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                      auto
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
         <Button
           variant="outline"
           size="sm"
@@ -375,7 +573,7 @@ export function SystemMapPage() {
         <div className="relative w-full sm:w-64">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Find a channel, route, topic or tag"
+            placeholder={lens === "deps" ? "Find a channel, connector, route or tag" : "Find a channel, route, topic or tag"}
             value={search}
             onChange={(e) => setView({ q: e.target.value })}
             onKeyDown={(e) => {
@@ -383,13 +581,16 @@ export function SystemMapPage() {
               // lights the matches and dims the rest.
               if (e.key !== "Enter" || !matches) return
               const term = search.trim().toLowerCase()
+              const hub = lens === "deps" ? dg.hubs.find((h) => h.name.toLowerCase() === term) : undefined
+              if (hub) return revealHub(hub.id)
               const hit =
                 graph.nodes.find((n) => matches.has(n.id) && n.name.toLowerCase() === term) ??
-                graph.nodes.find((n) => matches.has(n.id))
-              if (hit) revealChannel(hit.id)
+                graph.nodes.find((n) => matches.has(n.id)) ??
+                (lens === "deps" ? dg.hubs.find((h) => matches.has(h.id)) : undefined)
+              if (hit) reveal(hit.id)
             }}
             className="pl-8"
-            aria-label="Search channels"
+            aria-label="Search the map"
           />
         </div>
         <Select
@@ -414,6 +615,21 @@ export function SystemMapPage() {
                 {t.tag} ({t.count})
               </option>
             ))}
+          </Select>
+        )}
+        {lens !== "calls" && (
+          <Select
+            value={view.group}
+            onChange={(e) => setView({ group: e.target.value })}
+            className="w-full sm:w-44"
+            aria-label="Group channels by"
+            title="How channels are grouped into domains"
+          >
+            <option value="">Group: name prefix</option>
+            {tagGroupValue && <option value={tagGroupValue}>Group: tags</option>}
+            {view.group && view.group !== tagGroupValue && (
+              <option value={view.group}>Group: {view.group.replace(/^tag:/, "tags ").replace(/,/g, ", ")}</option>
+            )}
           </Select>
         )}
         <Select
@@ -519,30 +735,46 @@ export function SystemMapPage() {
                   {failedConnectors.length} connector{failedConnectors.length === 1 ? "" : "s"} failed
                   to load — every task using {failedConnectors.length === 1 ? "it" : "them"} is failing:
                 </span>
-                {failedConnectors.map((c) => (
-                  <Link
-                    key={c.name}
-                    to={c.known ? `/connectors/${c.refId}?test=1` : "/connectors"}
-                    className="rounded font-mono underline underline-offset-2 hover:opacity-80"
-                  >
-                    {c.name} · {c.users.length} channel{c.users.length === 1 ? "" : "s"}
-                  </Link>
-                ))}
+                {failedConnectors.map((c) =>
+                  lens === "deps" ? (
+                    <button
+                      key={c.name}
+                      type="button"
+                      onClick={() => revealHub(`connector:${c.name}`)}
+                      className="rounded font-mono underline underline-offset-2 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                    >
+                      {c.name} · {c.users.length} channel{c.users.length === 1 ? "" : "s"}
+                    </button>
+                  ) : (
+                    <Link
+                      key={c.name}
+                      to={c.known ? `/connectors/${c.refId}?test=1` : "/connectors"}
+                      className="rounded font-mono underline underline-offset-2 hover:opacity-80"
+                    >
+                      {c.name} · {c.users.length} channel{c.users.length === 1 ? "" : "s"}
+                    </Link>
+                  ),
+                )}
               </div>
             )}
           </div>
         </Callout>
       )}
 
-      {/* Two different reasons for a quiet map, and they used to share one
-          message that sent the operator to the console to "light it up". */}
-      {metricsOff ? (
+      {/* Why a map may be quiet, by the feed's state. Loading is not "off":
+          a large instance's first scrape takes seconds. */}
+      {traffic.state === "off" ? (
         <Callout variant="muted" className="py-2 text-xs">
           Metrics are off on this server (<code className="font-mono">[metrics]</code> in the engine
-          config), so the map shows structure only — no rates, no health, no latency.
+          config), so the map shows structure only — {lens === "deps" ? "every edge is a static reference, with no rates or health" : "no rates, no health, no latency"}.
+        </Callout>
+      ) : traffic.state === "error" ? (
+        <Callout variant="warning" className="py-2 text-xs">
+          The metrics endpoint is not answering. The map shows structure
+          {traffic.available ? " and the last sample it read" : " only"} until it does.
         </Callout>
       ) : (
-        traffic.available &&
+        traffic.state === "live" &&
         traffic.activeCount === 0 && (
           <Callout variant="muted" className="py-2 text-xs">
             No channel has carried traffic in the {spanLabel}. Send a request from the{" "}
@@ -556,53 +788,80 @@ export function SystemMapPage() {
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card className="relative min-h-[50vh] overflow-hidden p-0 lg:min-h-0">
-          <TrafficMap
-            graph={graph}
-            traffic={traffic}
-            visible={visible}
-            selectedId={selectedId}
-            sizeMetric={sizeMetric}
-            colorMetric={colorMetric}
-            revealToken={revealToken}
-            faults={faults}
-            hops={hops}
-            highlight={matches}
-            nextFire={nextFire}
-            onSelect={(node) => setSelectedId(node?.id ?? null)}
-          />
-          <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border bg-card/90 px-2 py-1 text-xs text-muted-foreground shadow-xs backdrop-blur">
-            {visible.size} of {graph.nodes.length} channels ·{" "}
-            {matches
-              ? matches.size === 0
-                ? `nothing matches "${search.trim()}" · `
-                : `${matches.size} match${matches.size === 1 ? "" : "es"} · `
-              : ""}
-            {traffic.activeCount} carrying traffic · {spanLabel}
+          {lens === "deps" ? (
+            <DependencyMap
+              graph={graph}
+              dg={dg}
+              traffic={traffic}
+              connectorTraffic={connectorTraffic}
+              selectedId={selectedId}
+              sizeMetric={sizeMetric}
+              colorMetric={colorMetric}
+              faults={faults}
+              pins={pins}
+              highlight={matches}
+              revealToken={revealToken}
+              onSelect={setSelectedId}
+            />
+          ) : lens === "grid" ? (
+            <HealthGrid
+              graph={graph}
+              nodes={viewNodes}
+              domains={dg.domainIndex}
+              traffic={traffic}
+              colorMetric={colorMetric}
+              sizeMetric={sizeMetric}
+              faults={faults}
+              pins={pins}
+              selectedId={selectedId}
+              highlight={matches}
+              revealToken={revealToken}
+              onSelect={setSelectedId}
+            />
+          ) : (
+            <TrafficMap
+              graph={graph}
+              traffic={traffic}
+              visible={visible}
+              selectedId={selectedId}
+              sizeMetric={sizeMetric}
+              colorMetric={colorMetric}
+              revealToken={revealToken}
+              faults={faults}
+              hops={hops}
+              highlight={matches}
+              nextFire={nextFire}
+              pins={pins}
+              onSelect={(node) => setSelectedId(node?.id ?? null)}
+            />
+          )}
+          <div className="pointer-events-none absolute bottom-3 left-3 max-w-[calc(100%-1.5rem)] truncate rounded-md border bg-card/90 px-2 py-1 text-xs text-muted-foreground shadow-xs backdrop-blur">
+            {footer}
           </div>
         </Card>
 
         <Card className="hidden min-h-0 overflow-hidden p-0 lg:block">
-          {wide && inspector ? inspector : <InspectorPlaceholder activeCount={traffic.activeCount} />}
+          {wide && inspector ? inspector : <InspectorPlaceholder activeCount={traffic.activeCount} lens={lens} />}
         </Card>
       </div>
 
       {/* Below `lg` the inspector column is gone; the same panel rises as a
           sheet, so a selection on a laptop split screen is not a dim canvas
           and nothing else. */}
-      {!wide && selected && inspector && (
+      {!wide && inspector && (
         <div
           className="fixed inset-x-0 bottom-0 z-40 h-[55vh] overflow-hidden rounded-t-xl border-t bg-card shadow-lg lg:hidden"
           role="dialog"
-          aria-label={`${selected.name} on the map`}
+          aria-label={`${selectedHub?.name ?? selected?.name ?? ""} on the map`}
         >
           {inspector}
         </div>
       )}
 
-      {/* Connectors ride the nodes that reference them rather than being nodes:
-          one used by 51 of 62 workflows would add an edge everywhere and
-          distinguish nothing. Fan-in is the interesting number, so show that. */}
-      {graph.connectors.length > 0 && (
+      {/* On the calls lens connectors ride the nodes that reference them rather
+          than being nodes, so their fan-in is a strip here. The dependencies
+          lens draws them as hubs, and the strip would repeat it. */}
+      {lens === "calls" && graph.connectors.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             <Plug className="h-3 w-3" />

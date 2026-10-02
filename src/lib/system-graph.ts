@@ -1,4 +1,4 @@
-import { countGroups, countLeafSteps } from "@/lib/workflow-steps"
+import { countGroups, countLeafSteps, workflowSteps } from "@/lib/workflow-steps"
 import { cronTransport } from "@/lib/cron"
 import {
   channelCallTargets,
@@ -211,8 +211,8 @@ export function buildSystemGraph(idx: EntityIndex): SystemGraph {
       workflowId: channel.workflow_id,
       workflowName: workflow?.name ?? null,
       workflowShared: (channelsPerWorkflow.get(channel.workflow_id ?? "") ?? 0) > 1,
-      steps: workflow ? countLeafSteps(workflow.tasks) : 0,
-      groups: workflow ? countGroups(workflow.tasks) : 0,
+      steps: workflow ? countLeafSteps(workflowSteps(workflow)) : 0,
+      groups: workflow ? countGroups(workflowSteps(workflow)) : 0,
       connectors: [...connectors].sort(),
       callers: [],
       callees: [],

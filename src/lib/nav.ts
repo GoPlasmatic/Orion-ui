@@ -5,6 +5,7 @@ import {
   Boxes,
   CalendarClock,
   Cpu,
+  DatabaseZap,
   FileText,
   Gauge,
   GitBranch,
@@ -22,10 +23,11 @@ import {
  * the `g` + key shortcuts and the tab title all read it, so a page is
  * registered once rather than in three files that drift.
  *
- * Grouped by the loop a person is in rather than by API resource: Build is
- * the developer's define → validate → test loop in the order the smoke flow
- * uses it; Observe is the operator's watch → drill → act loop; Govern is
- * change control and this instance.
+ * Grouped by what an operator is doing rather than by API resource: Monitor
+ * is watch and drill; Build is the developer's define → validate → test loop
+ * in the order the smoke flow uses it; Control is acting on the running
+ * instance (caches, the dead-letter queue, breakers, the engine); Govern is
+ * change control.
  */
 export interface NavItem {
   to: string
@@ -37,6 +39,12 @@ export interface NavItem {
   shortcut?: string
   /** Which live count the sidebar draws beside it. */
   badge?: "alerts" | "dlq" | "breakers" | "schedules"
+  /**
+   * A runtime that is off by default. The sidebar hides the item while
+   * `engine/status.capabilities` says the runtime is off *and* nothing of the
+   * kind exists; the route, the palette entry and the shortcut keep working.
+   */
+  capability?: "plugins" | "models"
 }
 
 export interface NavSection {
@@ -48,6 +56,8 @@ export interface NavSection {
 
 export const NAV_SECTIONS: NavSection[] = [
   {
+    label: "Monitor",
+    hint: "Watch the system and drill into what it did",
     items: [
       {
         to: "/",
@@ -63,6 +73,15 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: Network,
         keywords: "topology graph traffic calls",
         shortcut: "m",
+      },
+      { to: "/traces", label: "Traces", icon: Activity, keywords: "executions runs history", shortcut: "t" },
+      {
+        to: "/schedules",
+        label: "Schedules",
+        icon: CalendarClock,
+        keywords: "cron occurrences scheduled jobs ledger cancel",
+        shortcut: "s",
+        badge: "schedules",
       },
     ],
   },
@@ -85,6 +104,7 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: Blocks,
         keywords: "wasm webassembly custom functions",
         shortcut: "p",
+        capability: "plugins",
       },
       {
         to: "/models",
@@ -92,6 +112,7 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: Boxes,
         keywords: "onnx inference model_infer tensor graph admission",
         shortcut: "i",
+        capability: "models",
       },
       {
         to: "/console",
@@ -103,17 +124,15 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    label: "Observe",
-    hint: "The operator's loop: watch, drill, act",
+    label: "Control",
+    hint: "Act on the running instance",
     items: [
-      { to: "/traces", label: "Traces", icon: Activity, keywords: "executions runs history", shortcut: "t" },
       {
-        to: "/schedules",
-        label: "Schedules",
-        icon: CalendarClock,
-        keywords: "cron occurrences scheduled jobs ledger",
-        shortcut: "s",
-        badge: "schedules",
+        to: "/caches",
+        label: "Caches",
+        icon: DatabaseZap,
+        keywords: "response cache namespaces invalidate purge hit ratio",
+        shortcut: "h",
       },
       {
         to: "/trace-dlq",
@@ -131,11 +150,18 @@ export const NAV_SECTIONS: NavSection[] = [
         shortcut: "b",
         badge: "breakers",
       },
+      {
+        to: "/engine",
+        label: "Engine",
+        icon: Cpu,
+        keywords: "settings health reload backups api docs swagger openapi cluster generation capabilities",
+        shortcut: "e",
+      },
     ],
   },
   {
     label: "Govern",
-    hint: "Change control, and this instance",
+    hint: "Change control: who changed what, and what was promoted",
     items: [
       { to: "/audit", label: "Audit Log", icon: FileText, keywords: "who changed what when", shortcut: "a" },
       {
@@ -144,13 +170,6 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: Package,
         keywords: "promotion receipts release applied staged",
         shortcut: "k",
-      },
-      {
-        to: "/engine",
-        label: "Engine",
-        icon: Cpu,
-        keywords: "settings health reload backups api docs swagger openapi",
-        shortcut: "e",
       },
     ],
   },

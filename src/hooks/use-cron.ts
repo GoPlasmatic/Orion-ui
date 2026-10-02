@@ -54,3 +54,19 @@ export function useRetryOccurrence() {
     onError: (e) => toastError("Failed to retry occurrence", e),
   })
 }
+
+// Stops a pending, claimed or running attempt (1.10). The ledger and the
+// schedule both change — a freed slot can admit the next run — and so can the
+// trace list, since a running trace is settled as failed.
+export function useCancelOccurrence() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => cronApi.cancelOccurrence(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cron"] })
+      queryClient.invalidateQueries({ queryKey: ["traces"] })
+      toast.success("Occurrence cancelled — its slot frees within two heartbeats")
+    },
+    onError: (e) => toastError("Failed to cancel occurrence", e),
+  })
+}

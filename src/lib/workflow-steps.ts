@@ -1,4 +1,4 @@
-import type { Step, Task, TaskGroup } from "@/api/types"
+import type { Step, Task, TaskGroup, Workflow } from "@/api/types"
 
 /**
  * Reading a workflow's `tasks` tree.
@@ -56,6 +56,30 @@ export function flattenSteps(steps: Step[] | null | undefined): Task[] {
   }
   walk(Array.isArray(steps) ? steps : [])
   return out
+}
+
+/**
+ * Every step a workflow runs, in the order the engine runs them: its loop's
+ * `setup` list, then `tasks` (the loop body when there is a loop).
+ *
+ * The server's `engine/steps.rs::authored_steps` is this walk, and every
+ * reference check it makes (connectors, plugins, models, `channel_call`) goes
+ * through it since 1.10. A walk handed `tasks` alone misses whatever a loop's
+ * setup reads — on QA's "Clock: pair" that is three of the four connector
+ * calls and the only plugin call.
+ */
+export function workflowSteps(
+  workflow: Pick<Workflow, "tasks" | "loop"> | null | undefined
+): Step[] {
+  if (!workflow) return []
+  const setup = workflow.loop && Array.isArray(workflow.loop.setup) ? workflow.loop.setup : []
+  return [...setup, ...(Array.isArray(workflow.tasks) ? workflow.tasks : [])]
+}
+
+/** Ids of the leaf tasks in a loop's `setup`, which run once before the body. */
+export function loopSetupTaskIds(workflow: Pick<Workflow, "loop"> | null | undefined): Set<string> {
+  const setup = workflow?.loop && Array.isArray(workflow.loop.setup) ? workflow.loop.setup : []
+  return new Set(flattenSteps(setup).map((t) => t.id))
 }
 
 /** How many leaf tasks a step tree holds, without building the list. */

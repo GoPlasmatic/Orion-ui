@@ -23,6 +23,10 @@ import { useReducedMotion } from "@/lib/motion"
 import { faultsFor, type MapFaults } from "@/lib/faults"
 import { CLUSTER_HEADER, layoutSystemGraph, type Cluster, type Lane } from "@/lib/map-layout"
 import { neighbourhood, type SystemGraph, type SystemNode } from "@/lib/system-graph"
+import { middleTruncate, sharedPrefix } from "@/lib/domains"
+import { pinTitle, type ChangePins } from "@/components/graph/change-pins"
+import { FitControl } from "@/components/graph/map-controls"
+import { fitOptions } from "@/components/graph/map-fit"
 import type { ChannelTraffic, TrafficWindow } from "@/hooks/use-metrics"
 import {
   COMPACT_H,
@@ -42,6 +46,7 @@ import {
   legendFor,
   levelFor,
   rawSize,
+  worstLevel,
   type ColorMetric,
   type HealthLevel,
   type SizeMetric,
@@ -88,13 +93,6 @@ function TrafficEdge({
 const LANE_HEADER = 40
 
 /**
- * Floor for the initial fit. The map opens showing every channel, so the
- * first frame is an overview: dots and lanes legible, names not necessarily.
- * Zooming in is one scroll; not being able to see the whole system is not.
- */
-const FIT_MIN_ZOOM = 0.15
-
-/**
  * Channels on the canvas before a minimap earns its corner. Below this the
  * overview fit already shows everything; above it the operator is zoomed in
  * on one lane and needs to know where the rest went.
@@ -116,7 +114,12 @@ const LOD_ZOOM = 0.55
 const COLLAPSE_MAP_AT = 30
 const COLLAPSE_CLUSTER_AT = 6
 
-const LEVEL_RANK: Record<HealthLevel, number> = { idle: 0, healthy: 1, notice: 2, warning: 3, critical: 4 }
+/**
+ * Label budgets, in characters, for a card and for the overview rendering —
+ * sized to the card's name slot at its font, so `middleTruncate` does the
+ * cutting and CSS never has to cut from the right.
+ */
+const LABEL_CHARS = { full: 22, dot: 13, dotCompact: 13 } as const
 
 function laneTitle(lane: Lane): { label: string; detail: string } {
   if (lane.tier === 0) {
@@ -260,6 +263,8 @@ export interface TrafficMapProps {
   highlight?: ReadonlySet<string> | null
   /** A cron channel's next fire, by channel name, for its card. */
   nextFire: ReadonlyMap<string, string>
+  /** Recent audit changes by channel name, drawn as a pin on the node. */
+  pins?: ChangePins
 }
 
 /** Lanes and clusters are frames on the minimap; channels are the marks. */
@@ -278,6 +283,7 @@ function TrafficMapInner({
   hops,
   highlight = null,
   nextFire,
+  pins,
 }: TrafficMapProps) {
   const { fitView } = useReactFlow()
   // A boolean selector: the component re-renders when the level of detail
@@ -294,6 +300,21 @@ function TrafficMapInner({
   const shown = useMemo(
     () => graph.nodes.filter((n) => visible.has(n.id)),
     [graph.nodes, visible],
+  )
+
+  /**
+   * Labels: the product prefix every channel shares is dropped (`soma-`), and
+   * what is left is cut in the middle to the card's budget. With no domains on
+   * this lens the domain segment stays — it is what tells two lanes apart.
+   */
+  const prefix = useMemo(
+    () => sharedPrefix(graph.nodes.filter((n) => !n.unresolved).map((n) => n.name)),
+    [graph.nodes],
+  )
+  const labelFor = useCallback(
+    (name: string, chars: number) =>
+      middleTruncate(prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name, chars),
+    [prefix],
   )
   const shownEdges = useMemo(
     () => graph.edges.filter((e) => visible.has(e.source) && visible.has(e.target)),
@@ -385,11 +406,14 @@ function TrafficMapInner({
   // Re-frame only when the *set of channels* changed — a filter, a new
   // channel — never when a node merely grew because traffic reached it. The
   // layout still re-runs for the size change; the viewport stays put.
-  const fitKey = useMemo(() => shown.map((n) => n.id).join("|"), [shown])
+  // Folding or opening a cluster re-frames too: opening one used to leave the
+  // viewport where the single summary box had been, at 100% on six nodes.
+  const fitKey = useMemo(
+    () => `${shown.map((n) => n.id).join("|")}#${[...clusterOverrides.entries()].join(";")}`,
+    [shown, clusterOverrides],
+  )
   useEffect(() => {
-    const frame = requestAnimationFrame(() =>
-      fitView({ padding: 0.06, duration: reducedMotion ? 0 : 400, minZoom: FIT_MIN_ZOOM }),
-    )
+    const frame = requestAnimationFrame(() => fitView(fitOptions(reducedMotion)))
     return () => cancelAnimationFrame(frame)
   }, [fitKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -454,16 +478,16 @@ function TrafficMapInner({
 
     const clusters: Node[] = layout.clusters.map((cluster) => {
       let rate = 0
-      let level: HealthLevel = "idle"
+      const levels: HealthLevel[] = []
       let faulted = 0
       for (const m of cluster.members) {
         rate += rateOf(m)
         const node = graph.byId.get(m)
         if (!node) continue
-        const l = levelFor(colorMetric, node, traffic.byChannel.get(m))
-        if (LEVEL_RANK[l] > LEVEL_RANK[level]) level = l
+        levels.push(levelFor(colorMetric, node, traffic.byChannel.get(m)))
         if (faultsFor(node, faults).length > 0) faulted++
       }
+      const level = worstLevel(levels)
       const data: ClusterNodeData = {
         cluster,
         rate,
@@ -493,8 +517,11 @@ function TrafficMapInner({
       const channelTraffic: ChannelTraffic | undefined = traffic.byChannel.get(node.id)
       const level = levelFor(colorMetric, node, channelTraffic)
       const healthLabel = legendLabel.get(level) ?? level
+      const chars = lod === "dot" ? (compact ? LABEL_CHARS.dotCompact : LABEL_CHARS.dot) : LABEL_CHARS.full
       const data: TrafficNodeData = {
         node,
+        label: labelFor(node.name, chars),
+        pin: pinTitle(pins?.get(node.id)),
         traffic: channelTraffic,
         level,
         healthLabel,
@@ -544,6 +571,8 @@ function TrafficMapInner({
     lod,
     legendLabel,
     nextFire,
+    labelFor,
+    pins,
   ])
 
   /**
@@ -674,7 +703,8 @@ function TrafficMapInner({
         onPaneClick={onPaneClick}
       >
         <Background gap={22} size={1} color="var(--border)" />
-        <Controls showInteractive={false} className="!shadow-sm" />
+        <Controls showInteractive={false} showFitView={false} className="!shadow-sm" />
+        <FitControl />
         {shown.length > MINIMAP_AT && (
           // Lanes and clusters are nodes too; drawn as faint frames so the
           // minimap reads as columns rather than as a wall of rectangles. The

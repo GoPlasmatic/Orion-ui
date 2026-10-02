@@ -11,6 +11,7 @@ import { Select } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { REGISTRY_LIMIT } from "@/lib/use-pagination"
+import { TagsInput } from "@/components/shared/tags-input"
 
 /** A titled group of related config fields. */
 export function ConfigSection({
@@ -194,6 +195,48 @@ export function StringListField({
         }}
       />
       <p className="mt-1 text-xs text-muted-foreground">Comma-separated</p>
+    </div>
+  )
+}
+
+/**
+ * Edits a `string[]` as chips (`TagsInput`); empty maps to `undefined`. For a
+ * list whose entries each obey a rule, `findings` are shown under the field —
+ * a client-side lint, so the list stays editable while it is wrong.
+ */
+export function TagListField({
+  label,
+  description,
+  value,
+  onChange,
+  placeholder,
+  findings = [],
+}: {
+  label: string
+  description?: string
+  value: string[] | undefined
+  onChange: (value: string[] | undefined) => void
+  placeholder?: string
+  findings?: string[]
+}) {
+  const id = React.useId()
+  return (
+    <div>
+      <FieldLabel label={label} htmlFor={id} />
+      <TagsInput
+        id={id}
+        value={value ?? []}
+        onChange={(next) => onChange(next.length > 0 ? next : undefined)}
+        placeholder={placeholder}
+      />
+      {description && <p className="mt-1 text-xs text-muted-foreground">{description}</p>}
+      {findings.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-xs text-destructive" role="alert">
+          {findings.map((f) => (
+            <li key={f}>{f}</li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

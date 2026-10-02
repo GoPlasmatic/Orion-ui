@@ -2,6 +2,7 @@ import { useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router"
 import { useChannels, useImportChannels } from "@/hooks/use-channels"
 import { useHealth } from "@/hooks/use-health"
+import { DEFAULT_TRAFFIC_WINDOW, useChannelTraffic, type TrafficWindow } from "@/hooks/use-metrics"
 import { useExport } from "@/hooks/use-export"
 import { ImportDialog } from "@/components/shared/import-dialog"
 import type { CreateChannelRequest } from "@/api/types"
@@ -16,25 +17,43 @@ import { Select } from "@/components/ui/select"
 import { channelsApi } from "@/api/channels"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
-import { PAGE_SIZE } from "@/lib/use-pagination"
+import { PAGE_SIZE, REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { EntityTable } from "@/components/shared/entity-table"
 import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter-bar"
 import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
 import { cronTransport } from "@/lib/cron"
+import { healthOf } from "@/lib/traffic-encoding"
+import { TrafficCell } from "@/components/admin/traffic-cell"
 import { CalendarClock, Download, Plus, Radio, Upload } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, Channel>()
 
 /** Filters in the URL so a filtered list is a link; sort and page ride along. */
-const FILTER_KEYS = ["status", "protocol", "type", "tag"] as const
+const FILTER_KEYS = ["status", "protocol", "type", "tag", "q"] as const
+
+/**
+ * The status the list shows when the URL names none. An operator opening
+ * Channels wants what is serving; drafts and the archive were mixed in, and
+ * on QA 148 rows read as one undifferentiated list. `?status=all` is the
+ * explicit everything.
+ */
+const DEFAULT_CHANNEL_STATUS = "active"
+const ALL = "all"
 
 /** What each dropdown accepts; anything else in the URL reads as unset. */
 const FILTER_VALUES = {
-  status: ENTITY_STATUSES,
+  status: [...ENTITY_STATUSES, ALL],
   protocol: CHANNEL_PROTOCOLS,
   type: CHANNEL_TYPES,
+}
+
+/** The `status` a list request sends for the URL's value: active when absent, none for `all`. */
+function channelStatusQuery(urlValue: string): EntityStatus | undefined {
+  if (!urlValue) return DEFAULT_CHANNEL_STATUS
+  if (urlValue === ALL) return undefined
+  return urlValue as EntityStatus
 }
 
 /** Column id → the server's `sort_by` field; the rest are not sortable. */
@@ -53,11 +72,32 @@ const TAGS_SHOWN = 3
  * and a list that paints them "active" is wrong about the one thing an
  * operator scanning it wants to know.
  */
-function buildColumns(quarantined: ReadonlyMap<string, string>) {
+function buildColumns(quarantined: ReadonlyMap<string, string>, traffic: TrafficWindow) {
   return columnHelper.columns([
     columnHelper.accessor("name", {
       header: "Name",
       cell: (info) => <span className="font-medium">{info.getValue()}</span>,
+    }),
+    columnHelper.display({
+      id: "traffic",
+      header: "Traffic",
+      // Rate · error share · p95 over the dashboard's default window, from
+      // the shared `/metrics` poll. A channel reached only by channel_call has
+      // no series of its own and reads idle — see `deriveLoad`.
+      cell: (info) => {
+        const t = traffic.byChannel.get(info.row.original.name)
+        return (
+          <TrafficCell
+            state={traffic.state}
+            level={healthOf(t)}
+            ratePerMin={t?.ratePerMin}
+            errorPct={t?.errorPct}
+            p95Ms={t?.p95Ms}
+            windowed={t?.windowed}
+            spanLabel={traffic.spanLabel}
+          />
+        )
+      },
     }),
     columnHelper.accessor("channel_type", {
       header: "Type",
@@ -152,7 +192,7 @@ function buildColumns(quarantined: ReadonlyMap<string, string>) {
     columnHelper.accessor("updated_at", {
       header: "Updated",
       cell: (info) => (
-        <span className="text-muted-foreground" title={formatDate(info.getValue())}>
+        <span className="whitespace-nowrap text-muted-foreground" title={formatDate(info.getValue())}>
           {formatWhen(info.getValue())}
         </span>
       ),
@@ -160,33 +200,47 @@ function buildColumns(quarantined: ReadonlyMap<string, string>) {
   ])
 }
 
+/** Client-side sort for the search path, on the same fields the server sorts by. */
+function compareChannels(a: Channel, b: Channel, field: string): number {
+  switch (field) {
+    case "name":
+    case "channel_type":
+    case "protocol":
+    case "status":
+      return String(a[field]).localeCompare(String(b[field]))
+    case "updated_at":
+      return a.updated_at.localeCompare(b.updated_at)
+    default:
+      return 0
+  }
+}
+
 export function ChannelsPage() {
   const navigate = useNavigate()
-  const { filters, update, clear, hasFilters, sortQuery, sort, offset, prev, next } = useListState(
-    FILTER_KEYS,
-    SORT_FIELDS,
-    { values: FILTER_VALUES },
-  )
-  const statusFilter = filters.status as EntityStatus | ""
+  const { filters, update, clear, hasFilters, sortQuery, sort, sortBy, sortOrder, offset, prev, next } =
+    useListState(FILTER_KEYS, SORT_FIELDS, { values: FILTER_VALUES })
+  const status = channelStatusQuery(filters.status)
   const protocolFilter = filters.protocol as ChannelProtocol | ""
   const typeFilter = filters.type as ChannelType | ""
+  const search = filters.q.trim().toLowerCase()
   const [showImport, setShowImport] = useState(false)
   const { data: health } = useHealth()
+  const traffic = useChannelTraffic(DEFAULT_TRAFFIC_WINDOW)
 
   const quarantined = useMemo(
     () => new Map((health?.channels?.quarantined ?? []).map((q) => [q.channel, q.reason ?? ""])),
     [health?.channels?.quarantined],
   )
-  const columns = useMemo(() => buildColumns(quarantined), [quarantined])
+  const columns = useMemo(() => buildColumns(quarantined, traffic), [quarantined, traffic])
 
   const query = {
-    status: statusFilter || undefined,
+    status,
     protocol: protocolFilter || undefined,
     channel_type: typeFilter || undefined,
     tag: filters.tag || undefined,
   }
 
-  // Export honours the active filters, and emits the shape /import accepts.
+  // Export honours the server-side filters, and emits the shape /import accepts.
   const exportAll = useExport(async () => {
     const channels = await channelsApi.export(query)
     downloadJson(channels, "orion-channels")
@@ -194,11 +248,46 @@ export function ChannelsPage() {
   })
   const importChannels = useImportChannels()
 
-  const { data, isLoading } = useChannels({ limit: PAGE_SIZE, offset, ...query, ...sortQuery })
+  // The server has no name filter (admin/channels takes status, type,
+  // protocol, tag), so a name search runs here over the registry — the same
+  // REGISTRY_LIMIT read the map and the dashboard share — with the other
+  // filters, the sort and the page applied in the browser too.
+  const serverPage = useChannels({ limit: PAGE_SIZE, offset, ...query, ...sortQuery }, !search)
+  const registry = useChannels({ limit: REGISTRY_LIMIT }, !!search)
+  const searched = useMemo(() => {
+    if (!search) return null
+    const tag = filters.tag.toLowerCase()
+    const rows = (registry.data?.data ?? []).filter(
+      (c) =>
+        c.name.toLowerCase().includes(search) &&
+        (!status || c.status === status) &&
+        (!protocolFilter || c.protocol === protocolFilter) &&
+        (!typeFilter || c.channel_type === typeFilter) &&
+        (!tag || c.tags.some((t) => t.toLowerCase() === tag)),
+    )
+    if (sortBy) {
+      const dir = sortOrder === "desc" ? -1 : 1
+      rows.sort((a, b) => dir * compareChannels(a, b, sortBy))
+    }
+    return rows
+  }, [search, registry.data, status, protocolFilter, typeFilter, filters.tag, sortBy, sortOrder])
+
+  const rows = searched ? searched.slice(offset, offset + PAGE_SIZE) : (serverPage.data?.data ?? [])
+  const total = searched ? searched.length : serverPage.data?.total
+  const isLoading = search ? registry.isLoading : serverPage.isLoading
+
+  // What the default hides, and whether the registry is empty at all: two
+  // one-row reads for their totals, so "No channels yet" is never said over
+  // a registry of drafts.
+  const hidingByDefault = !filters.status
+  const archived = useChannels({ limit: 1, status: "archived" }, hidingByDefault)
+  const anyStatus = useChannels({ limit: 1 }, hidingByDefault && !hasFilters && rows.length === 0 && !isLoading)
+  const archivedCount = archived.data?.total ?? 0
+  const otherCount = anyStatus.data?.total ?? anyStatus.data?.data.length ?? 0
 
   const table = useTable({
     features: listTableFeatures,
-    data: data?.data ?? [],
+    data: rows,
     columns,
   })
 
@@ -230,16 +319,26 @@ export function ChannelsPage() {
       )}
 
       <FilterBar>
+        <FilterTextInput
+          value={filters.q}
+          onChange={(q) => update({ q })}
+          placeholder="Name contains… (in browser)"
+          ariaLabel="Search channels by name"
+          title="The server has no name filter: this searches the loaded registry in the browser"
+          className="w-full sm:w-56"
+        />
         <Select
-          value={statusFilter}
-          onChange={(e) => update({ status: e.target.value })}
+          value={filters.status || DEFAULT_CHANNEL_STATUS}
+          onChange={(e) =>
+            update({ status: e.target.value === DEFAULT_CHANNEL_STATUS ? "" : e.target.value })
+          }
           className={FILTER_W}
           aria-label="Filter by status"
         >
-          <option value="">All statuses</option>
-          <option value="draft">Draft</option>
           <option value="active">Active</option>
+          <option value="draft">Draft</option>
           <option value="archived">Archived</option>
+          <option value={ALL}>All statuses</option>
         </Select>
         <Select
           value={protocolFilter}
@@ -270,6 +369,16 @@ export function ChannelsPage() {
           ariaLabel="Filter by tag"
           title="Matches one whole tag, not part of one"
         />
+        {hidingByDefault && archivedCount > 0 && (
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            onClick={() => update({ status: ALL })}
+            title="The list shows active channels unless a status is chosen"
+          >
+            {archivedCount} archived hidden · show all
+          </button>
+        )}
       </FilterBar>
 
       <EntityTable
@@ -280,6 +389,17 @@ export function ChannelsPage() {
         empty={
           hasFilters ? (
             <NoMatches noun="channels" onClear={clear} />
+          ) : otherCount > 0 ? (
+            <EmptyState
+              icon={Radio}
+              title="No active channels"
+              description={`Nothing is serving: every channel in the registry is a draft or archived (${otherCount} in all).`}
+              action={
+                <Button variant="outline" onClick={() => update({ status: ALL })}>
+                  Show every status
+                </Button>
+              }
+            />
           ) : (
             <EmptyState
               icon={Radio}
@@ -302,8 +422,8 @@ export function ChannelsPage() {
 
       <PaginationFooter
         offset={offset}
-        count={data?.data.length ?? 0}
-        total={data?.total}
+        count={rows.length}
+        total={total}
         onPrev={prev}
         onNext={next}
       />

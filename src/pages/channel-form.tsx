@@ -449,7 +449,12 @@ function ChannelForm({
             </Select>
           </div>
 
-          <ChannelConfigEditor value={config} onChange={setConfig} protocol={protocol} />
+          <ChannelConfigEditor
+            value={config}
+            onChange={setConfig}
+            protocol={protocol}
+            routePattern={protocol === "rest" ? routePattern : null}
+          />
 
           {validation && <ValidationResults result={validation} validLabel="Channel is valid." />}
 

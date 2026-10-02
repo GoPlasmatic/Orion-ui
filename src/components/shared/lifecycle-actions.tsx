@@ -1,9 +1,10 @@
 import { Button } from "@/components/ui/button"
 import type { EntityStatus, ValidationResponse } from "@/api/types"
-import { Play, Archive, GitBranch, Trash2, ShieldCheck } from "lucide-react"
+import { Play, Archive, GitBranch, ShieldCheck } from "lucide-react"
 import { useState } from "react"
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
 import { ValidationResults } from "@/components/shared/validation-results"
+import { MoreActions } from "@/components/admin/more-actions"
 
 interface LifecycleActionsProps {
   status: EntityStatus
@@ -31,6 +32,11 @@ interface LifecycleActionsProps {
    * a guess is worse than a refusal that explains itself.
    */
   activateRefusedReason?: string | null
+  /**
+   * The name a delete is confirmed by typing. Defaults to the enclosing
+   * `DetailHeader`'s title, which is what every detail page shows.
+   */
+  entityName?: string
 }
 
 export function LifecycleActions({
@@ -44,9 +50,14 @@ export function LifecycleActions({
   preflight,
   preflightPending,
   activateRefusedReason,
+  entityName,
 }: LifecycleActionsProps) {
-  const [confirmAction, setConfirmAction] = useState<"archive" | "delete" | null>(null)
+  const [confirmArchive, setConfirmArchive] = useState(false)
 
+  // One primary action, and it follows the lifecycle: a draft's next step is
+  // Activate, an active entity's is a new version to change it. Archive is a
+  // secondary outline button; Delete sits in the overflow menu behind
+  // type-to-confirm (`MoreActions`).
   return (
     <>
       <div className="flex items-center gap-2">
@@ -54,6 +65,12 @@ export function LifecycleActions({
           <Button size="sm" variant="outline" onClick={onPreflight} disabled={preflightPending}>
             <ShieldCheck className="h-3.5 w-3.5" />
             {preflightPending ? "Checking..." : "Pre-flight"}
+          </Button>
+        )}
+        {status === "active" && onArchive && (
+          <Button size="sm" variant="outline" onClick={() => setConfirmArchive(true)} disabled={isPending}>
+            <Archive className="h-3.5 w-3.5" />
+            Archive
           </Button>
         )}
         {status === "draft" && onActivate && (
@@ -67,34 +84,18 @@ export function LifecycleActions({
             Activate
           </Button>
         )}
-        {status === "active" && onArchive && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setConfirmAction("archive")}
-            disabled={isPending}
-          >
-            <Archive className="h-3.5 w-3.5" />
-            Archive
-          </Button>
-        )}
         {status === "active" && onNewVersion && (
-          <Button size="sm" variant="outline" onClick={onNewVersion} disabled={isPending}>
+          <Button size="sm" onClick={onNewVersion} disabled={isPending}>
             <GitBranch className="h-3.5 w-3.5" />
             New Version
           </Button>
         )}
-        {onDelete && (
-          <Button
-            size="sm"
-            variant="destructive"
-            onClick={() => setConfirmAction("delete")}
-            disabled={isPending}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            Delete
-          </Button>
-        )}
+        <MoreActions
+          onDelete={onDelete}
+          entityName={entityName}
+          disabled={isPending}
+          deleteDescription="This permanently deletes every version — drafts, the active one and the archive. It cannot be undone; archiving keeps the history."
+        />
       </div>
 
       {preflight && (
@@ -103,27 +104,15 @@ export function LifecycleActions({
         </div>
       )}
 
-      {confirmAction === "archive" && onArchive && (
+      {confirmArchive && onArchive && (
         <ConfirmDialog
           title="Archive"
           description="This will remove it from the engine and stop handling traffic. Are you sure?"
           onConfirm={() => {
             onArchive()
-            setConfirmAction(null)
+            setConfirmArchive(false)
           }}
-          onCancel={() => setConfirmAction(null)}
-        />
-      )}
-      {confirmAction === "delete" && onDelete && (
-        <ConfirmDialog
-          title="Delete"
-          description="This will permanently delete all versions. This action cannot be undone."
-          onConfirm={() => {
-            onDelete()
-            setConfirmAction(null)
-          }}
-          onCancel={() => setConfirmAction(null)}
-          destructive
+          onCancel={() => setConfirmArchive(false)}
         />
       )}
     </>

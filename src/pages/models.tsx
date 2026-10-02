@@ -159,7 +159,7 @@ function buildColumns(residency: ReadonlyMap<string, string>) {
     columnHelper.accessor("updated_at", {
       header: "Updated",
       cell: (info) => (
-        <span className="text-muted-foreground" title={formatDate(info.getValue())}>
+        <span className="whitespace-nowrap text-muted-foreground" title={formatDate(info.getValue())}>
           {formatWhen(info.getValue())}
         </span>
       ),

@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { formatSpan } from "@/lib/utils"
+import { ApiError } from "@/api/client"
 import {
   fetchMetrics,
   counterTotal,
@@ -192,7 +193,7 @@ function pairSeries(fn: (a: MetricsSnapshot, b: MetricsSnapshot, dtSec: number) 
  * "p95 since the server started". A restart shows up as a negative delta and
  * clamps to zero. Gauges are not meaningful here; nothing reads them off it.
  */
-function deltaSnapshot(base: MetricsSnapshot, cur: MetricsSnapshot): MetricsSnapshot {
+export function deltaSnapshot(base: MetricsSnapshot, cur: MetricsSnapshot): MetricsSnapshot {
   const key = (l: MetricLine) =>
     `${l.name}|${Object.keys(l.labels)
       .sort()
@@ -320,13 +321,30 @@ export interface TrafficSeries {
   errorPct: number[]
 }
 
+/**
+ * Where the metrics feed stands, as one value a page can switch on.
+ *
+ * - `loading` — the first scrape has not answered yet. On a large instance it
+ *   can take seconds; this is **not** "off", and telling an operator to enable
+ *   `[metrics]` while it loads is wrong (QA showed exactly that for ~7 s).
+ * - `off` — the server answered and there is nothing to read (404, or an empty
+ *   exposition): `[metrics]` is disabled on this instance.
+ * - `error` — the scrape failed for another reason; the last good sample, if
+ *   any, is still what the page shows.
+ * - `warming` — one sample: totals and cumulative latency are real, rates are
+ *   not computable until the second poll.
+ * - `live` — two or more samples; windowed figures are real.
+ */
+export type MetricsState = "loading" | "off" | "error" | "warming" | "live"
+
 export interface TrafficWindow {
   isLoading: boolean
   isError: boolean
+  state: MetricsState
   available: boolean
   /** Seconds actually covered — may be short of the requested window. */
   spanSec: number
-  /** The covered span in words: "last 48 s", "waiting for a second sample", "metrics off". */
+  /** The covered span in words: "last 48 s", "waiting for a second sample", "metrics off", "loading metrics". */
   spanLabel: string
   /**
    * Channels that carried anything across the whole buffer, not just the
@@ -383,23 +401,46 @@ export function useChannelTraffic(windowSec: number, paused = false): TrafficWin
 
   const cur = query.data ?? null
 
+  const errorStatus = query.error instanceof ApiError ? query.error.status : null
   return useMemo(() => {
     const core = windowCore(cur, windowSec)
-    const metricsOff = !query.isLoading && !core.available
+    const state = metricsState(core, query.isLoading, query.isError, errorStatus)
     return {
       ...core,
       isLoading: query.isLoading,
       isError: query.isError,
-      spanLabel: metricsOff
-        ? "metrics off"
-        : core.hasRate
-          ? `last ${formatSpan(core.spanSec)}`
-          : "waiting for a second sample",
+      state,
+      spanLabel: SPAN_LABEL[state](core.spanSec),
     }
-  }, [cur, windowSec, query.isLoading, query.isError])
+  }, [cur, windowSec, query.isLoading, query.isError, errorStatus])
 }
 
-type WindowCore = Omit<TrafficWindow, "isLoading" | "isError" | "spanLabel">
+type WindowCore = Omit<TrafficWindow, "isLoading" | "isError" | "spanLabel" | "state">
+
+const SPAN_LABEL: Record<MetricsState, (spanSec: number) => string> = {
+  loading: () => "loading metrics",
+  off: () => "metrics off",
+  error: () => "metrics unreachable",
+  warming: () => "waiting for a second sample",
+  live: (spanSec) => `last ${formatSpan(spanSec)}`,
+}
+
+/**
+ * The state of the feed from the query and the reduction. A sample in hand
+ * outranks a failed refetch: the page keeps showing it, so the state is what
+ * that sample supports, not `error`.
+ */
+export function metricsState(
+  core: { available: boolean; hasRate: boolean },
+  isLoading: boolean,
+  isError: boolean,
+  errorStatus: number | null,
+): MetricsState {
+  if (core.available) return core.hasRate ? "live" : "warming"
+  if (isLoading) return "loading"
+  if (isError) return errorStatus === 404 ? "off" : "error"
+  return "off"
+}
 
 /**
  * The reduction is a function of the buffer and the window, and every hook
@@ -414,6 +455,25 @@ function windowCore(cur: MetricsSnapshot | null, windowSec: number): WindowCore 
   const value = computeWindow(cur, windowSec)
   windowCache = { key, value }
   return value
+}
+
+/**
+ * The oldest buffered sample still inside the window that ends at `cur` —
+ * strictly older than `cur`, so a span is non-zero. Absent on the very first
+ * poll, which is what leaves every rate null rather than a fabricated zero.
+ * With nothing inside the window but something before it, the most recent
+ * older sample stands in so a long window still reports a rate early on.
+ */
+export function windowBase(cur: MetricsSnapshot, windowSec: number): MetricsSnapshot | null {
+  const floor = cur.t - windowSec * 1000
+  for (const s of history) {
+    if (s.t >= cur.t) break
+    if (s.t >= floor) return s
+  }
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].t < cur.t) return history[i]
+  }
+  return null
 }
 
 function computeWindow(cur: MetricsSnapshot | null, windowSec: number): WindowCore {
@@ -436,28 +496,7 @@ function computeWindow(cur: MetricsSnapshot | null, windowSec: number): WindowCo
     }
     if (!cur || cur.lines.length === 0) return empty
 
-    // Oldest sample still inside the window. Strictly older than `cur` so the
-    // span is non-zero; absent on the very first poll, which is what leaves
-    // every rate null rather than reporting a fabricated zero.
-    const floor = cur.t - windowSec * 1000
-    let base: MetricsSnapshot | null = null
-    for (const s of history) {
-      if (s.t >= cur.t) break
-      if (s.t >= floor) {
-        base = s
-        break
-      }
-    }
-    // Nothing inside the window but something before it: fall back to the most
-    // recent older sample so a long window still reports a rate early on.
-    if (!base) {
-      for (let i = history.length - 1; i >= 0; i--) {
-        if (history[i].t < cur.t) {
-          base = history[i]
-          break
-        }
-      }
-    }
+    const base = windowBase(cur, windowSec)
 
     const spanSec = base ? (cur.t - base.t) / 1000 : 0
     const hasRate = spanSec > 0
@@ -591,6 +630,25 @@ function computeWindow(cur: MetricsSnapshot | null, windowSec: number): WindowCo
       series,
       seriesFor,
     }
+}
+
+/**
+ * The shared `["metrics"]` poll and nothing else: the current snapshot, with
+ * each new one recorded in the ring buffer. For readers outside this module
+ * (`use-ops-metrics.ts`) that reduce the snapshot themselves. Same key and
+ * cadence as every other reader, so it adds no request.
+ */
+export function useMetricsSnapshot(paused = false) {
+  const query = useQuery({
+    queryKey: ["metrics"],
+    queryFn: fetchMetrics,
+    refetchInterval: paused ? false : METRICS_POLL_MS,
+  })
+  const t = query.data?.t
+  useEffect(() => {
+    if (query.data) pushSample(query.data)
+  }, [t]) // eslint-disable-line react-hooks/exhaustive-deps
+  return query
 }
 
 export function useMetrics() {

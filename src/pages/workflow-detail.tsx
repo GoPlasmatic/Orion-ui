@@ -13,8 +13,6 @@ import {
   useTestWorkflow,
   useWorkflowStatusDryRun,
 } from "@/hooks/use-workflows"
-import { WorkflowVisualizer } from "@goplasmatic/dataflow-ui"
-import { toVisualizerWorkflow } from "@/lib/workflow-mapper"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -28,18 +26,15 @@ import { LifecycleActions } from "@/components/shared/lifecycle-actions"
 import { VersionHistory } from "@/components/shared/version-history"
 import { VersionCompare } from "@/components/shared/version-compare"
 import { JsonViewer } from "@/components/shared/json-viewer"
-import { NeighbourhoodMap } from "@/components/graph/neighbourhood-map"
-import { WorkflowDependencies } from "@/components/shared/workflow-dependencies"
+import { WorkflowLenses } from "@/components/workflow/workflow-lenses"
 import { ErrorState } from "@/components/shared/error-state"
 import { stepResultBadgeClass } from "@/lib/status"
-import { ChevronDown, ChevronUp, CircleStop, History, Layers, OctagonX, Pencil, Percent, Play, Radio } from "lucide-react"
-import { countGroups, countHaltOnFailure, countLeafSteps, countTerminal } from "@/lib/workflow-steps"
+import { CircleStop, History, Layers, OctagonX, Pencil, Percent, Play, Radio } from "lucide-react"
+import { countGroups, countHaltOnFailure, countLeafSteps, countTerminal, workflowSteps } from "@/lib/workflow-steps"
 import type { WorkflowTestResponse } from "@/api/types"
 
 /** The last dry-run payload, per workflow, in this browser only. */
 const dryRunKey = (id: string) => `orion-dryrun-${id}`
-/** Whether the diagram is folded away — a laptop screen preference, per browser. */
-const DIAGRAM_KEY = "orion-workflow-diagram"
 const EMPTY_PAYLOAD = "{\n  \n}"
 
 
@@ -72,7 +67,6 @@ export function WorkflowDetailPage() {
   const [testResult, setTestResult] = useState<WorkflowTestResponse | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
   const [rolloutDraft, setRolloutDraft] = useState<number | null>(null)
-  const [diagramHidden, setDiagramHidden] = useState(() => readStorage(DIAGRAM_KEY) === "hidden")
 
   if (isLoading) {
     return <DetailSkeleton />
@@ -93,16 +87,11 @@ export function WorkflowDetailPage() {
 
   // Orion 1.2 / dataflow-rs 3.6: a `tasks` element carrying its own `tasks` key
   // is a task group, so the array length is not the number of tasks that run.
-  const taskCount = countLeafSteps(workflow.tasks)
-  const groupCount = countGroups(workflow.tasks)
-  const terminalCount = countTerminal(workflow.tasks)
-  const haltCount = countHaltOnFailure(workflow.tasks)
-
-  const toggleDiagram = () => {
-    const next = !diagramHidden
-    setDiagramHidden(next)
-    writeStorage(DIAGRAM_KEY, next ? "hidden" : "shown")
-  }
+  const steps = workflowSteps(workflow)
+  const taskCount = countLeafSteps(steps)
+  const groupCount = countGroups(steps)
+  const terminalCount = countTerminal(steps)
+  const haltCount = countHaltOnFailure(steps)
 
   const handleTest = () => {
     setTestError(null)
@@ -276,39 +265,16 @@ export function WorkflowDetailPage() {
         </Card>
       )}
 
-      {/* Diagram is the primary content of the page — but on a laptop it is
-          the whole first screen, so it folds away and the choice is remembered. */}
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">
-          {diagramHidden ? "Diagram hidden" : `Pipeline · ${taskCount} ${taskCount === 1 ? "task" : "tasks"}`}
-        </span>
-        <Button variant="ghost" size="sm" onClick={toggleDiagram} aria-expanded={!diagramHidden}>
-          {diagramHidden ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-          {diagramHidden ? "Show diagram" : "Hide diagram"}
-        </Button>
-      </div>
-      {!diagramHidden && (
-        <div className="h-[calc(100dvh-19rem)] min-h-[520px] overflow-hidden rounded-lg border">
-          <WorkflowVisualizer workflows={[toVisualizerWorkflow(workflow)]} />
-        </div>
-      )}
+      {/* The diagram is the primary content of the page: one step tree, four
+          lenses (structure, dependencies, cost, last run), state in the URL. */}
+      <WorkflowLenses workflow={workflow} runsOn={runsOn} />
 
-      <Tabs defaultValue="relationships">
+      <Tabs defaultValue="test">
         <TabsList>
-          <TabsTrigger value="relationships">Relationships</TabsTrigger>
-          <TabsTrigger value="dependencies">Dependencies</TabsTrigger>
           <TabsTrigger value="test">Dry Run</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="relationships">
-          <NeighbourhoodMap kind="workflow" id={workflow.workflow_id} />
-        </TabsContent>
-
-        <TabsContent value="dependencies">
-          <WorkflowDependencies workflowId={workflow.workflow_id} />
-        </TabsContent>
 
         <TabsContent value="test">
           <div className="grid gap-6 lg:grid-cols-2">

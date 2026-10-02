@@ -1,7 +1,7 @@
 import { Link } from "react-router"
 import { Callout } from "@/components/ui/callout"
 import { useRetryRisks } from "@/hooks/use-retry-safety"
-import { countLeafSteps } from "@/lib/workflow-steps"
+import { countLeafSteps, workflowSteps } from "@/lib/workflow-steps"
 import { cn } from "@/lib/utils"
 
 /**
@@ -24,7 +24,7 @@ export function RetrySafetyWarning({
   const { risks, workflow, ready } = useRetryRisks(workflowId)
   if (!workflowId || !ready || !workflow) return null
 
-  const tasks = countLeafSteps(workflow.tasks)
+  const tasks = countLeafSteps(workflowSteps(workflow))
   if (risks.length === 0) {
     return (
       <p className={cn("text-xs text-muted-foreground", className)}>

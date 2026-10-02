@@ -11,6 +11,7 @@ const ROUTES: Record<string, (id: string) => string> = {
   plugin: (id) => `/plugins/${encodeURIComponent(id)}`,
   model: (id) => `/models/${encodeURIComponent(id)}`,
   cron_occurrence: (id) => `/schedules/occurrences/${id}`,
+  cache_namespace: (id) => `/caches?namespace=${encodeURIComponent(id)}`,
   circuit_breaker: (id) => `/circuit-breakers?key=${encodeURIComponent(id)}`,
   trace_dlq: () => "/trace-dlq",
   package: () => "/packages",

@@ -2,7 +2,6 @@ import { useState } from "react"
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router"
 import { useTrace } from "@/hooks/use-traces"
 import { useChannel } from "@/hooks/use-channels"
-import type { ExecutionStep } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
@@ -10,9 +9,10 @@ import { DetailSkeleton } from "@/components/shared/detail-header"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { ErrorState } from "@/components/shared/error-state"
 import { Breadcrumbs } from "@/components/shared/breadcrumbs"
-import { formatDate, formatDuration, cn } from "@/lib/utils"
-import { traceStatusBadgeClass, stepResultBadgeClass, stepResultDotClass } from "@/lib/status"
-import { extractSteps, firstTaskPayload } from "@/lib/trace-payload"
+import { formatDate, formatDuration, serverSpan, cn } from "@/lib/utils"
+import { traceStatusBadgeClass } from "@/lib/status"
+import { firstTaskPayload } from "@/lib/trace-payload"
+import { TraceSteps } from "@/components/traces/trace-steps"
 import { copyText } from "@/lib/clipboard"
 import {
   ChevronDown,
@@ -56,83 +56,6 @@ function VerdictTile({ label, value }: { label: string; value: Scalar }) {
   )
 }
 
-function TaskStep({
-  step,
-  index,
-  isLast,
-  share,
-}: {
-  step: ExecutionStep
-  index: number
-  isLast: boolean
-  /** This step's duration as a share of the longest step, for the bar. */
-  share: number | null
-}) {
-  const [open, setOpen] = useState(false)
-  const result = typeof step.result === "string" ? step.result.toLowerCase() : undefined
-  const label = step.task_name || step.task_id || step.function || `Task ${index + 1}`
-  const snapshotData = step.message?.context?.data
-  const hasError = step.error !== undefined && step.error !== null
-
-  return (
-    <li className="relative pl-8">
-      {!isLast && <span className="absolute bottom-0 left-[0.4375rem] top-3 w-px bg-border" />}
-      <span
-        className={cn(
-          "absolute left-0 top-[0.6rem] h-3.5 w-3.5 rounded-full ring-4 ring-background",
-          stepResultDotClass(result),
-        )}
-      />
-      <div className="mb-2 overflow-hidden rounded-md border">
-        {/* The slow step is visible without expanding anything: a bar scaled
-            to the longest step in the run. */}
-        {share != null && (
-          <div className="h-1 w-full bg-muted" aria-hidden>
-            <div
-              className={cn("h-1", result === "error" ? "bg-destructive" : "bg-chart-1")}
-              style={{ width: `${Math.max(2, share * 100)}%` }}
-            />
-          </div>
-        )}
-        <button
-          onClick={() => setOpen(!open)}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50"
-        >
-          {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-          <span className="font-medium">{label}</span>
-          {step.function && (
-            <span className="font-mono text-xs text-muted-foreground">{step.function}</span>
-          )}
-          <span className="ml-auto flex items-center gap-2">
-            {step.duration_ms !== undefined && (
-              <span className="text-xs text-muted-foreground">{formatDuration(step.duration_ms)}</span>
-            )}
-            {result && (
-              <Badge variant="outline" className={stepResultBadgeClass(result)}>
-                {result}
-              </Badge>
-            )}
-          </span>
-        </button>
-        {open && (
-          <div className="space-y-3 border-t px-3 py-3">
-            {step.input !== undefined && <JsonViewer data={step.input} label="Input" maxHeight="14rem" />}
-            {step.output !== undefined && <JsonViewer data={step.output} label="Output" maxHeight="14rem" />}
-            {snapshotData !== undefined && (
-              <JsonViewer data={snapshotData} label="Data after task" maxHeight="14rem" />
-            )}
-            {step.input === undefined &&
-              step.output === undefined &&
-              snapshotData === undefined &&
-              step.message && <JsonViewer data={step.message} label="Message snapshot" maxHeight="14rem" />}
-            {hasError && <JsonViewer data={step.error} label="Error" maxHeight="10rem" />}
-          </div>
-        )}
-      </div>
-    </li>
-  )
-}
-
 export function TraceDetailPage() {
   const { id } = useParams<{ id: string }>()
   // The console hands the async submission's capability token over in router
@@ -173,9 +96,7 @@ export function TraceDetailPage() {
 
   const result = trace.message
   const resultErrors = result?.errors
-  const taskSteps = extractSteps(trace.task_trace_json)
   const { scalars, nested } = splitOutput(result?.data)
-  const longestStep = Math.max(0, ...taskSteps.map((s) => s.duration_ms ?? 0))
   const position = siblings.indexOf(trace.id)
   const prevId = position > 0 ? siblings[position - 1] : null
   const nextId = position >= 0 && position < siblings.length - 1 ? siblings[position + 1] : null
@@ -240,7 +161,9 @@ export function TraceDetailPage() {
                 <span className="text-sm font-medium">{trace.channel}</span>
               )
             )}
-            <span className="text-sm text-muted-foreground">{formatDuration(trace.duration_ms)}</span>
+            <span className="text-sm tabular-nums text-muted-foreground">
+              {formatDuration(trace.duration_ms ?? serverSpan(trace.started_at, trace.completed_at))}
+            </span>
             <span className="ml-auto flex items-center gap-1 font-mono text-xs text-muted-foreground">
               {trace.id}
               <Button
@@ -326,27 +249,8 @@ export function TraceDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Execution pipeline */}
-      {taskSteps.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Execution pipeline</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ol className="relative">
-              {taskSteps.map((step, i) => (
-                <TaskStep
-                  key={i}
-                  step={step}
-                  index={i}
-                  isLast={i === taskSteps.length - 1}
-                  share={longestStep > 0 && step.duration_ms != null ? step.duration_ms / longestStep : null}
-                />
-              ))}
-            </ol>
-          </CardContent>
-        </Card>
-      )}
+      {/* Where the time went — or why this run kept no steps */}
+      <TraceSteps trace={trace} channel={channel} />
 
       {/* Nested output objects */}
       {nested.length > 0 && (

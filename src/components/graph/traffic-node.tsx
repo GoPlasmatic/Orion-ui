@@ -4,6 +4,7 @@ import {
   CalendarClock,
   CornerDownRight,
   HelpCircle,
+  Pin,
   Radio,
   ShieldAlert,
   Unplug,
@@ -43,6 +44,14 @@ export type LevelOfDetail = "dot" | "full"
 
 export interface TrafficNodeData extends Record<string, unknown> {
   node: SystemNode
+  /**
+   * The name as drawn: the shared prefix dropped and cut in the middle to fit
+   * (`middleTruncate`). The full name is the hover. A name cut from the right
+   * loses the part that tells `soma-admin-runner-keys-list` from its siblings.
+   */
+  label: string
+  /** Recent changes from the audit log, as hover text; null for none. */
+  pin: string | null
   traffic?: ChannelTraffic
   level: HealthLevel
   /** What the colour means under the current metric ("failing", "100–500 ms", "draft"). */
@@ -63,8 +72,22 @@ export interface TrafficNodeData extends Record<string, unknown> {
 
 const FAULT_ICON = { quarantined: ShieldAlert, connector: Unplug, breaker: ZapOff } as const
 
+/** A change marker: the node was edited, activated or imported recently. */
+export function ChangePin({ title, className }: { title: string | null; className?: string }) {
+  if (!title) return null
+  return (
+    <span
+      className={cn("flex shrink-0 items-center text-info", className)}
+      title={title}
+      aria-label={`Recent change: ${title}`}
+    >
+      <Pin className="h-full w-full" aria-hidden />
+    </span>
+  )
+}
+
 /** One glyph per fault, in the fault's own tone, with the reason on hover. */
-function FaultGlyphs({ faults, size = "h-3 w-3" }: { faults: NodeFault[]; size?: string }) {
+export function FaultGlyphs({ faults, size = "h-3 w-3" }: { faults: NodeFault[]; size?: string }) {
   if (faults.length === 0) return null
   return (
     <span className="flex shrink-0 items-center gap-0.5">
@@ -128,7 +151,7 @@ function TrafficDot({
 }
 
 export function TrafficNode({ data, selected }: NodeProps) {
-  const { node, traffic, level, healthLabel, dot, compact, dimmed, focused, load, faults, lod, nextFire } =
+  const { node, label, pin, traffic, level, healthLabel, dot, compact, dimmed, focused, load, faults, lod, nextFire } =
     data as TrafficNodeData
   // The name, and what its colour says — a dot at overview zoom otherwise
   // encodes health by colour alone.
@@ -194,8 +217,9 @@ export function TrafficNode({ data, selected }: NodeProps) {
             compact ? "text-xl text-foreground/80" : "text-[26px]",
           )}
         >
-          {node.name}
+          {label}
         </p>
+        <ChangePin title={pin} className={compact ? "h-4 w-4" : "h-6 w-6"} />
         <FaultGlyphs faults={faults ?? []} size={compact ? "h-4 w-4" : "h-6 w-6"} />
       </div>
     )
@@ -221,7 +245,8 @@ export function TrafficNode({ data, selected }: NodeProps) {
             derived ? "border-2 border-primary" : healthDot[level],
           )}
         />
-        <p className="truncate text-xs font-medium text-foreground/80">{node.name}</p>
+        <p className="min-w-0 truncate text-xs font-medium text-foreground/80">{label}</p>
+        <ChangePin title={pin} className="h-3 w-3" />
         <FaultGlyphs faults={faults ?? []} />
         {node.unresolved && <HelpCircle className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />}
       </div>
@@ -246,8 +271,9 @@ export function TrafficNode({ data, selected }: NodeProps) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <p className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-tight">
-            {node.name}
+            {label}
           </p>
+          <ChangePin title={pin} className="h-3.5 w-3.5" />
           <FaultGlyphs faults={faults ?? []} size="h-3.5 w-3.5" />
           {traffic?.ratePerMin != null && traffic.ratePerMin > 0 ? (
             <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">

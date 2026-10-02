@@ -6,6 +6,9 @@ import { useTimeZone } from "@/lib/use-time-zone"
 import { isComponentFault } from "@/lib/status"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Select } from "@/components/ui/select"
+import { PopoverMenu } from "@/components/admin/popover-menu"
 import { Globe, Menu, Moon, Search, Sun } from "lucide-react"
 
 type EngineState = "healthy" | "degraded" | "unreachable" | "checking"
@@ -33,11 +36,11 @@ export function Header({
   onOpenMenu?: () => void
 }) {
   const { data: health, isError } = useHealth()
-  const { zone } = useTimeZone()
+  const { zone, setZone, label: zoneLabel, localName } = useTimeZone()
   // No interval: the instance id is fixed for the life of the process, and the
   // dashboard's own poll refreshes the shared key whenever it is open.
   const { data: breakers } = useCircuitBreakers()
-  const { resolvedTheme, setTheme } = useTheme()
+  const { theme, resolvedTheme, setTheme } = useTheme()
 
   const faults = Object.entries(health?.components ?? {})
     .filter(([, state]) => isComponentFault(state))
@@ -89,26 +92,49 @@ export function Header({
 
       <div className="flex shrink-0 items-center gap-2">
         {zone === "utc" && (
-          <Link
-            to="/engine"
-            className="hidden items-center gap-1 text-xs text-muted-foreground hover:text-foreground lg:inline-flex"
-            title="Every timestamp is shown in UTC. Change it on the Engine page, under Display."
+          <span
+            className="hidden items-center gap-1 text-xs text-muted-foreground lg:inline-flex"
+            title="Every timestamp is shown in UTC. Change it under Display, beside this."
           >
             <Globe className="h-3.5 w-3.5" /> times in UTC
-          </Link>
+          </span>
         )}
-        <div className="flex items-center rounded-md border bg-background/50 p-0.5">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-            className="text-muted-foreground"
-            aria-label={`Switch to ${resolvedTheme === "dark" ? "light" : "dark"} theme`}
-            title={`Switch to ${resolvedTheme === "dark" ? "light" : "dark"} theme`}
-          >
-            {resolvedTheme === "dark" ? <Sun /> : <Moon />}
-          </Button>
-        </div>
+        {/* Display preferences — how this browser shows the console. They
+            lived on the Engine page until the 1.12 revamp, which made a page
+            about the instance also the place to pick a theme. */}
+        <PopoverMenu
+          label="Display preferences"
+          role="group"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-background/50 text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+          panelClassName="w-64 space-y-3 p-3"
+          trigger={() => (resolvedTheme === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />)}
+        >
+          <p className="text-xs text-muted-foreground">Kept in this browser only.</p>
+          <div>
+            <Label htmlFor="display-theme">Theme</Label>
+            <Select
+              id="display-theme"
+              value={theme}
+              onChange={(e) => setTheme(e.target.value as "light" | "dark" | "system")}
+            >
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+              <option value="system">Follow the system</option>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="display-zone">Times shown in</Label>
+            <Select
+              id="display-zone"
+              value={zone}
+              onChange={(e) => setZone(e.target.value as "local" | "utc")}
+            >
+              <option value="local">Local time ({zone === "utc" ? localName : zoneLabel})</option>
+              <option value="utc">UTC</option>
+            </Select>
+            <p className="mt-1 text-xs text-muted-foreground">Server logs are UTC.</p>
+          </div>
+        </PopoverMenu>
 
         {nodeId && (
           <span

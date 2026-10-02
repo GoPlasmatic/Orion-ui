@@ -22,7 +22,9 @@ import {
   ToggleField,
   StringListField,
   LogicField,
+  TagListField,
 } from "@/components/shared/config-field"
+import { lintNamespaces } from "@/lib/cache-namespaces"
 
 interface ChannelConfigEditorProps {
   value: ChannelConfig
@@ -33,6 +35,8 @@ interface ChannelConfigEditorProps {
    * than stored and ignored — those sections are hidden rather than offered.
    */
   protocol?: ChannelProtocol
+  /** The channel's route pattern, for the OAuth2 sign-in's `{provider}` lint. */
+  routePattern?: string | null
 }
 
 const TRACING_MODES = [
@@ -190,7 +194,7 @@ function RateLimitFields({
   )
 }
 
-export function ChannelConfigEditor({ value, onChange, protocol }: ChannelConfigEditorProps) {
+export function ChannelConfigEditor({ value, onChange, protocol, routePattern }: ChannelConfigEditorProps) {
   const { resolvedTheme } = useTheme()
   const isCron = protocol === "cron"
   // Keys the server refuses on a cron channel but that are still set — a
@@ -340,7 +344,11 @@ export function ChannelConfigEditor({ value, onChange, protocol }: ChannelConfig
       <div className="space-y-4">
         <ChannelAuthEditor value={value.auth} onChange={(v) => setTop("auth", v)} />
 
-        <OAuth2LoginEditor value={value.oauth2_login} onChange={(v) => setTop("oauth2_login", v)} />
+        <OAuth2LoginEditor
+          value={value.oauth2_login}
+          onChange={(v) => setTop("oauth2_login", v)}
+          routePattern={routePattern}
+        />
         {value.oauth2_login && protocol && protocol !== "rest" && (
           <Callout variant="destructive" icon={false} className="px-3 py-2 text-xs">
             OAuth2 sign-in needs a REST channel with a route pattern: both legs are routes, and a
@@ -561,6 +569,20 @@ export function ChannelConfigEditor({ value, onChange, protocol }: ChannelConfig
                 includeEmpty="Choose a cache connector"
               />
             </div>
+            <TagListField
+              label="Invalidation namespaces"
+              description="1–8 names of lower-case letters, digits and _ - . : (up to 64 characters). Invalidating a namespace — from a workflow's cache_invalidate or the Caches page — drops every entry this channel stored under it."
+              value={cache.namespaces}
+              onChange={(v) => setSub("cache", "namespaces", v)}
+              placeholder="orders, tenant:42"
+              findings={lintNamespaces(cache.namespaces)}
+            />
+            <ToggleField
+              label="Coalesce misses"
+              description="Concurrent misses for one key on this node wait for the first to store its entry instead of each running the workflow. Waiters are bounded by the channel timeout, capped at 5 s; each replica coalesces on its own."
+              checked={cache.coalesce_misses ?? false}
+              onCheckedChange={(c) => setSub("cache", "coalesce_misses", c || undefined)}
+            />
             <StringListField
               label="Cache key fields"
               value={cache.cache_key_fields}

@@ -314,6 +314,23 @@ export interface CacheConfig {
   // quarantines the channel rather than falling back to the payload hash.
   key_logic?: JsonLogicValue
   connector?: string
+  // Invalidation namespaces (1.10), 1–8 entries of `a-z0-9_-.:` up to 64 chars.
+  // Each has a version counter in the cache store; `cache_invalidate` or
+  // `POST admin/cache/namespaces/{ns}/invalidate` bumps it and every entry
+  // stored under an older version stops matching. One INCR, no scan.
+  namespaces?: string[]
+  // Coalesce concurrent misses for one key on this node (1.10): the first miss
+  // runs the workflow, the rest wait (bounded by timeout_ms, capped at 5 s) for
+  // its stored entry. Per node — replicas each run their own leader.
+  coalesce_misses?: boolean
+}
+
+// `POST admin/cache/namespaces/{namespace}/invalidate` (1.10). `stores` is how
+// many cache stores the bump reached — every connector a channel declaring the
+// namespace uses, plus the in-memory store when one does.
+export interface CacheInvalidatedResponse {
+  namespace: string
+  stores: number
 }
 
 export interface DeduplicationConfig {
@@ -376,19 +393,79 @@ export interface OAuth2IdTokenConfig {
  * alongside `cache` (a cached 302 would replay one browser's state cookie to
  * the next visitor).
  */
-export interface OAuth2LoginConfig {
-  // `https` only.
-  authorize_url: string
+// Where the normalised identity stamped at `metadata.identity` (1.11) is read
+// from: each names the claim or userinfo key. Defaults are the OIDC claim
+// names (`sub`, `preferred_username`, `name`, `email`, `picture`); GitHub, for
+// one, needs `subject: "id"`, `login: "login"`, `picture: "avatar_url"`.
+export interface OAuth2IdentityMap {
+  subject?: string
+  login?: string
+  name?: string
+  email?: string
+  picture?: string
+}
+
+// `oidc` verifies an `id_token`; `oauth2` does not. Absent derives it from
+// whether `id_token` is configured (or `issuer` is set).
+export type OAuth2ProviderKind = "oidc" | "oauth2"
+
+// One identity provider (1.11). The flat form of `OAuth2LoginConfig` carries
+// the same fields at the top level; `providers` keys several of these by slug.
+// Shared settings (callback_path, state_secret, state_cookie, return_to, pkce,
+// run_workflow_on_authorize, the redirect_uri template) stay on the block.
+export interface OAuth2ProviderConfig {
+  kind?: OAuth2ProviderKind | string
+  // OIDC issuer: `authorize_url`, `token_url`, `userinfo_url` and the id_token
+  // JWKS are discovered from `<issuer>/.well-known/openid-configuration` at
+  // load. Explicit endpoints, if given, win.
+  issuer?: string
+  // `https` only. Required unless `issuer` discovers it.
+  authorize_url?: string
   // `https` only; address-checked on every exchange unless the instance sets
-  // `oauth2_login.allow_private_token_urls`.
-  token_url: string
+  // `oauth2_login.allow_private_token_urls`. Required unless discovered.
+  token_url?: string
   // Literal, or `var://name` for a per-environment value.
-  client_id: string
+  client_id?: string
   // `env://NAME` or `vault://…`; a literal works but stores the secret in the
   // definition. Masked on read like the auth secrets.
-  client_secret: string
+  client_secret?: string
   // How credentials reach the token endpoint: `basic` (default) or `body`.
   client_auth?: "basic" | "body"
+  // Per-provider override of the block's `redirect_uri` template.
+  redirect_uri?: string
+  scopes?: string[]
+  extra_authorize_params?: Record<string, string>
+  id_token?: OAuth2IdTokenConfig
+  // For a provider whose identity is not in an id_token (GitHub's `/user`).
+  userinfo_url?: string
+  identity?: OAuth2IdentityMap
+}
+
+export interface OAuth2LoginConfig {
+  // Single-provider (flat) form, 1.6. Mutually exclusive with `providers`.
+  kind?: OAuth2ProviderKind | string
+  issuer?: string
+  // `https` only. Required in the flat form unless `issuer` discovers it.
+  authorize_url?: string
+  // `https` only; address-checked on every exchange unless the instance sets
+  // `oauth2_login.allow_private_token_urls`.
+  token_url?: string
+  // Literal, or `var://name` for a per-environment value.
+  client_id?: string
+  // `env://NAME` or `vault://…`; a literal works but stores the secret in the
+  // definition. Masked on read like the auth secrets.
+  client_secret?: string
+  // How credentials reach the token endpoint: `basic` (default) or `body`.
+  client_auth?: "basic" | "body"
+  userinfo_url?: string
+  identity?: OAuth2IdentityMap
+  // Several providers on one channel, keyed by slug (1.11). `route_pattern`
+  // and `callback_path` must then each carry one `{provider}` segment, and
+  // `redirect_uri` must contain `{provider}`.
+  providers?: Record<string, OAuth2ProviderConfig>
+  // Merge the deployment's `[oauth2_login.providers]` under `providers` (the
+  // definition wins a slug clash). Implies the multi-provider route shape.
+  providers_from_instance?: boolean
   // Sent on both legs — RFC 6749 §4.1.3 requires them to match.
   redirect_uri: string
   // Static second path on this channel; must differ from `route_pattern`.
@@ -609,12 +686,31 @@ export interface Workflow {
   // Each element is a `Task` or a `TaskGroup` — use `flattenSteps` for the
   // leaf tasks the engine actually runs.
   tasks: Step[]
-  // The engine-managed loop over `tasks`, absent for a workflow that runs its
-  // tasks once.
-  loop?: unknown
+  // The engine-managed loop over `tasks` (dataflow-rs 3.14 / Orion 1.9.1),
+  // absent for a workflow that runs its tasks once. Its `setup` steps run
+  // first, once; `tasks` is then the body. `workflowSteps()` walks both.
+  loop?: WorkflowLoop
   content_hash: string
   created_at: string
   updated_at: string
+}
+
+/**
+ * A workflow `loop` (dataflow-rs 3.14). `setup` runs once before the body and
+ * holds steps exactly like `tasks` (groups included). `over` iterates a list —
+ * each element bound at `as` — otherwise the body repeats while the workflow
+ * condition holds, up to `max`. `counter` names where the iteration index is
+ * written; `scratch` is per-iteration space cleared between passes. Unknown
+ * keys are a 400 UNKNOWN_FIELD since 1.10, and `"loop": null` clears it.
+ */
+export interface WorkflowLoop {
+  setup?: Step[]
+  over?: JsonLogicValue
+  as?: string
+  counter?: string
+  max?: number
+  scratch?: string
+  [key: string]: unknown
 }
 
 // What a workflow's tasks reference. The server walks the latest version's
@@ -706,22 +802,60 @@ export interface ExecutionStepMessage {
   [key: string]: unknown
 }
 
+// One write a task made to the message (`TraceOptions.changes`).
+export interface ExecutionStepChange {
+  path: string
+  old_value?: unknown
+  new_value?: unknown
+  [key: string]: unknown
+}
+
+/**
+ * One step of a dataflow-rs execution trace, as Orion 1.12 (dataflow-rs 3.15)
+ * stores it under `tracing.task_details`.
+ *
+ * `result` is only `executed` or `skipped`: a task that ran and then errored
+ * is still `executed`, and the error lives on the trace (`"Task <id> error:
+ * …"`) and in the snapshot's `errors` — `lib/trace-timeline.ts` attributes it.
+ * `started_at` (RFC 3339, nanoseconds, UTC with a `Z`) and `duration_us` are
+ * set on executed steps only. `loop_counter` is the workflow `loop` iteration
+ * a body step ran in; `element_index` the `for_each` element.
+ */
 export interface ExecutionStep {
-  task_id?: string
-  task_name?: string
   workflow_id?: string
-  function?: string
+  // Null for a workflow-level skip.
+  task_id?: string | null
   result?: ExecutionStepResult
-  duration_ms?: number
-  error?: unknown
-  input?: unknown
-  output?: unknown
+  // Snapshot after the step. Absent for skips, and for steps recorded after
+  // `max_snapshot_bytes` was exceeded (the trace is then `truncated`).
   message?: ExecutionStepMessage
+  mapping_contexts?: unknown[]
+  started_at?: string
+  duration_us?: number
+  // This task's own writes; `[]` wrote nothing, absent means not recorded.
+  changes?: ExecutionStepChange[]
+  loop_counter?: number
+  element_index?: number
+  /** @deprecated never sent by the server; read `duration_us`. */
+  duration_ms?: number
+  /** @deprecated never sent by the server. */
+  task_name?: string
+  /** @deprecated never sent by the server. */
+  function?: string
+  /** @deprecated never sent by the server. */
+  error?: unknown
+  /** @deprecated never sent by the server. */
+  input?: unknown
+  /** @deprecated never sent by the server. */
+  output?: unknown
   [key: string]: unknown
 }
 
 export interface ExecutionTrace {
   steps: ExecutionStep[]
+  // Set when `max_snapshot_bytes` was exceeded: later steps keep their timings
+  // but lose their `message` snapshot. Serialized only when true.
+  truncated?: boolean
   [key: string]: unknown
 }
 

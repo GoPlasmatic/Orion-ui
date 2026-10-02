@@ -1,44 +1,51 @@
 import { useState } from "react"
 import { useDocsServed, useEngineStatus, useEngineReload } from "@/hooks/use-engine"
-import { useReloadConnectors } from "@/hooks/use-connectors"
+import { useCircuitBreakers } from "@/hooks/use-connectors"
 import { useBackups, useCreateBackup } from "@/hooks/use-backup"
 import { useHealth } from "@/hooks/use-health"
-import { useTheme } from "@/lib/use-theme"
-import { useTimeZone } from "@/lib/use-time-zone"
-import { Select } from "@/components/ui/select"
-import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Callout } from "@/components/ui/callout"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PageHeader } from "@/components/shared/page-header"
 import { HealthComponents } from "@/components/shared/health-components"
+import { LoadIssuesReport } from "@/components/shared/load-issues"
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
 import { componentStateBadgeClass, traceStatusBadgeClass } from "@/lib/status"
-import { formatBytes, formatDate, formatUptime } from "@/lib/utils"
+import { useUrlFilters } from "@/lib/use-url-filters"
+import { formatBytes, formatDate, formatUptime, formatWhen } from "@/lib/utils"
 import { countLoadIssues } from "@/api/types"
 import type { EngineCapabilities } from "@/api/types"
-import { RefreshCw, Archive, Database, HeartPulse, Monitor, Plug } from "lucide-react"
+import { RefreshCw, Archive, BookOpen, HeartPulse, Server } from "lucide-react"
+
+const TAB_KEYS = ["tab"] as const
+const TABS = ["health", "cluster", "maintenance"] as const
+type EngineTab = (typeof TABS)[number]
 
 /**
- * The instance: its health report, the engine and connector reloads, backups
- * and the API reference. Named "Settings" until 2026-09-05, which sent
- * operators looking for health to a page whose name promised preferences;
- * the theme toggle lives in the header.
+ * The instance, in three sections: **Health** (the `/health` report, row by
+ * row), **Cluster & runtime** (the running generation from `engine/status` —
+ * what it is, what this node can run, what it refused) and **Maintenance**
+ * (one reload, backups, the API reference — each shown only where this
+ * instance offers it). Named "Settings" until 2026-09-05; the display
+ * preferences that lived here moved to the header's Display menu.
+ *
+ * The tab is in the URL (`?tab=`), and `#component-<name>` — where the
+ * dashboard sends a degraded component with no page of its own — always opens
+ * Health, so those links keep landing on the row.
  */
 export function EnginePage() {
+  const { values, set } = useUrlFilters(TAB_KEYS)
+  // Health unless the URL names another tab — so `#component-<name>` links,
+  // which carry no `?tab=`, land on the report.
+  const tab: EngineTab = (TABS as readonly string[]).includes(values.tab)
+    ? (values.tab as EngineTab)
+    : "health"
+
   const { data: engine } = useEngineStatus()
-  const reload = useEngineReload()
-  const reloadConnectors = useReloadConnectors()
-  const [confirmReload, setConfirmReload] = useState(false)
-  // A button that opens a 404 in a new tab says nothing: a production server
-  // withholds the spec and the Swagger UI, and the probe says whether this one does.
-  const docsServed = useDocsServed().data
-  const { data: backups, isLoading: backupsLoading, error: backupsError } = useBackups()
-  const createBackup = useCreateBackup()
   const { data: health } = useHealth()
-  const { theme, setTheme } = useTheme()
-  const { zone, setZone, label: zoneLabel, localName } = useTimeZone()
   // `load_issues` absent means "this server cannot tell you" (pre-1.9), which
   // is not the same as "nothing quarantined" — so it counts as zero and says
   // nothing, rather than claiming a clean generation.
@@ -48,169 +55,251 @@ export function EnginePage() {
     <div className="space-y-6">
       <PageHeader
         title="Engine"
-        description="Health, reloads, backups and the API reference for this instance"
+        description="This instance: its health, the generation it serves, and maintenance"
       />
 
-      {/* The full /health report. The dashboard shows only the faults; this is
-          where a coarse `degraded` becomes a sentence and the admin-only
-          detail — background tasks, plugin loads, the scheduler — is readable. */}
+      <Tabs
+        defaultValue="health"
+        value={tab}
+        onValueChange={(v) => set({ tab: v === "health" ? "" : v })}
+      >
+        <TabsList>
+          <TabsTrigger value="health">
+            Health
+            {health && health.status !== "ok" && (
+              <>
+                <span className="ml-1.5 h-1.5 w-1.5 rounded-full bg-warning" aria-hidden />
+                <span className="sr-only"> (degraded)</span>
+              </>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="cluster">
+            Cluster &amp; runtime
+            {quarantined > 0 && (
+              <span
+                className="ml-1.5 rounded-full bg-warning/15 px-1.5 text-xs tabular-nums text-warning"
+                aria-label={`${quarantined} quarantined`}
+              >
+                {quarantined}
+              </span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="health" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <HeartPulse className="h-4 w-4" /> Health
+                {health && (
+                  <Badge
+                    variant="outline"
+                    className={traceStatusBadgeClass(health.status === "ok" ? "completed" : "failed")}
+                  >
+                    {health.status}
+                  </Badge>
+                )}
+              </CardTitle>
+              <CardDescription>
+                Per-subsystem state from <code className="font-mono">/health</code>. A monitor should
+                read the <code className="font-mono">status</code> field, not only the HTTP code: a
+                failed connector load, a quarantined channel or a stalled scheduler report degraded
+                at 200.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {quarantined > 0 && (
+                <Callout variant="warning">
+                  The running generation quarantined {quarantined}{" "}
+                  {quarantined === 1 ? "entity" : "entities"}.{" "}
+                  <button
+                    type="button"
+                    className="font-medium underline underline-offset-2"
+                    onClick={() => set({ tab: "cluster" })}
+                  >
+                    See what it refused
+                  </button>
+                </Callout>
+              )}
+              {/* `/engine/status` is the authority for what the running
+                  generation could not load — rendered on the Cluster tab. */}
+              <HealthComponents
+                health={health}
+                loadIssues={engine?.load_issues}
+                showLoadIssues={!engine?.load_issues}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="cluster" className="space-y-4">
+          <ClusterRuntime />
+        </TabsContent>
+
+        <TabsContent value="maintenance" className="space-y-4">
+          <Maintenance quarantined={quarantined} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+function Fact({ label, value, title }: { label: string; value: React.ReactNode; title?: string }) {
+  return (
+    <div title={title}>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 text-sm tabular-nums">{value}</dd>
+    </div>
+  )
+}
+
+/**
+ * The running generation as `GET admin/engine/status` reports it. Every fact
+ * here describes **the node that answered** — a peer reloading on the same
+ * epoch bump may differ, which is why the node id leads.
+ */
+function ClusterRuntime() {
+  const { data: engine, isLoading } = useEngineStatus()
+  const { data: health } = useHealth()
+  const { data: breakers } = useCircuitBreakers()
+  const nodeId = breakers?.instance_id
+
+  if (isLoading) return <Skeleton className="h-48 w-full rounded-xl" />
+
+  return (
+    <>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <HeartPulse className="h-4 w-4" /> Health
-            {health && (
-              <Badge
-                variant="outline"
-                className={traceStatusBadgeClass(health.status === "ok" ? "completed" : "failed")}
-              >
-                {health.status}
-              </Badge>
-            )}
+            <Server className="h-4 w-4" /> Running generation
           </CardTitle>
           <CardDescription>
-            Per-subsystem state from <code className="font-mono">/health</code>
-            {health?.git_hash ? ` · build ${health.git_hash}` : ""}. A monitor should read the{" "}
-            <code className="font-mono">status</code> field, not only the HTTP code: a failed
-            connector load, a quarantined channel or a stalled scheduler report degraded at 200.
+            What the node that answered is serving. In a cluster each node reloads on the config
+            epoch on its own, so a peer can be a generation behind or refuse differently.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
+            <Fact label="Version" value={engine?.version ?? "—"} />
+            <Fact
+              label="Build"
+              value={health?.git_hash ? <span className="font-mono text-xs">{health.git_hash}</span> : "—"}
+            />
+            <Fact
+              label="Generation"
+              value={engine?.generation ? engine.generation : "—"}
+              title="Bumped by every reload this node completes. 0 or absent: a server before 1.9."
+            />
+            <Fact label="Uptime" value={engine ? formatUptime(engine.uptime_seconds) : "—"} />
+            <Fact
+              label="Workflows"
+              value={engine ? `${engine.active_workflows} active of ${engine.workflows_count}` : "—"}
+            />
+            <Fact
+              label="Node"
+              value={nodeId ? <span className="font-mono text-xs">{nodeId.slice(0, 8)}</span> : "—"}
+              title={nodeId ? `Instance ${nodeId}` : undefined}
+            />
+          </dl>
+          {engine?.capabilities && <Capabilities capabilities={engine.capabilities} />}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>What this generation refused</CardTitle>
+          <CardDescription>
+            A reload never fails over one entity: it is quarantined and everything else serves.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {/* `/engine/status` is the authority for what the running generation
-              could not load: `/health` serves the same four lists, but only to
-              a caller it recognises as an admin, so on an instance with
-              `admin_auth` on they can be missing there and present here. */}
-          <HealthComponents health={health} loadIssues={engine?.load_issues} />
+          {!engine?.load_issues ? (
+            <p className="text-sm text-muted-foreground">
+              This server does not report load issues (before 1.9) — which is not the same as
+              nothing being quarantined. The Health tab carries what <code className="font-mono">/health</code>{" "}
+              says.
+            </p>
+          ) : countLoadIssues(engine.load_issues) === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nothing quarantined — every active channel, connector, plugin and model loaded.
+            </p>
+          ) : (
+            <LoadIssuesReport issues={engine.load_issues} />
+          )}
         </CardContent>
       </Card>
+    </>
+  )
+}
 
-      {/* Display preferences. The header toggles the theme too; this is
-          where both are named, and the only place "system" theme and the
-          display zone can be chosen. */}
-      <Card>
+/**
+ * One reload, backups and the API reference. Backups and the docs are shown
+ * only where this instance offers them, with one line saying why when not:
+ * backups are SQLite-only (a 400 elsewhere, cluster mode included), and a
+ * server running with `environment = "production"` withholds the spec.
+ */
+function Maintenance({ quarantined }: { quarantined: number }) {
+  const reload = useEngineReload()
+  const [confirmReload, setConfirmReload] = useState(false)
+  const docsServed = useDocsServed().data
+  const { data: backups, isLoading: backupsLoading, error: backupsError } = useBackups()
+  const createBackup = useCreateBackup()
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <Card className="md:col-span-2">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Monitor className="h-4 w-4" /> Display
+            <RefreshCw className="h-4 w-4" /> Reload
           </CardTitle>
           <CardDescription>
-            How this browser shows the console. Kept in this browser only.
+            Rebuild the running generation from the database and bump the cluster config epoch
+            once — what picks up channel, workflow and connector changes, and what finishes a
+            batch of deferred status changes.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <Label htmlFor="display-theme">Theme</Label>
-            <Select
-              id="display-theme"
-              value={theme}
-              onChange={(e) => setTheme(e.target.value as "light" | "dark" | "system")}
-            >
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-              <option value="system">Follow the system</option>
-            </Select>
-          </div>
-          <div>
-            <Label
-              htmlFor="display-zone"
-              hint={`Your zone is ${localName} (${zone === "utc" ? "hidden while UTC is chosen" : zoneLabel}). Server logs are UTC.`}
-            >
-              Times shown in
-            </Label>
-            <Select
-              id="display-zone"
-              value={zone}
-              onChange={(e) => setZone(e.target.value as "local" | "utc")}
-            >
-              <option value="local">Local time</option>
-              <option value="utc">UTC</option>
-            </Select>
-          </div>
+        <CardContent className="flex flex-wrap items-center gap-3">
+          <Button onClick={() => setConfirmReload(true)} disabled={reload.isPending}>
+            <RefreshCw className={`h-4 w-4 ${reload.isPending ? "animate-spin" : ""}`} />
+            {reload.isPending ? "Reloading..." : "Reload engine"}
+          </Button>
+          {quarantined > 0 && (
+            <span className="text-sm text-warning">
+              The current generation quarantined {quarantined}{" "}
+              {quarantined === 1 ? "entity" : "entities"}; a reload retries {quarantined === 1 ? "it" : "them"}.
+            </span>
+          )}
+          {confirmReload && (
+            <ConfirmDialog
+              title="Reload the engine?"
+              description="The engine is rebuilt from the database and the cluster config epoch is bumped, so every node reloads its generation. Any status change made with reload=defer takes effect now. Requests in flight finish on the generation they started on; a channel whose definition no longer loads is quarantined rather than served."
+              confirmLabel="Reload"
+              onConfirm={() => {
+                setConfirmReload(false)
+                reload.mutate()
+              }}
+              onCancel={() => setConfirmReload(false)}
+            />
+          )}
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {/* Engine */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <RefreshCw className="h-4 w-4" /> Engine
-            </CardTitle>
-            <CardDescription>
-              {engine
-                ? `Version ${engine.version} | Uptime: ${formatUptime(engine.uptime_seconds)}`
-                : "Loading..."}
-              {engine?.generation ? ` | Generation ${engine.generation}` : ""}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {engine?.capabilities && <Capabilities capabilities={engine.capabilities} />}
-            <p className="text-sm text-muted-foreground">
-              Reload the engine to pick up configuration changes to channels and workflows. It
-              rebuilds the running generation and bumps the cluster config epoch once, which is
-              also what finishes a batch of deferred status changes.
-            </p>
-            {quarantined > 0 && (
-              <p className="text-sm text-warning">
-                This generation quarantined {quarantined}{" "}
-                {quarantined === 1 ? "entity" : "entities"} — the health report above names{" "}
-                {quarantined === 1 ? "it" : "them"}. A reload never fails over one entity: it is
-                refused, and everything else serves.
-              </p>
-            )}
-            <Button
-              onClick={() => setConfirmReload(true)}
-              disabled={reload.isPending}
-            >
-              <RefreshCw className={`h-4 w-4 ${reload.isPending ? "animate-spin" : ""}`} />
-              {reload.isPending ? "Reloading..." : "Reload Engine"}
-            </Button>
-            {confirmReload && (
-              <ConfirmDialog
-                title="Reload the engine?"
-                description="The engine is rebuilt from the database and the cluster config epoch is bumped, so every node reloads its generation. Any status change made with reload=defer takes effect now. Requests in flight finish on the generation they started on; a channel whose definition no longer loads is quarantined rather than served."
-                onConfirm={() => {
-                  setConfirmReload(false)
-                  reload.mutate()
-                }}
-                onCancel={() => setConfirmReload(false)}
-              />
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Connectors */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Plug className="h-4 w-4" /> Connectors
-            </CardTitle>
-            <CardDescription>
-              Refresh connector bindings via an engine reload.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Reloads the engine so channels pick up the latest connector configuration.
-              Connector edits already reload the registry automatically.
-            </p>
-            <Button
-              variant="outline"
-              onClick={() => reloadConnectors.mutate()}
-              disabled={reloadConnectors.isPending}
-            >
-              <RefreshCw className={`h-4 w-4 ${reloadConnectors.isPending ? "animate-spin" : ""}`} />
-              {reloadConnectors.isPending ? "Reloading..." : "Reload Connectors"}
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Backups */}
+      {backupsError ? (
+        <p className="text-sm text-muted-foreground md:col-span-2">
+          <Archive className="mr-1.5 inline h-3.5 w-3.5" />
+          Backups are not offered here — they snapshot a SQLite database, and this instance
+          answered: {backupsError instanceof Error ? backupsError.message : "unavailable"}.
+        </p>
+      ) : (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Archive className="h-4 w-4" /> Backups
             </CardTitle>
             <CardDescription>
-              Snapshot the database into the server's backup directory (SQLite only).
+              Snapshot the database into the server's backup directory. There is no restore
+              endpoint: restoring is a file copy on the host.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -220,15 +309,10 @@ export function EnginePage() {
               disabled={createBackup.isPending}
             >
               <Archive className="h-4 w-4" />
-              {createBackup.isPending ? "Creating..." : "Create Backup"}
+              {createBackup.isPending ? "Creating..." : "Create backup"}
             </Button>
-
             {backupsLoading ? (
               <Skeleton className="h-16 w-full" />
-            ) : backupsError ? (
-              <p className="text-sm text-muted-foreground">
-                Backups unavailable: {backupsError instanceof Error ? backupsError.message : "error"}
-              </p>
             ) : (backups?.length ?? 0) === 0 ? (
               <p className="text-sm text-muted-foreground">No backups yet.</p>
             ) : (
@@ -239,9 +323,12 @@ export function EnginePage() {
                     className="flex items-center justify-between rounded-md border px-3 py-1.5 text-sm"
                   >
                     <span className="truncate font-mono text-xs">{b.filename}</span>
-                    <span className="ml-3 shrink-0 text-xs text-muted-foreground">
+                    <span
+                      className="ml-3 shrink-0 text-xs text-muted-foreground"
+                      title={b.modified_at ? formatDate(b.modified_at) : undefined}
+                    >
                       {formatBytes(b.size_bytes)}
-                      {b.modified_at ? ` · ${formatDate(b.modified_at)}` : ""}
+                      {b.modified_at ? ` · ${formatWhen(b.modified_at)}` : ""}
                     </span>
                   </div>
                 ))}
@@ -249,47 +336,33 @@ export function EnginePage() {
             )}
           </CardContent>
         </Card>
+      )}
 
-        {/* API Docs */}
+      {docsServed === false ? (
+        <p className="text-sm text-muted-foreground md:col-span-2">
+          <BookOpen className="mr-1.5 inline h-3.5 w-3.5" />
+          The API reference is not served here: a server running with{" "}
+          <code className="font-mono">environment = "production"</code> withholds the spec and the
+          Swagger UI. The spec this console targets is vendored in the UI repository.
+        </p>
+      ) : (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Database className="h-4 w-4" /> API Documentation
+              <BookOpen className="h-4 w-4" /> API reference
             </CardTitle>
-            <CardDescription>
-              Interactive API reference.
-            </CardDescription>
+            <CardDescription>The Swagger UI and OpenAPI spec this instance serves.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Access the Swagger UI and OpenAPI specification for the Orion API.
-            </p>
-            {docsServed === false && (
-              <p className="text-xs text-warning">
-                Not served by this instance: a server running with{" "}
-                <code className="font-mono">environment = "production"</code> withholds the spec and
-                the Swagger UI. The spec this console targets is vendored in the UI repository.
-              </p>
-            )}
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={() => window.open("/docs", "_blank")}
-                disabled={docsServed === false}
-              >
-                Swagger UI
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => window.open("/api/v1/openapi.json", "_blank")}
-                disabled={docsServed === false}
-              >
-                OpenAPI Spec
-              </Button>
-            </div>
+          <CardContent className="flex gap-2">
+            <Button variant="outline" onClick={() => window.open("/docs", "_blank")}>
+              Swagger UI
+            </Button>
+            <Button variant="outline" onClick={() => window.open("/api/v1/openapi.json", "_blank")}>
+              OpenAPI spec
+            </Button>
           </CardContent>
         </Card>
-      </div>
+      )}
     </div>
   )
 }
@@ -309,6 +382,8 @@ function Capabilities({ capabilities }: { capabilities: EngineCapabilities }) {
     { key: "plugins", label: "Plugins", setting: "plugins.enabled" },
     { key: "models", label: "Models", setting: "models.enabled" },
   ]
+  // The wire is a boolean; tolerate "on" / "off" spellings as well.
+  const on = (v: unknown) => v === true || v === "on"
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs text-muted-foreground">This node runs</span>
@@ -316,10 +391,10 @@ function Capabilities({ capabilities }: { capabilities: EngineCapabilities }) {
         <Badge
           key={key}
           variant="outline"
-          className={componentStateBadgeClass(capabilities[key] ? "ok" : "disabled")}
-          title={`${setting} = ${capabilities[key]} — a node without it quarantines what needs it rather than refusing to start`}
+          className={componentStateBadgeClass(on(capabilities[key]) ? "ok" : "disabled")}
+          title={`${setting} = ${on(capabilities[key])} — a node without it quarantines what needs it rather than refusing to start`}
         >
-          {label} {capabilities[key] ? "on" : "off"}
+          {label} {on(capabilities[key]) ? "on" : "off"}
         </Badge>
       ))}
     </div>

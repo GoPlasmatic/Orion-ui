@@ -13,16 +13,18 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { EmptyState } from "@/components/shared/empty-state"
+import { CancelOccurrenceButton } from "@/components/admin/cancel-occurrence"
 import { occurrenceStatusBadgeClass } from "@/lib/status"
 import { isRetryable, occurrenceStatusLabel } from "@/lib/cron"
-import { formatDate, formatDuration, serverSpan } from "@/lib/utils"
+import { formatDate, formatDuration, formatWhen, serverSpan } from "@/lib/utils"
 import { CalendarClock, RotateCcw } from "lucide-react"
 
 /**
  * The occurrence ledger as a table, shared by the Schedules page (every
  * channel) and a cron channel's detail page (one channel, `showChannel` off).
  * Rows link to the occurrence, which is where the trace id, the executing
- * version and the lease detail live.
+ * version and the lease detail live. With `onRetry`, the actions column also
+ * offers Cancel on an attempt still pending, claimed or running (1.10).
  */
 export function OccurrencesTable({
   rows,
@@ -120,9 +122,14 @@ export function OccurrencesTable({
                       {o.trigger}
                     </Badge>
                   </TableCell>
-                  <TableCell className="tabular-nums">{formatDate(o.scheduled_for)}</TableCell>
-                  <TableCell className="tabular-nums text-muted-foreground">
-                    {o.started_at ? formatDate(o.started_at) : "—"}
+                  <TableCell className="tabular-nums" title={formatDate(o.scheduled_for)}>
+                    {formatWhen(o.scheduled_for)}
+                  </TableCell>
+                  <TableCell
+                    className="tabular-nums text-muted-foreground"
+                    title={o.started_at ? formatDate(o.started_at) : undefined}
+                  >
+                    {o.started_at ? formatWhen(o.started_at) : "—"}
                   </TableCell>
                   <TableCell className="tabular-nums text-muted-foreground">
                     {duration == null ? "—" : formatDuration(duration)}
@@ -132,20 +139,23 @@ export function OccurrencesTable({
                   </TableCell>
                   {onRetry && (
                     <TableCell className="text-right">
-                      {isRetryable(o.status) && (
-                        <Button
-                          variant="outline"
-                          size="xs"
-                          disabled={retryPending}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onRetry(o.id)
-                          }}
-                          title="Another attempt at this occurrence — same id, same scheduled_for"
-                        >
-                          <RotateCcw /> Retry
-                        </Button>
-                      )}
+                      <div className="flex justify-end gap-1.5">
+                        <CancelOccurrenceButton occurrence={o} />
+                        {isRetryable(o.status) && (
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            disabled={retryPending}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onRetry(o.id)
+                            }}
+                            title="Another attempt at this occurrence — same id, same scheduled_for"
+                          >
+                            <RotateCcw /> Retry
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   )}
                 </TableRow>

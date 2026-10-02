@@ -92,6 +92,35 @@ export const healthText: Record<HealthLevel, string> = {
   notice: "text-info",
 }
 
+/**
+ * Stroke colour per level, for SVG geometry that carries a health reading — a
+ * dependency edge's error share. CSS variables resolve in an inline `style`
+ * stroke, which is where React Flow puts it.
+ */
+export const healthStroke: Record<HealthLevel, string> = {
+  idle: "var(--border-strong)",
+  healthy: "var(--success)",
+  warning: "var(--warning)",
+  critical: "var(--destructive)",
+  notice: "var(--info)",
+}
+
+/** Quiet to loud, for "the worst of several". */
+export const LEVEL_RANK: Record<HealthLevel, number> = {
+  idle: 0,
+  healthy: 1,
+  notice: 2,
+  warning: 3,
+  critical: 4,
+}
+
+/** The loudest of several levels; idle when there are none. */
+export function worstLevel(levels: Iterable<HealthLevel>): HealthLevel {
+  let worst: HealthLevel = "idle"
+  for (const l of levels) if (LEVEL_RANK[l] > LEVEL_RANK[worst]) worst = l
+  return worst
+}
+
 /** Stacked-bar segment colours, in the order they are drawn. */
 export const segmentColor = {
   ok: "bg-success",
@@ -254,9 +283,17 @@ export function rawSize(
  * magnitude more than a leaf.
  */
 export function dotSize(value: number, max: number): number {
-  if (max <= 0 || value <= 0) return MIN_DOT
-  const scaled = Math.sqrt(value / max)
-  return Math.round(MIN_DOT + (MAX_DOT - MIN_DOT) * scaled)
+  return sqrtScale(value, max, MIN_DOT, MAX_DOT)
+}
+
+/**
+ * The square-root scale `dotSize` uses, between any two extents — the health
+ * grid sizes its tiles with it, so a tile and a dot say "busier" the same way.
+ */
+export function sqrtScale(value: number, max: number, min: number, top: number): number {
+  if (max <= 0 || value <= 0) return min
+  const scaled = Math.sqrt(Math.min(1, value / max))
+  return Math.round(min + (top - min) * scaled)
 }
 
 export function levelFor(

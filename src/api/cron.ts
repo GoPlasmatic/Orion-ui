@@ -71,6 +71,20 @@ export const cronApi = {
       )
       .then(unwrap),
 
+  /**
+   * Stop an attempt that is `pending`, `claimed` or `running` (1.10). It is
+   * settled as `failed`, `claimed_by` is cleared, the singleton slot frees
+   * within two heartbeats, and `error_message` names the holder it took the
+   * claim from; a trace still marked running becomes failed. 409 once the
+   * occurrence has finished, 404 for an unknown id.
+   */
+  cancelOccurrence: (id: string) =>
+    api
+      .post<DataResponse<CronOccurrence>>(
+        `admin/cron/occurrences/${encodeURIComponent(id)}/cancel`
+      )
+      .then(unwrap),
+
   // One row per active cron channel: schedule, next fire, last run, backlog.
   status: () => api.get<DataResponse<CronScheduleStatus[]>>("admin/cron/status").then(unwrap),
 }

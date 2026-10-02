@@ -1,6 +1,7 @@
 import { useMemo } from "react"
 import { useActiveWorkflow } from "@/hooks/use-workflows"
 import { useFunctions } from "@/hooks/use-functions"
+import { workflowSteps } from "@/lib/workflow-steps"
 import { retryRisks } from "@/lib/retry-safety"
 
 /**
@@ -11,7 +12,7 @@ import { retryRisks } from "@/lib/retry-safety"
 export function useRetryRisks(workflowId: string | null | undefined) {
   const { workflow, isLoading: workflowLoading } = useActiveWorkflow(workflowId ?? "")
   const { data: catalogue, isLoading: catalogueLoading } = useFunctions()
-  const risks = useMemo(() => retryRisks(workflow?.tasks, catalogue), [workflow?.tasks, catalogue])
+  const risks = useMemo(() => retryRisks(workflowSteps(workflow), catalogue), [workflow, catalogue])
   return {
     risks,
     workflow,

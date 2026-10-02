@@ -4,6 +4,7 @@ import {
   ArrowRight,
   ArrowUpRight,
   GitBranch,
+  History,
   Link2,
   Pencil,
   Play,
@@ -26,11 +27,16 @@ import { StatusBadge } from "@/components/shared/status-badge"
 import { useTraces } from "@/hooks/use-traces"
 import { useTriggerChannel } from "@/hooks/use-channels"
 import { cn, formatDate, formatRelative } from "@/lib/utils"
+import { middleTruncate } from "@/lib/domains"
+import { edgeLoad, hubId } from "@/lib/dependency-graph"
+import { changeText, type ChangeNote } from "@/components/graph/change-pins"
+import type { ConnectorChannelTraffic } from "@/hooks/use-ops-metrics"
 import type { ConnectorUse, SystemGraph, SystemNode } from "@/lib/system-graph"
-import type { ChannelTraffic, TrafficSeries } from "@/hooks/use-metrics"
+import type { ChannelTraffic, MetricsState, TrafficSeries } from "@/hooks/use-metrics"
 import type { MapFaults, NodeFault } from "@/lib/faults"
 import {
   compactNumber,
+  errorLevel,
   formatMs,
   formatPct,
   healthDot,
@@ -71,9 +77,10 @@ function ChannelLink({
     <button
       type="button"
       onClick={() => onSelect(node)}
+      title={name}
       className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
     >
-      <span className="truncate">{name}</span>
+      <span className="min-w-0 overflow-hidden whitespace-nowrap">{middleTruncate(name, 22)}</span>
       {node.unresolved && (
         <Badge variant="outline" className="ml-auto shrink-0 text-[9px]">
           missing
@@ -99,6 +106,11 @@ export function MapInspector({
   onHopsChange,
   onSelect,
   onClose,
+  showHops = true,
+  connectorEdges,
+  onSelectHub,
+  changes,
+  metricsState = "live",
 }: {
   node: SystemNode
   traffic: ChannelTraffic | undefined
@@ -116,6 +128,16 @@ export function MapInspector({
   onHopsChange: (hops: number) => void
   onSelect: (node: SystemNode) => void
   onClose: () => void
+  /** The blast-radius hop control belongs to the calls lens. */
+  showHops?: boolean
+  /** Measured channel → connector calls, for the figures beside each connector. */
+  connectorEdges?: ReadonlyMap<string, ConnectorChannelTraffic>
+  /** On the dependencies lens a connector row selects that hub on the canvas. */
+  onSelectHub?: (hubId: string) => void
+  /** Recent audit changes touching this channel, newest first. */
+  changes?: ChangeNote[]
+  /** Where the metrics feed stands, so "no requests" is not said while loading or off. */
+  metricsState?: MetricsState
 }) {
   const level = healthOf(traffic)
   const windowed = traffic?.windowed ?? 0
@@ -135,7 +157,7 @@ export function MapInspector({
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <Radio className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <p className="truncate font-display text-sm font-semibold">{node.name}</p>
+            <p className="break-all font-display text-sm font-semibold">{node.name}</p>
           </div>
           <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
             {node.schedule
@@ -279,9 +301,17 @@ export function MapInspector({
           ) : (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className={cn("h-2 w-2 rounded-full", healthDot.idle)} />
-              {node.callers.length > 0
-                ? "No calls reached this channel in the window"
-                : "No requests in this window"}
+              {metricsState === "loading"
+                ? "Loading metrics…"
+                : metricsState === "off"
+                  ? "Metrics are off on this server"
+                  : metricsState === "error"
+                    ? "Metrics are unreachable right now"
+                    : metricsState === "warming"
+                      ? "Waiting for a second sample to compute a rate"
+                      : node.callers.length > 0
+                        ? "No calls reached this channel in the window"
+                        : "No requests in this window"}
             </div>
           )}
         </div>
@@ -313,6 +343,29 @@ export function MapInspector({
           </div>
         )}
 
+        {changes && changes.length > 0 && (
+          <div>
+            <p className="mb-1.5 flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <History className="h-3 w-3" />
+              Changed in the last day
+            </p>
+            <ul className="space-y-0.5 text-xs">
+              {changes.slice(0, 5).map((c) => (
+                <li key={c.id} className="flex items-baseline justify-between gap-2" title={formatDate(c.at)}>
+                  <span>{changeText(c)}</span>
+                  <span className="shrink-0 truncate text-[10px] text-muted-foreground">{c.principal}</span>
+                </li>
+              ))}
+            </ul>
+            <Link
+              to={`/audit?resource_id=${encodeURIComponent(node.channelId)}`}
+              className="mt-1 inline-block text-[11px] text-muted-foreground underline underline-offset-2"
+            >
+              Audit log
+            </Link>
+          </div>
+        )}
+
         <Separator />
 
         {/* ---- what it runs ---- */}
@@ -340,28 +393,30 @@ export function MapInspector({
         )}
 
         {/* ---- blast radius ---- */}
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Blast radius
-          </p>
-          <div className="flex gap-0.5 rounded-md border p-0.5" role="group" aria-label="Blast radius">
-            {([1, 2, Infinity] as const).map((h) => (
-              <button
-                key={String(h)}
-                type="button"
-                onClick={() => onHopsChange(h)}
-                aria-pressed={hops === h}
-                className={cn(
-                  "rounded px-2 py-0.5 text-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-                  hops === h ? "bg-secondary text-secondary-foreground" : "text-muted-foreground hover:text-foreground",
-                )}
-                title={h === Infinity ? "Everything reachable in either direction" : `${h} call hop${h === 1 ? "" : "s"}`}
-              >
-                {h === Infinity ? "all" : `${h} hop${h === 1 ? "" : "s"}`}
-              </button>
-            ))}
+        {showHops && (
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Blast radius
+            </p>
+            <div className="flex gap-0.5 rounded-md border p-0.5" role="group" aria-label="Blast radius">
+              {([1, 2, Infinity] as const).map((h) => (
+                <button
+                  key={String(h)}
+                  type="button"
+                  onClick={() => onHopsChange(h)}
+                  aria-pressed={hops === h}
+                  className={cn(
+                    "rounded px-2 py-0.5 text-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                    hops === h ? "bg-secondary text-secondary-foreground" : "text-muted-foreground hover:text-foreground",
+                  )}
+                  title={h === Infinity ? "Everything reachable in either direction" : `${h} call hop${h === 1 ? "" : "s"}`}
+                >
+                  {h === Infinity ? "all" : `${h} hop${h === 1 ? "" : "s"}`}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <p className="mb-1 flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -404,42 +459,84 @@ export function MapInspector({
               <Plug className="h-3 w-3" />
               Connectors
             </p>
-            <div className="flex flex-wrap gap-1.5">
-              {node.connectors.map((name) => {
-                const use = connectorsByName.get(name)
-                const failed = mapFaults.failedConnectors.has(name)
-                const breaker = breakerHere.find((b) => b.connector === name)
-                const state = failed
-                  ? " · failed to load"
-                  : breaker
-                    ? ` · breaker ${breaker.state}`
-                    : use && !use.enabled
-                      ? " · off"
-                      : ""
-                const tone = failed
-                  ? "border-destructive/50 text-destructive"
-                  : breaker
-                    ? "border-warning/50 text-warning"
-                    : use && !use.enabled
-                      ? "opacity-60"
-                      : ""
-                return use?.known ? (
-                  <Link key={name} to={`/connectors/${use.refId}`}>
-                    <Badge
-                      variant="outline"
-                      className={cn("text-[10px] transition-colors hover:bg-accent", tone)}
+            {onSelectHub ? (
+              <div className="-mx-1">
+                {node.connectors.map((name) => {
+                  const use = connectorsByName.get(name)
+                  const failed = mapFaults.failedConnectors.has(name)
+                  const l = connectorEdges
+                    ? edgeLoad([node.id], { kind: "connector", name }, connectorEdges)
+                    : null
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => onSelectHub(hubId("connector", name))}
+                      title={`${name} — select it on the map to see everything that depends on it`}
+                      className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                     >
-                      {name}
-                      {state}
+                      {failed ? (
+                        <Unplug className="h-3 w-3 shrink-0 text-destructive" />
+                      ) : (
+                        <Plug className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className={cn("min-w-0 flex-1 overflow-hidden whitespace-nowrap", use && !use.enabled && "opacity-60")}>
+                        {middleTruncate(name, 26)}
+                      </span>
+                      <span
+                        className={cn(
+                          "shrink-0 font-mono text-[10px] tabular-nums",
+                          l?.errorPct ? healthText[errorLevel(l.errorPct)] : "text-muted-foreground",
+                        )}
+                      >
+                        {l?.measured
+                          ? `${compactNumber(l.calls)} calls${l.errorPct ? ` · ${formatPct(l.errorPct)}` : ""}`
+                          : failed
+                            ? "failed"
+                            : "ref"}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {node.connectors.map((name) => {
+                  const use = connectorsByName.get(name)
+                  const failed = mapFaults.failedConnectors.has(name)
+                  const breaker = breakerHere.find((b) => b.connector === name)
+                  const state = failed
+                    ? " · failed to load"
+                    : breaker
+                      ? ` · breaker ${breaker.state}`
+                      : use && !use.enabled
+                        ? " · off"
+                        : ""
+                  const tone = failed
+                    ? "border-destructive/50 text-destructive"
+                    : breaker
+                      ? "border-warning/50 text-warning"
+                      : use && !use.enabled
+                        ? "opacity-60"
+                        : ""
+                  return use?.known ? (
+                    <Link key={name} to={`/connectors/${use.refId}`}>
+                      <Badge
+                        variant="outline"
+                        className={cn("text-[10px] transition-colors hover:bg-accent", tone)}
+                      >
+                        {name}
+                        {state}
+                      </Badge>
+                    </Link>
+                  ) : (
+                    <Badge key={name} variant="outline" className="border-dashed text-[10px]">
+                      {name} · unknown
                     </Badge>
-                  </Link>
-                ) : (
-                  <Badge key={name} variant="outline" className="border-dashed text-[10px]">
-                    {name} · unknown
-                  </Badge>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -496,14 +593,23 @@ export function MapInspector({
   )
 }
 
-export function InspectorPlaceholder({ activeCount }: { activeCount: number }) {
+export function InspectorPlaceholder({
+  activeCount,
+  lens = "calls",
+}: {
+  activeCount: number
+  lens?: "calls" | "deps" | "grid"
+}) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
       <Waypoints className="h-6 w-6 text-muted-foreground/50" />
-      <p className="text-sm font-medium">Select a channel</p>
+      <p className="text-sm font-medium">{lens === "deps" ? "Select a channel or a connector" : "Select a channel"}</p>
       <p className="text-xs text-muted-foreground">
-        Click any node to see its live traffic, what calls it, and what it depends on. Everything
-        outside its blast radius dims.
+        {lens === "deps"
+          ? "Click a connector to light up everything that depends on it — the blast radius of an outage. Click a domain to open it."
+          : lens === "grid"
+            ? "Click a tile to see the channel's live traffic and what it depends on."
+            : "Click any node to see its live traffic, what calls it, and what it depends on. Everything outside its blast radius dims."}
       </p>
       {activeCount > 0 && (
         <p className="mt-1 text-[11px] text-muted-foreground">

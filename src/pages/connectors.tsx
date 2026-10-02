@@ -7,6 +7,9 @@ import {
   useImportConnectors,
 } from "@/hooks/use-connectors"
 import { useExport } from "@/hooks/use-export"
+import { useEntityIndex } from "@/hooks/use-entity-index"
+import { DEFAULT_TRAFFIC_WINDOW } from "@/hooks/use-metrics"
+import { useConnectorTraffic, type ConnectorTrafficWindow } from "@/hooks/use-ops-metrics"
 import { ImportDialog } from "@/components/shared/import-dialog"
 import { useTable, createColumnHelper } from "@tanstack/react-table"
 import { listTableFeatures } from "@/lib/table"
@@ -25,7 +28,8 @@ import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { EntityTable } from "@/components/shared/entity-table"
 import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter-bar"
 import { enabledBadgeClass, disabledBadgeClass, breakerStateBadgeClass } from "@/lib/status"
-import { formatDate, formatWhen, downloadJson } from "@/lib/utils"
+import { cn, formatDate, formatWhen, downloadJson } from "@/lib/utils"
+import { compactNumber, errorLevel, formatMs, formatPct, healthText } from "@/lib/traffic-encoding"
 import { Download, Plug, Plus, RefreshCw, Upload } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, ConnectorListItem>()
@@ -45,11 +49,53 @@ const SORT_FIELDS: Record<string, string> = {
 /** The most alarming breaker state among a connector's keys. */
 const BREAKER_RANK: Record<string, number> = { open: 2, half_open: 1, closed: 0 }
 
+/** One traffic figure in a list cell, or why there is none (metrics off, warming, idle). */
+function TrafficFigure({
+  traffic,
+  connector,
+  pick,
+}: {
+  traffic: ConnectorTrafficWindow
+  connector: string
+  pick: "rate" | "error" | "p95"
+}) {
+  if (traffic.state === "off" || traffic.state === "error") {
+    return <span className="text-muted-foreground" title="Metrics are not available">—</span>
+  }
+  if (traffic.state === "loading") return <span className="text-xs text-muted-foreground">…</span>
+  const t = traffic.byConnector.get(connector)
+  if (!t || t.total === 0) {
+    return <span className="text-xs text-muted-foreground" title="No call through this connector since the server started">idle</span>
+  }
+  if (pick === "rate") {
+    if (t.ratePerMin == null) return <span className="text-xs text-muted-foreground" title="Waiting for a second sample">warming</span>
+    return <span className="font-mono text-xs tabular-nums">{compactNumber(t.ratePerMin)}/min</span>
+  }
+  if (pick === "error") {
+    return (
+      <span
+        className={cn("font-mono text-xs tabular-nums", t.errorPct ? healthText[errorLevel(t.errorPct)] : "text-muted-foreground")}
+        title={t.windowed != null && t.windowed > 0 ? "Over the window" : "Since the server started"}
+      >
+        {formatPct(t.errorPct)}
+      </span>
+    )
+  }
+  return <span className="font-mono text-xs tabular-nums">{formatMs(t.p95Ms)}</span>
+}
+
 /**
  * Columns take the breaker map: a connector whose breaker is open on this node
  * is the one an operator is looking for, and the list showed load state only.
+ * They also take who depends on each connector and its live traffic: "Enabled ·
+ * Loaded" read the same for a database 145 channels use as for an integration
+ * one disabled channel names.
  */
-function buildColumns(breakerByConnector: ReadonlyMap<string, string>) {
+function buildColumns(
+  breakerByConnector: ReadonlyMap<string, string>,
+  dependants: ReadonlyMap<string, string[]>,
+  traffic: ConnectorTrafficWindow,
+) {
   return columnHelper.columns([
     columnHelper.accessor("name", {
       header: "Name",
@@ -60,6 +106,37 @@ function buildColumns(breakerByConnector: ReadonlyMap<string, string>) {
       cell: (info) => (
         <Badge variant="outline" className="uppercase">{info.getValue()}</Badge>
       ),
+    }),
+    columnHelper.accessor("name", {
+      id: "dependants",
+      header: "Dependants",
+      cell: (info) => {
+        const users = dependants.get(info.getValue()) ?? []
+        if (users.length === 0) return <span className="text-xs text-muted-foreground">none</span>
+        return (
+          <span
+            className="text-sm tabular-nums"
+            title={`${users.slice(0, 12).join(", ")}${users.length > 12 ? `, +${users.length - 12} more` : ""}`}
+          >
+            {users.length} channel{users.length === 1 ? "" : "s"}
+          </span>
+        )
+      },
+    }),
+    columnHelper.display({
+      id: "rate",
+      header: "Rate",
+      cell: (info) => <TrafficFigure traffic={traffic} connector={info.row.original.name} pick="rate" />,
+    }),
+    columnHelper.display({
+      id: "errors",
+      header: "Error %",
+      cell: (info) => <TrafficFigure traffic={traffic} connector={info.row.original.name} pick="error" />,
+    }),
+    columnHelper.display({
+      id: "p95",
+      header: "p95",
+      cell: (info) => <TrafficFigure traffic={traffic} connector={info.row.original.name} pick="p95" />,
     }),
     columnHelper.accessor("enabled", {
       header: "Status",
@@ -116,7 +193,7 @@ function buildColumns(breakerByConnector: ReadonlyMap<string, string>) {
     columnHelper.accessor("updated_at", {
       header: "Updated",
       cell: (info) => (
-        <span className="text-muted-foreground" title={formatDate(info.getValue())}>
+        <span className="whitespace-nowrap text-muted-foreground" title={formatDate(info.getValue())}>
           {formatWhen(info.getValue())}
         </span>
       ),
@@ -167,7 +244,18 @@ export function ConnectorsPage() {
     }
     return m
   }, [breakers])
-  const columns = useMemo(() => buildColumns(breakerByConnector), [breakerByConnector])
+  // Dependants come from the system graph (channel config and workflow task
+  // references, the same derivation the map draws), keyed by connector name.
+  const { graph } = useEntityIndex()
+  const dependants = useMemo(
+    () => new Map(graph.connectors.map((c) => [c.name, c.users])),
+    [graph.connectors],
+  )
+  const traffic = useConnectorTraffic(DEFAULT_TRAFFIC_WINDOW)
+  const columns = useMemo(
+    () => buildColumns(breakerByConnector, dependants, traffic),
+    [breakerByConnector, dependants, traffic],
+  )
 
   const table = useTable({
     features: listTableFeatures,

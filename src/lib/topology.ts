@@ -1,4 +1,4 @@
-import { flattenSteps } from "@/lib/workflow-steps"
+import { flattenSteps, workflowSteps } from "@/lib/workflow-steps"
 import type { Channel, Workflow, Connector } from "@/api/types"
 
 // Pure entity indexing and reference extraction. Operates on already-fetched
@@ -36,6 +36,10 @@ const CONNECTOR_FUNCTIONS = new Set([
   "db_write",
   "cache_read",
   "cache_write",
+  // 1.10. `cache_invalidate` takes no connector: it bumps namespace counters
+  // in the response-cache store, not a connector the workflow names.
+  "cache_delete",
+  "cache_incr",
   "mongo_read",
   "mongo_write",
   "mongo_aggregate",
@@ -88,7 +92,7 @@ export function workflowConnectorRefs(workflow: Workflow): string[] {
   // miss every task inside a guard clause — a connector referenced only from
   // one would render as unreferenced on the system map and survive the
   // connector-deletion reverse sweep.
-  for (const task of flattenSteps(workflow.tasks)) {
+  for (const task of flattenSteps(workflowSteps(workflow))) {
     if (!task.function || !CONNECTOR_FUNCTIONS.has(task.function.name)) continue
     const name = connectorNameFromInput(task.function.input)
     if (name) names.add(name)
@@ -112,7 +116,7 @@ export function workflowConnectorRefs(workflow: Workflow): string[] {
  */
 export function channelCallTargets(workflow: Workflow): string[] {
   const targets: string[] = []
-  for (const task of flattenSteps(workflow.tasks)) {
+  for (const task of flattenSteps(workflowSteps(workflow))) {
     if (task.function?.name !== "channel_call") continue
     const target = task.function.input?.channel
     if (typeof target === "string") targets.push(target)
@@ -122,7 +126,7 @@ export function channelCallTargets(workflow: Workflow): string[] {
 
 /** Whether any `channel_call` computes its target rather than naming it. */
 export function hasDynamicChannelCalls(workflow: Workflow): boolean {
-  for (const task of flattenSteps(workflow.tasks)) {
+  for (const task of flattenSteps(workflowSteps(workflow))) {
     if (task.function?.name !== "channel_call") continue
     const input = task.function.input ?? {}
     if (input.channel !== undefined && typeof input.channel !== "string") return true

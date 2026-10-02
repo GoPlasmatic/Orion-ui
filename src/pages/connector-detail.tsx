@@ -13,12 +13,12 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { NeighbourhoodMap } from "@/components/graph/neighbourhood-map"
-import { ConfirmDialog } from "@/components/shared/confirm-dialog"
+import { MoreActions } from "@/components/admin/more-actions"
 import { ConnectorTestDialog } from "@/components/shared/connector-test-dialog"
 import { ErrorState } from "@/components/shared/error-state"
 import { formatDate } from "@/lib/utils"
 import { enabledBadgeClass, disabledBadgeClass, breakerStateBadgeClass } from "@/lib/status"
-import { Trash2, RefreshCw, Pencil, Activity } from "lucide-react"
+import { RefreshCw, Pencil, Activity } from "lucide-react"
 import { useMemo, useState } from "react"
 
 export function ConnectorDetailPage() {
@@ -36,7 +36,6 @@ export function ConnectorDetailPage() {
     () => (connector ? (graph.connectors.find((c) => c.name === connector.name)?.users ?? []) : []),
     [connector, graph],
   )
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   // `?test=1` opens the probe straight away — the dashboard's "connector
   // failed to load" alert lands here, and the probe is the first thing to run.
   const [showTest, setShowTest] = useState(() => params.get("test") === "1")
@@ -91,15 +90,17 @@ export function ConnectorDetailPage() {
                 Edit
               </Link>
             </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setShowDeleteConfirm(true)}
+            <MoreActions
               disabled={deleteConnector.isPending}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              Delete
-            </Button>
+              deleteDescription={
+                users.length > 0
+                  ? `"${connector.name}" is referenced by ${users.length} channel${users.length === 1 ? "" : "s"} (${users.slice(0, 5).join(", ")}${users.length > 5 ? ", …" : ""}). The server refuses the delete while an active workflow uses it; a draft one will start failing. This cannot be undone.`
+                  : "This permanently deletes the connector. It cannot be undone."
+              }
+              onDelete={() =>
+                deleteConnector.mutate(connector.id, { onSuccess: () => navigate("/connectors") })
+              }
+            />
           </>
         }
       />
@@ -185,24 +186,6 @@ export function ConnectorDetailPage() {
         <ConnectorTestDialog connector={connector} onClose={() => setShowTest(false)} />
       )}
 
-      {showDeleteConfirm && (
-        <ConfirmDialog
-          title="Delete Connector"
-          description={
-            users.length > 0
-              ? `"${connector.name}" is referenced by ${users.length} channel${users.length === 1 ? "" : "s"} (${users.slice(0, 5).join(", ")}${users.length > 5 ? ", …" : ""}). The server refuses the delete while an active workflow uses it; a draft one will start failing. This cannot be undone.`
-              : `Are you sure you want to delete "${connector.name}"? This action cannot be undone.`
-          }
-          destructive
-          onConfirm={() => {
-            deleteConnector.mutate(connector.id, {
-              onSuccess: () => navigate("/connectors"),
-            })
-            setShowDeleteConfirm(false)
-          }}
-          onCancel={() => setShowDeleteConfirm(false)}
-        />
-      )}
     </div>
   )
 }
