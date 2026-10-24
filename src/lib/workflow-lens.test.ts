@@ -91,7 +91,7 @@ describe("lensSections", () => {
           name: "Answer early",
           condition: { "==": [1, 1] },
           terminal: true,
-          tasks: [{ id: "reply", name: "Reply", function: { name: "map", input: {} }, halt_on: "failure" }],
+          tasks: [{ id: "reply", name: "Reply", function: { name: "map", input: {} }, on_rejection: "halt" }],
         },
         { id: "write", name: "Write", function: { name: "db_write", input: { connector: "db" } }, terminal: true },
       ],

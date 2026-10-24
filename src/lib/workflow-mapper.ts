@@ -1,5 +1,5 @@
 import type { Step, Task, Workflow } from "@/api/types"
-import { isTaskGroup, groupMembers } from "@/lib/workflow-steps"
+import { isTaskGroup, groupMembers, haltsOnOutcome } from "@/lib/workflow-steps"
 import type {
   Step as DataflowStep,
   Task as DataflowTask,
@@ -31,24 +31,25 @@ function toVisualizerStep(step: Step): DataflowStep {
       description: step.description,
       condition: step.condition,
       terminal: step.terminal,
-      continue_on_error: step.continue_on_error,
       tasks: groupMembers(step).map(toVisualizerStep),
     }
   }
   const task: Task = step
   return {
     id: task.id,
-    name: task.name,
+    // The visualizer wants a label; a task's `name` is optional.
+    name: task.name ?? task.id,
     description: task.description,
     condition: task.condition,
     function: {
       name: task.function?.name ?? "",
       input: task.function?.input ?? {},
     },
-    continue_on_error: task.continue_on_error,
+    // The visualizer (dataflow-ui 3.x) still reads the 3.x spellings: a task
+    // that continues past a failure, and one whose outcome ends the workflow.
+    continue_on_error: task.on_failure === "continue" ? true : undefined,
     terminal: task.terminal,
-    // 1.6: the visualizer (dataflow-ui 3.12) draws the halt-on-failure marker.
-    halt_on: task.halt_on,
+    halt_on: haltsOnOutcome(task) ? "failure" : undefined,
     for_each: task.for_each,
   } satisfies DataflowTask
 }

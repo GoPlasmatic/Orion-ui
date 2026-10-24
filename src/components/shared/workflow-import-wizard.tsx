@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { executionTrace } from "@/lib/trace-timeline"
 import { Link } from "react-router"
 import { DataLogicEditor } from "@goplasmatic/datalogic-ui"
 import {
@@ -280,7 +281,7 @@ export function WorkflowImportWizard({ open, onClose }: WorkflowImportWizardProp
                     <Badge variant="outline" className={stepResultBadgeClass(testResult.matched ? "executed" : "skipped")}>
                       {testResult.matched ? "Matched" : "No match"}
                     </Badge>
-                    {testResult.trace?.steps?.map((s, i) => {
+                    {executionTrace({ task_trace_json: testResult.trace })?.steps.map((s, i) => {
                       const r = typeof s.result === "string" ? s.result.toLowerCase() : undefined
                       return (
                         <div key={i} className="flex items-center gap-2 text-sm">

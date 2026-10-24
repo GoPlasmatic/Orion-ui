@@ -8,6 +8,7 @@ import { MemoryRouter } from "react-router"
 import type { Channel, TraceDetail } from "@/api/types"
 import { CATALOGUE, COSTS, TRACE, WORKFLOW } from "./__fixtures__/trace-64b46dde"
 import { TraceSteps } from "./trace-steps"
+import { TRACE_V4 } from "./__fixtures__/trace-v4"
 
 vi.mock("@/hooks/use-workflows", () => ({
   useActiveWorkflow: () => ({ workflow: WORKFLOW, isLoading: false }),
@@ -57,6 +58,11 @@ describe("TraceSteps", () => {
       "href",
       `/workflows/soma-clock-pair-run?lens=run&trace=${TRACE.id}`,
     )
+  })
+
+  it("reads a dataflow-rs 4 trace and selects the step the engine marked failed", () => {
+    renderAt("/traces/x", { ...trace, error: undefined, task_trace_json: TRACE_V4 } as TraceDetail, channel({ task_details: true }))
+    expect(screen.getByRole("region", { name: "Step lookup" })).toBeInTheDocument()
   })
 
   it("reads the selection from ?step=", () => {

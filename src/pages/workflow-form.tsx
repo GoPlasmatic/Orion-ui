@@ -63,15 +63,15 @@ const SAMPLE_TASK = `{
 }`
 
 /**
- * A task that ends the workflow when it fails — `halt_on: "failure"`, Orion
- * 1.6 / dataflow-rs 3.10. The outcome axis to `terminal`'s position axis: a
- * `validation` rule that did not pass is a status of 400 or above, so the
- * workflow stops there and the task keeps its own status on the audit trail.
+ * A task that ends the workflow when it is rejected — `on_rejection: "halt"`.
+ * The outcome axis to `terminal`'s position axis: a `validation` rule that
+ * did not pass records a 4xx, so the workflow stops there and the task keeps
+ * its own status on the audit trail.
  */
 const SAMPLE_HALT_TASK = `{
   "id": "check",
   "name": "Refuse a bad request",
-  "halt_on": "failure",
+  "on_rejection": "halt",
   "function": {
     "name": "validation",
     "input": { "rules": [] }
@@ -569,7 +569,7 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
               is a task; one carrying its own <code className="font-mono">tasks</code> is a{" "}
               <strong>group</strong> — a single condition gating that whole run. Any step may set{" "}
               <code className="font-mono">terminal: true</code>; a task may set{" "}
-              <code className="font-mono">halt_on: "failure"</code>. Type inside{" "}
+              <code className="font-mono">on_rejection: "halt"</code>. Type inside{" "}
               <code className="font-mono">"function": {"{ \"name\": \"…\" }"}</code> for the
               catalogue, inside its <code className="font-mono">input</code> for the fields it
               declares, and press Ctrl-Space for the keys a step takes.

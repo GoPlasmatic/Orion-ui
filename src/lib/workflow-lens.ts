@@ -12,7 +12,7 @@ import { parseEngineError } from "@/lib/trace-error"
 import { formatMicros, type StepPhase, type Timeline } from "@/lib/trace-timeline"
 import { formatMs, formatPct, formatRatio } from "@/lib/traffic-encoding"
 import { plural } from "@/lib/utils"
-import { groupMembers, isObject, isTaskGroup, loopBinding } from "@/lib/workflow-steps"
+import { groupMembers, haltsOnOutcome, isObject, isTaskGroup, loopBinding } from "@/lib/workflow-steps"
 
 /**
  * The workflow page's four lenses over one step tree.
@@ -150,7 +150,7 @@ export function lensSections(workflow: Pick<Workflow, "tasks" | "loop">, index?:
         effect: stepEffect(step, index),
         conditional: hasCondition(step.condition),
         terminal: step.terminal === true,
-        haltOnFailure: step.halt_on === "failure",
+        haltOnFailure: haltsOnOutcome(step),
         writes: declaredWrites(step),
       })
     }

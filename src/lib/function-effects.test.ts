@@ -27,7 +27,7 @@ const CATALOGUE: FunctionSchema[] = [
   fn("cache_delete", "connector", { kind: "idempotent_write" }),
   fn("channel_call", "control", { kind: "depends_on", input: "channel" }),
   fn("model_infer", "compute", { kind: "pure" }),
-  fn("validation", "utility", { kind: "pure" }, { aliases: ["validate"] }),
+  fn("validation", "utility", { kind: "pure" }),
   fn("tb.pairing.pair", "plugin", { kind: "pure" }, { source: "plugin", plugin: { id: "tb.pairing", version: 2, digest: "sha256:x", abi: "1.0.0" } }),
 ]
 const index = functionIndex(CATALOGUE)
@@ -68,8 +68,8 @@ describe("stepEffect", () => {
     expect(stepEffect(task("model_infer", { model: "ranker" }), index)).toMatchObject({ op: "infer", resource: { kind: "model", name: "ranker" } })
   })
 
-  it("resolves aliases and reads a filter as a gate", () => {
-    expect(stepEffect(task("validate"), index).retry).toBe("pure")
+  it("reads a function by its name and a filter as a gate", () => {
+    expect(stepEffect(task("validation"), index).retry).toBe("pure")
     expect(stepEffect(task("filter"), index)).toMatchObject({ gate: true, op: "gate" })
   })
 
@@ -97,6 +97,7 @@ describe("resolveDependsOn", () => {
 describe("functionIndex", () => {
   it("is built once per catalogue", () => {
     expect(functionIndex(CATALOGUE)).toBe(index)
-    expect(index.get("validate")?.name).toBe("validation")
+    expect(index.get("validation")?.name).toBe("validation")
+    expect(index.get("validate")).toBeUndefined()
   })
 })

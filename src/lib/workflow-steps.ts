@@ -138,12 +138,18 @@ export function countTerminal(steps: Step[] | null | undefined): number {
 }
 
 /**
- * Tasks that end the workflow when they fail (`halt_on: "failure"`, Orion
- * 1.6 / dataflow-rs 3.10) — the outcome axis to `terminal`'s position axis.
+ * Whether a task's own outcome ends its workflow: `on_rejection: "halt"` (a
+ * 4xx, which a failing `validation` records) or `on_failure: "halt"` (a
+ * handler error or 5xx) — the outcome axis to `terminal`'s position axis.
  */
+export function haltsOnOutcome(task: Task): boolean {
+  return task.on_rejection === "halt" || task.on_failure === "halt"
+}
+
+/** Tasks that end the workflow on their own outcome — see {@link haltsOnOutcome}. */
 export function countHaltOnFailure(steps: Step[] | null | undefined): number {
   let n = 0
-  for (const task of flattenSteps(steps)) if (task.halt_on === "failure") n++
+  for (const task of flattenSteps(steps)) if (haltsOnOutcome(task)) n++
   return n
 }
 
@@ -245,9 +251,19 @@ export function lintSteps(steps: unknown): StepIssue[] {
       if (raw.terminal !== undefined && typeof raw.terminal !== "boolean") {
         issues.push({ path: `${path}.terminal`, message: "must be true or false" })
       }
-      // 1.6: the outcome axis. Only these two spellings exist.
-      if (raw.halt_on !== undefined && raw.halt_on !== "failure" && raw.halt_on !== "never") {
-        issues.push({ path: `${path}.halt_on`, message: 'must be "failure" or "never"' })
+      // The outcome axis, in the spellings the engine reads.
+      if (raw.on_failure !== undefined && !["fail", "continue", "halt"].includes(raw.on_failure as string)) {
+        issues.push({ path: `${path}.on_failure`, message: 'must be "fail", "continue" or "halt"' })
+      }
+      if (raw.on_rejection !== undefined && raw.on_rejection !== "continue" && raw.on_rejection !== "halt") {
+        issues.push({ path: `${path}.on_rejection`, message: 'must be "continue" or "halt"' })
+      }
+      // The 1.x spellings, which the server refuses: say what to write.
+      if (raw.halt_on !== undefined) {
+        issues.push({ path: `${path}.halt_on`, message: 'is a 1.x spelling, no longer read — write "on_rejection": "halt"' })
+      }
+      if (raw.continue_on_error !== undefined) {
+        issues.push({ path: `${path}.continue_on_error`, message: 'is a 1.x spelling, no longer read — write "on_failure": "continue"' })
       }
 
       // Presence of `tasks` is what makes it a group — the engine's own test.

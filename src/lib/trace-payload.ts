@@ -12,7 +12,9 @@ export function firstTaskPayload(
   trace: { task_trace_json?: unknown } | undefined | null,
 ): Record<string, unknown> | null {
   if (!trace) return null
-  const payload = executionTrace(trace as { task_trace_json?: unknown })?.steps[0]?.message?.payload
+  const et = executionTrace(trace as { task_trace_json?: unknown })
+  // dataflow-rs 4: the run's `data` starts as its payload, and `initial` is it.
+  const payload = et?.initial?.data ?? et?.steps[0]?.message?.payload
   if (payload === undefined || payload === null || typeof payload !== "object" || Array.isArray(payload)) {
     return null
   }

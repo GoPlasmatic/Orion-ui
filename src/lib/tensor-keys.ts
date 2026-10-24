@@ -148,15 +148,13 @@ function collect(value: unknown, path: string, out: StepIssue[]): void {
 }
 
 /**
- * The catalogue keyed by every name a task may spell a function with —
- * `validation` carries `validate` in `aliases`, and both resolve to one entry.
- * Built once per run rather than rescanned per field of per task.
+ * The catalogue keyed by function name. Built once per run rather than
+ * rescanned per field of per task.
  */
 function indexByName(catalogue: FunctionSchema[] | undefined): Map<string, FunctionSchema> {
   const index = new Map<string, FunctionSchema>()
   for (const entry of catalogue ?? []) {
     index.set(entry.name, entry)
-    for (const alias of entry.aliases ?? []) index.set(alias, entry)
   }
   return index
 }

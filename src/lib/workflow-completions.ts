@@ -29,13 +29,13 @@ interface KeyOption {
 
 const TASK_KEYS: KeyOption[] = [
   { label: "id", detail: "string · required", info: "Unique across tasks and groups.", value: '""' },
-  { label: "name", detail: "string · required", info: "Human title, shown on the diagram and in traces.", value: '""' },
+  { label: "name", detail: "string", info: "Human title, shown on the diagram and in traces.", value: '""' },
   { label: "description", detail: "string", value: '""' },
   { label: "function", detail: "object · task", info: "`{ name, input }` — makes this step a task.", value: '{ "name": "", "input": {} }' },
   { label: "condition", detail: "JSONLogic", info: "Runs the step only when truthy; a group evaluates it once on entry.", value: "{}" },
   { label: "terminal", detail: "boolean", info: "End the workflow after this step.", value: "true" },
-  { label: "halt_on", detail: '"failure" | "never"', info: "End the workflow when this task fails (status ≥ 400).", value: '"failure"' },
-  { label: "continue_on_error", detail: "boolean", value: "true" },
+  { label: "on_rejection", detail: '"continue" | "halt"', info: "What a 4xx from this task does — a failing validation records 400.", value: '"halt"' },
+  { label: "on_failure", detail: '"fail" | "continue" | "halt"', info: "What a handler error or 5xx from this task does.", value: '"continue"' },
   { label: "tasks", detail: "array · group", info: "Makes this step a task group: one condition gating a contiguous run.", value: "[]" },
 ]
 
@@ -238,7 +238,7 @@ export function stepCompletions(
     // quote, but a paste or a deletion leaves the bare form.
     const openQuote = node.type.isError && doc[node.from] === '"'
 
-    // Inside a string value: the function name, or the halt_on spelling.
+    // Inside a string value: the function name, or a step policy's spelling.
     if (node.name === "String" || (openQuote && node.parent?.name === "Property")) {
       const prop = ownerProperty(node)
       if (!prop) return null
@@ -260,13 +260,25 @@ export function stepCompletions(
       if (key === "on_null" && obj && isMappingObject(obj, doc)) {
         return { from, to, options: ON_NULL, validFor: WORD }
       }
-      if (key === "halt_on") {
+      if (key === "on_rejection") {
         return {
           from,
           to,
           options: [
-            { label: "failure", detail: "end the workflow when this task fails" },
-            { label: "never", detail: "the default" },
+            { label: "halt", detail: "end the workflow when this task records a 4xx" },
+            { label: "continue", detail: "the default" },
+          ],
+          validFor: WORD,
+        }
+      }
+      if (key === "on_failure") {
+        return {
+          from,
+          to,
+          options: [
+            { label: "fail", detail: "the default: pass the failure to the workflow" },
+            { label: "continue", detail: "record the failure and run the next task" },
+            { label: "halt", detail: "end the workflow" },
           ],
           validFor: WORD,
         }

@@ -115,7 +115,7 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   editor, and the retry-safety guard on the DLQ requeue and occurrence retry dialogs. Its shape
   still matters: since 1.2 it is *every*
   valid function name, not just the schema registry — entries carry `source` (`orion` | `engine`
-  | `plugin`), optional `aliases`, `input_fields` is **absent** for an engine built-in, every
+  | `plugin`), `input_fields` is **absent** for an engine built-in, every
   entry carries `retry_safety` (1.6) and a `plugin` entry names the plugin version and digest
   serving it.
 - **Models** — ONNX graphs as the fifth versioned entity (`/models`, 1.8), with the workflow's
@@ -161,15 +161,25 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 - **A workflow's steps are `loop.setup` then `tasks` (1.10).** Every server walk covers the
   loop's setup; `workflowSteps(workflow)` is the client's. A task may carry `for_each`. Counting
   or reference-walking `workflow.tasks` alone misses whatever the setup reads.
-- **Trace steps (dataflow-rs 3.15).** Under `tracing.task_details` each executed step carries
-  `started_at` (RFC 3339, ns, `Z`), `duration_us`, `changes`, `loop_counter`, `element_index`;
-  the trace may be `truncated` (snapshots dropped, timings kept). `result` is only `executed` |
-  `skipped` — **a step that errored is `executed`**; the failure is named in the trace's error
-  prose (`lib/trace-error.ts::parseEngineError`). Observed quirks the timeline absorbs
-  (`lib/trace-timeline.ts`): a **sync** trace row is stamped at persist time (`started_at ==
-  completed_at`, after the steps, `duration_ms` ≈ 0), so the steps' span wins; a failure the
-  engine reports as an IO error can keep **no** steps; a sync request that times out or fails
-  with a 5xx persists **no trace at all**. With `errors_only`, a successful run keeps nothing.
+- **Trace steps (dataflow-rs 4 on Orion 2; 3.15 on 1.12).** Orion 2 stores `task_trace_json`
+  as dataflow-rs 4's replayable trace: `{initial, steps, truncated}`, each step with `task_id`,
+  `result` (`executed` | `skipped` | `failed`), `status`, its `changes` (`removed` / `replaced`
+  flags), `mapping_ends`, `errors`, `elapsed_us`, `loop_counter`, `element_index`, and no
+  snapshot. `lib/trace-timeline.ts::executionTrace` is the one parse point: it replays the
+  changes from `initial` into a per-step `message` snapshot and `mapping_contexts`, maps
+  `elapsed_us` → `duration_us`, and drops the engine's own steps (no `task_id`, the loop
+  counter) after applying them — so everything downstream reads one step model. A v4 step has
+  **no start instant**: `buildTimeline` lays the steps end to end, so admission and the gaps
+  between steps are not measured; a `failed` step is the failure. 1.12 (dataflow-rs 3.15) is
+  still read: each executed step carries the snapshot itself, `started_at` (RFC 3339, ns, `Z`),
+  `duration_us`, `changes`, `loop_counter`, `element_index`; the trace may be `truncated`
+  (snapshots dropped, timings kept). There `result` is only `executed` | `skipped` — **a step
+  that errored is `executed`**; the failure is named in the trace's error prose
+  (`lib/trace-error.ts::parseEngineError`). Observed quirks the timeline absorbs: a **sync**
+  trace row is stamped at persist time (`started_at == completed_at`, after the steps,
+  `duration_ms` ≈ 0), so the steps' span wins; a failure the engine reports as an IO error can
+  keep **no** steps; a sync request that times out or fails with a 5xx persists **no trace at
+  all**. With `errors_only`, a successful run keeps nothing.
 - **Function effects come from the catalogue.** `lib/function-effects.ts::stepEffect` reads
   `category: "connector"`, `source: "plugin"` + `plugin`, and `retry_safety`, resolving
   `depends_on` from a literal input (`http_call` method, `data_write`/`mongo_write` op,
@@ -326,11 +336,13 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   literal of the declared kind. A literal is JSONLogic for itself, so the static spelling still
   works. `channel_call.channel` is one such field — a computed target is an object, and
   `lib/topology.ts::channelCallTargets` skips it (the server's `has_dynamic_channel_calls` is the
-  authority; `channel_logic` survives only as an alias).
-- **`halt_on: "failure"` (1.6, dataflow-rs 3.10)** on a task ends the workflow when that task
-  failed (status ≥ 400, which covers a `validation` rule) — the outcome axis to `terminal`'s
-  position axis; they compose by `or`. `lintSteps` refuses any other spelling; the visualizer
-  (dataflow-ui 3.12) draws it; `countHaltOnFailure` badges it.
+  authority; `channel_logic` is no longer read).
+- **`on_rejection` / `on_failure` (dataflow-rs 4)** on a task: `on_rejection: "halt"` ends the
+  workflow on a 4xx (which covers a `validation` rule), `on_failure` is `fail` | `continue` |
+  `halt` for a handler error or 5xx — the outcome axis to `terminal`'s position axis; they
+  compose by `or`. The server refuses the 1.x `halt_on` / task `continue_on_error`, and
+  `lintSteps` names the v4 key to write. `haltsOnOutcome` / `countHaltOnFailure` badge it; the
+  visualizer (dataflow-ui 3.x) still reads the 3.x spellings, so `workflow-mapper` translates.
 - **`?token=` on trace reads is deprecated (1.6).** The header `x-trace-token` is what
   `tracesApi.get` has always sent; the console now hands the token to the trace page in router
   *state* rather than the UI's own URL, for the same reason (browser history, `Referer`, pasted
@@ -382,10 +394,10 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 - **The function catalogue is two lists in one.** `GET admin/functions` serves all 26 valid names.
   `source: "orion"` rows carry `input_fields` and are input-schema validated at create;
   `source: "engine"` rows (dataflow-rs built-ins — `map`, `filter`, `log`, `parse_json`, …) **omit**
-  `input_fields` entirely. Never index it without a guard. `validation` carries `validate` in
-  `aliases` rather than appearing twice. The field shape is **not in the OpenAPI spec** (hand-typed
+  `input_fields` entirely. Never index it without a guard. There are no aliases: `validate` is not
+  a function name. The field shape is **not in the OpenAPI spec** (hand-typed
   from a live server): each field carries `kind`, `required`, `resolvable` (folds `{"var": …}`),
-  `alias`, and since 1.3 `secret_at` — the paths inside the field that take `{"secret": "name"}`
+  and since 1.3 `secret_at` — the paths inside the field that take `{"secret": "name"}`
   (`[""]` = the value itself, `["[].key"]` = each element's `key`). Those are also the only places an
   `env://` / `vault://` string resolves; anywhere else it is refused as `UNRESOLVED_SECRET_REF`.
 - **`[vars]` and `[secrets]` (1.3) have no admin endpoint.** Both are server config. A var is
@@ -497,7 +509,7 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   `@codemirror/*` outside the view module undoes the split. `lib/json-path.ts` maps a
   `lintSteps` path (`tasks[1].function.name`) to a range in the document; `lib/workflow-completions.ts`
   is the catalogue-backed source (function names inside `function.name`, that function's
-  `input_fields` inside `input`, the keys a step takes, the `halt_on` spellings) and handles a
+  `input_fields` inside `input`, the keys a step takes, the `on_rejection` / `on_failure` spellings) and handles a
   string still being typed (an error node to the parser, not a `String`). `onRun` binds
   Mod-Enter above the default keymap (which would insert a blank line): the console sends on it
   and the workflow dry run runs on it.
@@ -598,7 +610,7 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   workflow's *active* version (`useActiveWorkflow` in `use-workflows.ts`), because that is what a
   retry runs — the latest version is the draft while one is open. Rendered in the DLQ entry and
   bulk dialogs, on an occurrence page and on a cron channel's occurrences tab.
-- **`src/lib/trace-payload.ts`** — `firstTaskPayload` (on `executionTrace`): the request as the first
+- **`src/lib/trace-payload.ts`** — `firstTaskPayload` (on `executionTrace`; a v4 trace's `initial.data`): the request as the first
   task saw it, the closest thing to the original input a trace keeps (the read carries no raw
   request). "Re-send in console", the console's "Last trace's input" and the dry run's "Use last
   trace's input" all read it.
@@ -689,8 +701,9 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   not depend on the visualizer package.
 - **`src/lib/workflow-mapper.ts`** — Maps API `Workflow` (has `workflow_id`) to
   `@goplasmatic/dataflow-ui` `Workflow` type (has `id`). Walks the step tree rather than casting:
-  the visualizer requires `function.input`, which the API type leaves optional. Passes `halt_on`
-  through so the 3.12 visualizer draws it.
+  the visualizer requires `function.input`, which the API type leaves optional. Translates
+  `on_rejection`/`on_failure` to the 3.x `halt_on` / `continue_on_error` the dataflow-ui 3.x
+  visualizer draws.
 - **`src/lib/cron.ts`** — Reading a cron channel: `isCronChannel`, `cronTransport` (the one
   reader of `transport_config` as a schedule), `CRON_REFUSED_CONFIG_KEYS` +
   `stripCronRefusedConfig` (what a protocol switch must drop), `lintCronExpression` (six fields,

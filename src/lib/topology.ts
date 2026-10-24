@@ -77,9 +77,8 @@ export function workflowConnectorRefs(workflow: Workflow): string[] {
  * `channelsByName`; looking it up in `channelsById` (a UUID map on a real
  * server) silently misses every time.
  *
- * Since 1.5 `channel` is JSONLogic: a literal string is the static case, and
- * an object is a target computed per message (the old `channel_logic` spelling
- * is an accepted alias for the same thing). A computed target is unknowable
+ * `channel` is JSONLogic: a literal string is the static case, and an object
+ * is a target computed per message. A computed target is unknowable
  * here, so it is skipped — `GET admin/workflows/{id}/dependencies` reports
  * `has_dynamic_channel_calls` for exactly that case.
  */
@@ -99,7 +98,6 @@ export function hasDynamicChannelCalls(workflow: Workflow): boolean {
     if (task.function?.name !== "channel_call") continue
     const input = task.function.input ?? {}
     if (input.channel !== undefined && typeof input.channel !== "string") return true
-    if (input.channel_logic !== undefined) return true
   }
   return false
 }

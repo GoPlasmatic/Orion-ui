@@ -110,7 +110,7 @@ const workflowRows: Workflow[] = [
     tags: ["billing"],
     status: "active",
     version: 3,
-    tasks: [{ id: "t1", name: "validate", function: { name: "validate" } }],
+    tasks: [{ id: "t1", name: "validate", function: { name: "validation" } }],
     content_hash: "sha256:ccc",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-02T00:00:00Z",

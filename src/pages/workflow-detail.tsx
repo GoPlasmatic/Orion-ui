@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { executionTrace } from "@/lib/trace-timeline"
 import { useParams, Link, useNavigate } from "react-router"
 import { useChannels } from "@/hooks/use-channels"
 import { useLastTraceInput } from "@/hooks/use-last-trace-input"
@@ -65,6 +66,11 @@ export function WorkflowDetailPage() {
   // reload and a page change; saved again on every run.
   const [testPayload, setTestPayload] = useState(() => readStorage(dryRunKey(id ?? "")) ?? EMPTY_PAYLOAD)
   const [testResult, setTestResult] = useState<WorkflowTestResponse | null>(null)
+  // The test run's trace, read as the trace page reads one.
+  const testSteps = useMemo(
+    () => executionTrace(testResult ? { task_trace_json: testResult.trace } : null)?.steps ?? [],
+    [testResult],
+  )
   const [testError, setTestError] = useState<string | null>(null)
   const [rolloutDraft, setRolloutDraft] = useState<number | null>(null)
 
@@ -160,9 +166,9 @@ export function WorkflowDetailPage() {
                 </Badge>
               )}
               {haltCount > 0 && (
-                <Badge variant="outline" className="text-xs" title="Tasks that end the workflow when they fail (halt_on: failure)">
+                <Badge variant="outline" className="text-xs" title="Tasks that end the workflow on their own outcome (on_rejection or on_failure: halt)">
                   <OctagonX className="mr-1 h-3 w-3" />
-                  {haltCount} halt on failure
+                  {haltCount} halt on outcome
                 </Badge>
               )}
               {workflow.status === "active" && (
@@ -347,10 +353,10 @@ export function WorkflowDetailPage() {
                       )}
                     </div>
 
-                    {testResult.trace?.steps && testResult.trace.steps.length > 0 && (
+                    {testSteps.length > 0 && (
                       <div className="space-y-2">
                         <h4 className="text-sm font-medium">Trace Steps</h4>
-                        {testResult.trace.steps.map((step, i) => {
+                        {testSteps.map((step, i) => {
                           const result = typeof step.result === "string" ? step.result.toLowerCase() : undefined
                           return (
                             <div key={i} className="flex items-center justify-between rounded border px-3 py-2">

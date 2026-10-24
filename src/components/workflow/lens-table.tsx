@@ -131,8 +131,8 @@ function Marker({ kind }: { kind: "terminal" | "halt" | "if" }) {
     )
   if (kind === "halt")
     return (
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title="Ends the workflow when it fails (halt_on: failure)">
-        <OctagonX className="h-3 w-3" aria-hidden /> halt on failure
+      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title="Ends the workflow on its own outcome (on_rejection or on_failure: halt)">
+        <OctagonX className="h-3 w-3" aria-hidden /> halts on outcome
       </span>
     )
   return (

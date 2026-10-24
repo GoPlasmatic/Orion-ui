@@ -28,7 +28,6 @@ export function functionIndex(catalogue: readonly FunctionSchema[] | null | unde
   const m = new Map<string, FunctionSchema>()
   for (const fn of catalogue) {
     m.set(fn.name, fn)
-    for (const alias of fn.aliases ?? []) m.set(alias, fn)
   }
   indexCache.set(catalogue, m)
   return m
@@ -206,7 +205,7 @@ export function stepEffect(task: Pick<Task, "function">, index: FunctionIndex = 
     const name = connectorName(input)
     resource = { kind: "connector", name, dynamic: name == null && input != null && CONNECTOR_KEYS.some((k) => input[k] != null) }
   } else if (canonical === "channel_call") {
-    const target = input?.channel ?? input?.channel_logic
+    const target = input?.channel
     resource = { kind: "channel", name: typeof target === "string" ? target : null, dynamic: target != null && typeof target !== "string" }
   } else if (canonical === "model_infer") {
     const model = input?.model

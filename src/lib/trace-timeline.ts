@@ -13,20 +13,28 @@ import { parseEngineError } from "@/lib/trace-error"
  * A trace's steps as a timeline: where the time went, in what structure, and
  * which step failed.
  *
- * Orion 1.12 (dataflow-rs 3.15) stores, under `tracing.task_details`, one
- * `ExecutionStep` per step the engine ran or skipped, each executed one with
- * `started_at` (RFC 3339, nanoseconds, `Z`) and `duration_us`. The trace row
- * itself carries `started_at` / `completed_at` as zoneless UTC microseconds.
- * Everything here is in **microseconds from the trace's `started_at`**, so the
- * stretch before the first step is admission (claim, lease, backpressure) and
- * the stretch after the last is settle (trace and occurrence writes).
+ * Under `tracing.task_details` the server stores the run's trace. Orion 2
+ * (dataflow-rs 4) writes `{initial, steps, truncated}`: the context the run
+ * started from, then each step with the changes it made and its `elapsed_us`.
+ * [`executionTrace`] replays that into one `ExecutionStep` per step, each with
+ * the snapshot after it, so everything below reads one model. Orion 1.12
+ * (dataflow-rs 3.15) stored the snapshots themselves, each executed step with
+ * `started_at` (RFC 3339, nanoseconds, `Z`) and `duration_us`; that shape is
+ * still read. The trace row itself carries `started_at` / `completed_at` as
+ * zoneless UTC microseconds. Everything here is in **microseconds from the
+ * trace's `started_at`**, so the stretch before the first step is admission
+ * (claim, lease, backpressure) and the stretch after the last is settle (trace
+ * and occurrence writes). A dataflow-rs 4 step carries no start instant, so
+ * its steps are laid end to end from the first: the admission and the gaps
+ * between steps are not measured.
  *
  * Three things the wire does not say directly, and this module works out:
  *
- * - **Which step failed.** `result` is only `executed` or `skipped`; a task
- *   that ran and errored is still `executed`. The error is on the trace,
- *   worded `"<CODE>: Task <id> error: …"` — `failingTaskId` reads it. With no
- *   such phrase, a failed trace's last executed step is taken as the failure.
+ * - **Which step failed.** dataflow-rs 4 says so: a step whose failure went
+ *   to the workflow's policy or stopped the run is `failed`. On 1.12 `result`
+ *   is only `executed` or `skipped`, and the error is on the trace, worded
+ *   `"<CODE>: Task <id> error: …"` — `failingTaskId` reads it. With neither, a
+ *   failed trace's last executed step is taken as the failure.
  * - **Structure.** A step in a loop's `setup` carries no `loop_counter`; a
  *   body step carries the iteration. With the workflow at hand the setup ids
  *   come from `loop.setup`; without it, steps without a counter that precede
@@ -121,10 +129,133 @@ export function failingTaskId(error: string | null | undefined): string | null {
 
 const parsedCache = new WeakMap<object, ExecutionTrace | null>()
 
+/** A dataflow-rs 4 trace, as Orion 2 writes `task_trace_json`. */
+interface ReplayTrace {
+  initial: Record<string, unknown>
+  steps: ReplayStep[]
+  truncated?: boolean
+}
+
+interface ReplayStep {
+  workflow_id?: string
+  task_id?: string | null
+  result?: string
+  status?: number | null
+  changes?: ExecutionStepChange[]
+  mapping_ends?: number[]
+  errors?: unknown[]
+  elapsed_us?: number
+  loop_counter?: number
+  element_index?: number
+  [key: string]: unknown
+}
+
+const ROOTS = new Set(["data", "metadata", "temp_data"])
+
+function isReplayTrace(v: unknown): v is ReplayTrace {
+  if (!v || typeof v !== "object") return false
+  const t = v as ReplayTrace
+  return Array.isArray(t.steps) && !!t.initial && typeof t.initial === "object" && !Array.isArray(t.initial)
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v)
+
+/** `data.items.0` and `data.items[0]` alike, as segments. */
+function pathSegments(path: string): string[] {
+  return path.replace(/\[(\d+)\]/g, ".$1").split(".").filter((seg) => seg !== "")
+}
+
+/**
+ * One change applied to a context root, by the engine's replay rules: a
+ * removal removes its path; a change at a root merges its object's keys into
+ * the root unless it `replaced` it; anything else is set at its path, a hop
+ * that cannot continue writing nothing and an index on an array naming its
+ * element.
+ */
+function applyChange(root: Record<string, unknown>, change: ExecutionStepChange): void {
+  const segs = pathSegments(String(change.path ?? ""))
+  if (segs.length === 0) return
+  if (segs.length === 1 && ROOTS.has(segs[0]) && !change.removed) {
+    if (!change.replaced && isRecord(root[segs[0]]) && isRecord(change.new_value)) {
+      root[segs[0]] = { ...(root[segs[0]] as Record<string, unknown>), ...structuredClone(change.new_value) }
+    } else {
+      root[segs[0]] = structuredClone(change.new_value)
+    }
+    return
+  }
+  let node: unknown = root
+  for (let i = 0; i < segs.length - 1; i++) {
+    const seg = segs[i]
+    if (Array.isArray(node)) {
+      node = node[Number(seg)]
+    } else if (isRecord(node)) {
+      if (node[seg] === undefined && !change.removed) node[seg] = {}
+      node = node[seg]
+    } else {
+      return
+    }
+  }
+  const last = segs[segs.length - 1]
+  if (Array.isArray(node)) {
+    const i = Number(last)
+    if (!Number.isInteger(i)) return
+    if (change.removed) node.splice(i, 1)
+    else node[i] = structuredClone(change.new_value)
+  } else if (isRecord(node)) {
+    if (change.removed) delete node[last]
+    else node[last] = structuredClone(change.new_value)
+  }
+}
+
+/**
+ * A dataflow-rs 4 trace in the step model the timeline reads: each task step
+ * with the snapshot its changes replay to, its `elapsed_us` as `duration_us`
+ * and its per-mapping contexts. The engine's own steps (a loop sweep's
+ * counter, with no task) are applied and not listed, as 1.12 never listed
+ * them; a workflow's skip is. Past the step a truncated trace stopped
+ * recording changes at, no snapshot is offered, since it would be stale.
+ */
+function replay(trace: ReplayTrace): ExecutionTrace {
+  const root = structuredClone(trace.initial)
+  const payload = isRecord(trace.initial.data) ? structuredClone(trace.initial.data) : undefined
+  let lastRecorded = trace.steps.length - 1
+  if (trace.truncated) {
+    lastRecorded = -1
+    trace.steps.forEach((s, i) => {
+      if (Array.isArray(s.changes) && s.changes.length > 0) lastRecorded = i
+    })
+  }
+  const steps: ExecutionStep[] = []
+  trace.steps.forEach((s, i) => {
+    const changes = Array.isArray(s.changes) ? s.changes : []
+    const mappingContexts: unknown[] = []
+    let from = 0
+    for (const end of s.mapping_ends ?? []) {
+      for (const change of changes.slice(from, end)) applyChange(root, change)
+      mappingContexts.push(structuredClone(root))
+      from = end
+    }
+    for (const change of changes.slice(from)) applyChange(root, change)
+    if (s.task_id == null && s.result !== "skipped") return
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { elapsed_us, mapping_ends, ...rest } = s
+    const kept = s.task_id != null && s.result !== "skipped" && i <= lastRecorded
+    steps.push({
+      ...rest,
+      changes,
+      duration_us: typeof elapsed_us === "number" ? elapsed_us : undefined,
+      message: kept ? { payload, context: structuredClone(root), errors: s.errors ?? [] } : undefined,
+      mapping_contexts: mappingContexts.length > 0 ? mappingContexts : undefined,
+    })
+  })
+  return { steps, truncated: trace.truncated === true, initial: trace.initial }
+}
+
 /**
  * The parsed `task_trace_json`, or null when the trace has none or it is not a
  * trace. Accepts the object the API returns, a JSON string, or a bare steps
- * array (what older rows hold). Parsed once per trace object.
+ * array (what older rows hold); a dataflow-rs 4 trace is replayed into
+ * per-step snapshots. Parsed once per trace object.
  */
 export function executionTrace(trace: Pick<TraceDetail, "task_trace_json"> | null | undefined): ExecutionTrace | null {
   if (!trace) return null
@@ -139,9 +270,11 @@ export function executionTrace(trace: Pick<TraceDetail, "task_trace_json"> | nul
   }
   const out: ExecutionTrace | null = Array.isArray(v)
     ? { steps: v as ExecutionTrace["steps"] }
-    : v && typeof v === "object" && Array.isArray((v as ExecutionTrace).steps)
-      ? (v as ExecutionTrace)
-      : null
+    : isReplayTrace(v)
+      ? replay(v)
+      : v && typeof v === "object" && Array.isArray((v as ExecutionTrace).steps)
+        ? (v as ExecutionTrace)
+        : null
   parsedCache.set(trace, out)
   return out
 }
@@ -199,7 +332,20 @@ export function buildTimeline(
   const looped = workflow ? !!workflow.loop : et.steps.some((s) => s.loop_counter != null)
   const firstCounted = et.steps.findIndex((s) => s.loop_counter != null)
 
-  const stepStarts = et.steps.map((s) => parseInstantUs(s.started_at))
+  let stepStarts = et.steps.map((s) => parseInstantUs(s.started_at))
+  // A dataflow-rs 4 step carries no start instant, only how long it ran: its
+  // steps are laid end to end from the row's start.
+  const sequential = stepStarts.every((v) => v == null) && et.steps.some((s) => typeof s.duration_us === "number")
+  if (sequential) {
+    const base = parseInstantUs(trace.started_at) ?? 0
+    let at = base
+    stepStarts = et.steps.map((s) => {
+      if (s.result === "skipped" || typeof s.duration_us !== "number") return null
+      const start = at
+      at += s.duration_us
+      return start
+    })
+  }
   const firstStepUs = stepStarts.find((v): v is number => v != null) ?? null
   // The trace row's own instants are not always the run's: a sync trace is
   // stamped when it is persisted, after its steps ran, with started_at equal to
@@ -226,7 +372,7 @@ export function buildTimeline(
       element: s.element_index ?? null,
       startUs: abs == null ? null : abs - origin,
       durationUs: typeof s.duration_us === "number" ? s.duration_us : null,
-      outcome: s.result === "skipped" ? "skipped" : "ok",
+      outcome: s.result === "skipped" ? "skipped" : s.result === "failed" ? "failed" : "ok",
       changes: Array.isArray(s.changes) ? s.changes : [],
       hasSnapshot: s.message != null,
       task: tasksById.get(taskId) ?? null,
@@ -234,9 +380,10 @@ export function buildTimeline(
     }
   })
 
-  // Attribute the failure to a step.
-  let failed: TimelineStep | null = null
-  if (trace.status === "failed") {
+  // Attribute the failure to a step: the one the engine marked, else the one
+  // the error names, else the last that ran.
+  let failed: TimelineStep | null = steps.find((s) => s.outcome === "failed") ?? null
+  if (!failed && trace.status === "failed") {
     const named = failingTaskId(trace.error)
     const executed = steps.filter((s) => s.outcome !== "skipped")
     failed =

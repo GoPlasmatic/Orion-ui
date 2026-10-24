@@ -630,21 +630,24 @@ export interface TaskFunction {
 
 export interface Task {
   id: string
-  name: string
+  name?: string
   description?: string
   condition?: JsonLogicValue
   function: TaskFunction
-  continue_on_error?: boolean
-  // End the workflow once this task has run (dataflow-rs 3.6+). A statement
-  // about *position*, not outcome: a false `condition` does not halt, but a
-  // task that failed under `continue_on_error` still does.
+  // What a handler error or 5xx from this task does (dataflow-rs 4):
+  // `"fail"` (the default) passes it to the workflow, `"halt"` ends the
+  // workflow, `"continue"` records it and runs the next task.
+  on_failure?: "fail" | "continue" | "halt"
+  // End the workflow once this task has run. A statement about *position*,
+  // not outcome: a false `condition` does not halt, but a task that failed
+  // under `on_failure: "continue"` still does.
   terminal?: boolean
-  // The outcome axis to `terminal`'s position axis (dataflow-rs 3.10 / Orion
-  // 1.6): `"failure"` ends the workflow when this task failed — a status of
-  // 400 or above, which covers a `validation` rule that did not pass. The two
-  // compose by `or`, and the task keeps its own status on the audit trail
+  // The outcome axis to `terminal`'s position axis: what a 4xx from this
+  // task does, which is what a `validation` rule that did not pass records.
+  // `"continue"` (the default) records it and runs the next task, `"halt"`
+  // ends the workflow, the task keeping its own status on the audit trail
   // rather than the 299 a `filter` halt records.
-  halt_on?: "failure" | "never"
+  on_rejection?: "continue" | "halt"
   // Fan-out (dataflow-rs 3.14 / Orion 1.9.1): run this task's function once
   // per element of `over`, each call on its own copy of the message, folded
   // back in element order. Steps then carry `element_index`.
@@ -667,9 +670,6 @@ export interface TaskGroup {
   description?: string
   condition?: JsonLogicValue
   terminal?: boolean
-  // Accepted by the engine, but `GROUP_CONTINUE_ON_ERROR` is an advisory
-  // finding (dataflow-rs 3.11): the flag belongs on the member tasks.
-  continue_on_error?: boolean
   tasks: Step[]
 }
 
@@ -753,10 +753,9 @@ export interface WorkflowDependencies {
   connectors: ConnectorDependency[]
   // Channel names targeted by `channel_call` tasks, statically.
   channels: string[]
-  // True when a `channel_call` computes its target at runtime — since 1.5 that
-  // is the *shape* of `channel` (an expression rather than a literal; the old
-  // `channel_logic` spelling is an accepted alias). The static `channels` list
-  // is then incomplete by construction.
+  // True when a `channel_call` computes its target at runtime — the *shape*
+  // of `channel` (an expression rather than a literal). The static `channels`
+  // list is then incomplete by construction.
   has_dynamic_channel_calls: boolean
   // Plugins whose functions the tasks name, resolved against this node's
   // generation. Absent on a server before 1.6.
@@ -805,7 +804,7 @@ export interface WorkflowTestRequest {
 // dataflow-rs 3.0 per-task execution trace.
 // `result` is lowercase on the wire ("executed" | "skipped" | "error"); each step
 // carries a `message` snapshot of the message state after that task.
-export type ExecutionStepResult = "executed" | "skipped" | "error" | string
+export type ExecutionStepResult = "executed" | "skipped" | "failed" | "error" | string
 
 export interface ExecutionStepMessage {
   id?: string
@@ -819,6 +818,10 @@ export interface ExecutionStepChange {
   path: string
   old_value?: unknown
   new_value?: unknown
+  /** The key at `path` was removed rather than written (dataflow-rs 4). */
+  removed?: boolean
+  /** The write replaced the root at `path` instead of merging into it (dataflow-rs 4). */
+  replaced?: boolean
   [key: string]: unknown
 }
 
@@ -838,8 +841,13 @@ export interface ExecutionStep {
   // Null for a workflow-level skip.
   task_id?: string | null
   result?: ExecutionStepResult
+  /** The call's status; null for a skip (dataflow-rs 4). */
+  status?: number | null
+  /** The error records the step added (dataflow-rs 4). */
+  errors?: unknown[]
   // Snapshot after the step. Absent for skips, and for steps recorded after
-  // `max_snapshot_bytes` was exceeded (the trace is then `truncated`).
+  // `max_snapshot_bytes` was exceeded (the trace is then `truncated`). On
+  // Orion 2 the client replays it from the trace's `initial` and changes.
   message?: ExecutionStepMessage
   mapping_contexts?: unknown[]
   started_at?: string
@@ -865,6 +873,8 @@ export interface ExecutionStep {
 
 export interface ExecutionTrace {
   steps: ExecutionStep[]
+  /** The context the run started from (dataflow-rs 4). */
+  initial?: Record<string, unknown>
   // Set when `max_snapshot_bytes` was exceeded: later steps keep their timings
   // but lose their `message` snapshot. Serialized only when true.
   truncated?: boolean
@@ -1681,10 +1691,6 @@ export interface FunctionSchema {
   // absence is the honest encoding of "declares no input schema". Never index
   // this without a guard.
   input_fields?: FunctionFieldSchema[] | null
-  // Other accepted spellings — `validation` carries `validate`. Omitted when
-  // there are none, so the catalogue lists one row per function rather than
-  // telling a completion tool there are two.
-  aliases?: string[]
   // Served for every entry since 1.6, built-ins included.
   retry_safety: RetrySafety
   // Present only on a `source: "plugin"` entry.
