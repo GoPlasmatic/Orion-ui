@@ -1,3 +1,18 @@
+# The admin credential, optionally supplied by this proxy. Orion 2.0 guards
+# /api/v2/admin/* and /metrics with admin_auth (required in production). When
+# ORION_ADMIN_AUTHORIZATION is set to the whole header value ("Bearer <key>"),
+# a request that carries no Authorization of its own is sent upstream with it;
+# one that carries its own (a key typed into the console) keeps it. Unset (the
+# default), nothing is added and the console asks each user for a key.
+#
+# Anyone who can reach this UI then acts with that key: put the UI behind your
+# own sign-in (an SSO proxy, a VPN) before setting it, and prefer a read-only
+# key where the console only needs to look.
+map $http_authorization $orion_authorization {
+    ""      "${ORION_ADMIN_AUTHORIZATION}";
+    default $http_authorization;
+}
+
 server {
     listen 8080;
     server_name _;
@@ -43,6 +58,7 @@ server {
     # Reverse proxy: API calls to Orion backend
     location /api/ {
         proxy_pass ${ORION_URL};
+        proxy_set_header Authorization $orion_authorization;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -52,6 +68,8 @@ server {
     # Reverse proxy: health/readiness/metrics endpoints
     location /health {
         proxy_pass ${ORION_URL};
+        # Answers anyone; adds its admin-only detail for a valid key.
+        proxy_set_header Authorization $orion_authorization;
     }
 
     location /healthz {
@@ -64,6 +82,7 @@ server {
 
     location /metrics {
         proxy_pass ${ORION_URL};
+        proxy_set_header Authorization $orion_authorization;
     }
 
     # SPA fallback — all other routes serve index.html

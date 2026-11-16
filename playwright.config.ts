@@ -15,6 +15,10 @@ const baseURL = `http://localhost:${uiPort}`
  */
 export default defineConfig({
   testDir: "./e2e",
+  // The 1.12 smoke flow authors and activates entities through endpoints 2.0
+  // removed; phase 7 of the port (PLAN-2.0.md) rewrites it around
+  // deployments. Until then the 2.0 foundations spec is what runs.
+  testIgnore: ["smoke.spec.ts"],
   timeout: 60_000,
   retries: process.env.CI ? 1 : 0,
   workers: 1,

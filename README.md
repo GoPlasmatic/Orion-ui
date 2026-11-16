@@ -152,7 +152,7 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 │                 TanStack Query                         │
 │                 (cache + fetch)                        │
 └────────────────────────┼───────────────────────────────┘
-                         │  /api/v1/*
+                         │  /api/v2/*
                          ▼
                 ┌────────────────┐
                 │  Orion Server  │
@@ -162,6 +162,14 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 
 In production the container serves the built SPA with nginx and reverse-proxies
 `/api/`, health, and metrics endpoints to the Orion server (`ORION_URL`).
+
+Orion 2.0 guards its admin API with `admin_auth` (required in production). The
+console asks each user for an admin API key, kept in that browser tab only. To
+supply one centrally instead, set `ORION_ADMIN_AUTHORIZATION` to the whole header
+value (`Bearer <key>`): nginx adds it to requests that carry no key of their own.
+Anyone who can reach the UI then acts with that key, so put the UI behind your
+own sign-in first, and prefer a read-only key where the console only needs to
+look.
 
 ## Scripts
 

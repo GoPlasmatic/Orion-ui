@@ -46,6 +46,11 @@ ENV NGINX_ENVSUBST_FILTER=ORION
 # Default backend URL (override in docker-compose or k8s)
 ENV ORION_URL=http://localhost:8080
 
+# Optional: the whole Authorization value ("Bearer <key>") nginx adds to a
+# request that carries none, so users are not asked for an admin key. Empty
+# (the default) adds nothing. See nginx.conf.template before setting it.
+ENV ORION_ADMIN_AUTHORIZATION=""
+
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \

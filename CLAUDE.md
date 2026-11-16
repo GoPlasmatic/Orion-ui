@@ -11,11 +11,11 @@ npm run lint         # ESLint
 npm run preview      # Preview production build locally
 
 npm test             # Vitest unit tests, incl. the API ↔ OpenAPI contract test
-npm run test:e2e     # Playwright smoke flow (needs a live orion-server on :8080; skips locally if absent).
+npm run test:e2e     # Playwright against a live orion-server 2.0 on :8080 (skips locally if absent).
                      # ORION_URL points it at another server; UI_PORT moves the dev server off 5173 —
                      # `reuseExistingServer` adopts whatever is already listening there.
-npm run patch:api    # Re-apply local fixes to the vendored spec (see contracts/PATCHES.md)
-npm run generate:api # Patch + regenerate src/api/schema.d.ts from contracts/openapi.json
+                     # ORION_ADMIN_KEY / ORION_READ_ONLY_KEY: the keys that server was started with.
+npm run generate:api # Regenerate src/api/schema.d.ts from contracts/openapi.json
 npm run check:contract # Fail if schema.d.ts is stale relative to the vendored spec
 ```
 
@@ -36,9 +36,14 @@ an entry once its parent ships a release that depends on the patched version its
 
 ## Server contract
 
-`contracts/openapi.json` is the vendored copy of the server's OpenAPI 3.1 spec (source:
-`Orion/docs/openapi.json`, also served at `/api/v1/openapi.json` — but **only when the server
-does not run with `environment = "production"`**) and pins the server version this UI targets.
+**The port to Orion 2.0 is under way — see `PLAN-2.0.md`.** The API layer speaks `/api/v2`; the
+pages still built on 1.12's per-entity CRUD are ported phase by phase.
+
+`contracts/openapi.json` is the vendored copy of the server's OpenAPI 3.1 spec and pins the
+server version this UI targets (now 2.0.0). Orion 2.0 no longer keeps a `docs/openapi.json`: the
+spec is generated into Orion-docs (`cargo run --manifest-path drift/Cargo.toml --bin
+dump-openapi > openapi.json` there), and a running server serves it at `/api/v2/openapi.json`
+— **only when it does not run with `environment = "production"`**.
 `src/api/schema.d.ts` is generated from it (do not hand-edit).
 
 `schema.d.ts` is **not imported anywhere**: it exists solely as a checked-in fingerprint for
@@ -49,21 +54,23 @@ them into `types.ts` by hand.
 When the server API changes:
 
 ```bash
-cp ../Orion/docs/openapi.json contracts/openapi.json
-npm run generate:api   # runs contracts/patch-spec.mjs, then openapi-typescript
+cp ../Orion-docs/openapi.json contracts/openapi.json
+npm run generate:api
 npm test
 ```
 
-`contracts/patch-spec.mjs` re-applies local fixes to defects in the published spec; see
-`contracts/PATCHES.md` for what is patched and why. It is idempotent and reports
-`nothing to patch` once upstream is fixed.
+The 2.0 spec resolves as published, so the 1.x local patch (`contracts/patch-spec.mjs`, which
+added the unregistered `OnConflict` / `ReloadMode` schemas) is gone.
 
 `src/api/contract.test.ts` asserts every request the API layer can issue exists in the spec with
 the same method and only declared query params, and its completeness check forces new API
 functions to be added to the `INVOCATIONS` manifest. Note it matches spec paths **structurally**
 (segment count plus `{param}` wildcards), so a path that moved to a same-shaped route fails as a
-*method* mismatch rather than a path one. CI runs both plus the Playwright smoke flow against a
-real server container (`ghcr.io/goplasmatic/orion`, tag-pinned to the targeted version).
+*method* mismatch rather than a path one. It also holds each function to its endpoint's
+**envelope**: a `Data_*` answer must be unwrapped, a bare or `Page_*` one must not. Calls still
+speaking 1.12 are listed in `PENDING_V2`, and each is held to *still failing* — porting one
+without removing it fails the test, so the list only shrinks. CI runs both plus the Playwright
+suite against a real server (built from the pinned Orion commit until `orion:2.0.0` is published).
 
 ## Architecture
 
@@ -71,8 +78,10 @@ Orion UI is a React 19 dashboard for the Orion workflow engine. It uses Vite 8, 
 
 ### Core Domain
 
-Targets the Orion **v1.12.0** API (dataflow-rs 3.15 / datalogic-rs 5.7). Five primitives with a
-Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
+Being ported from the Orion **v1.12.0** API to **2.0** (dataflow-rs 4 / datalogic-rs 5.9;
+`PLAN-2.0.md`). What follows describes the 1.12 surfaces the pages still render; 2.0 replaces the
+per-entity lifecycle below with immutable definitions bound into a deployment manifest. Five
+primitives with a Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 
 - **Channels** — Service endpoints (sync/async, REST/HTTP/Kafka/**cron**). Config covers `auth`
   (`api_key` | `hmac` | `jwt`), rate limits (incl. `key_logic` + `key_headers`), backpressure,
@@ -341,8 +350,8 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   workflow on a 4xx (which covers a `validation` rule), `on_failure` is `fail` | `continue` |
   `halt` for a handler error or 5xx — the outcome axis to `terminal`'s position axis; they
   compose by `or`. The server refuses the 1.x `halt_on` / task `continue_on_error`, and
-  `lintSteps` names the v4 key to write. `haltsOnOutcome` / `countHaltOnFailure` badge it; the
-  visualizer (dataflow-ui 3.x) still reads the 3.x spellings, so `workflow-mapper` translates.
+  `lintSteps` names the v4 key to write. `haltsOnOutcome` / `countHaltOnFailure` badge it, and
+  the visualizer (dataflow-ui 4) draws them as written.
 - **`?token=` on trace reads is deprecated (1.6).** The header `x-trace-token` is what
   `tracesApi.get` has always sent; the console now hands the token to the trace page in router
   *state* rather than the UI's own URL, for the same reason (browser history, `Referer`, pasted
@@ -365,9 +374,33 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   (a run that does not catch one answers 409) or `integrity_not_null` / `integrity_check` (400).
 - **`orion_messages_total{status}` counts a run that finished with task errors as `error` on every
   transport since 1.4** (the sync route used to count it `ok`).
-- **Envelope:** every admin 2xx body puts its payload under `data`. List endpoints add
-  `limit`/`offset` alongside, and `total` where the endpoint computes it. `unwrap()` in
-  `client.ts` is the helper; `/health` is not an admin route and is *not* wrapped.
+- **Envelope (2.0):** the admin surfaces carried over from 1.x answer `{ data: T }` (`Data_*` in
+  the spec; `unwrap()` in `client.ts`). Lists answer a `Page_*` — `{ data, limit, next_cursor?,
+  total? }` (`Page<T>` in `types.ts`), cursor-only, newest first, with `offset`, `sort_by` and
+  `sort_order` gone; `total` only with `include_total=true`. The resources new in 2.0
+  (definitions, deployments, plans, connections, connector packages, runtime capabilities)
+  answer **bare**, with no envelope. `/health`, `/healthz` and `/readyz` are not admin routes and
+  are not wrapped; in 2.0 `/healthz` (`LivenessResponse`) and `/readyz` (`ReadinessResponse`, read
+  even on its 503) have their own shapes.
+- **Admin auth (2.0; `api/auth.ts`).** `/api/v2/admin/*` and `/metrics` take `Authorization:
+  Bearer <key>` (or the raw key in a configured `admin_auth.header`); production requires it. A
+  read-only key may `GET`, plan and use the authoring dry-runs, and is refused everything else
+  with 403 `FORBIDDEN`. **A request with no key is a failed attempt**, and five lock the address
+  out for up to 30 s — during which a *correct* key is also answered 401. So no guarded request
+  leaves the browser before one probe (`GET admin/runtime-capabilities`) has answered, and after
+  a 401 they fail locally (`ApiError.heldBack`) until a key is entered. The key lives in
+  `sessionStorage` (`orion-admin-key`, through `storage.ts`); the header name in `localStorage`. A
+  401 naming a header (`Missing X-API-Key header`) is how a custom header is learned. Read-only is
+  learned from the first refused mutation (`useCanMutate`); full access from the first accepted
+  one. Queries never retry a 401/403 (`isAuthError`), because a retried 401 counts toward the
+  lockout. The image's nginx (and the dev proxy) can add `ORION_ADMIN_AUTHORIZATION` to requests
+  that carry none.
+- **Runtime capabilities (2.0)** — `GET admin/runtime-capabilities` (`useRuntimeCapabilities`):
+  `api_version`, `edition` (`community` < `standard` < `enterprise`), channel drivers, provider
+  backends, the deployment head and this node's reconciler status. It replaces
+  `engine/status.capabilities` as the answer to "can this server do X"; `useFeature("rollouts")`
+  turns the edition into a neutral "needs Standard" fact before the server's 403
+  `TIER_NOT_ENABLED`.
 - **Workflow `tasks` is a tree, not a list.** An element carrying its own `tasks` key is a
   **task group** (the engine's own test — presence of the key, nothing else); one carrying
   `function` is a task. Any step may set `terminal: true`. Groups nest 8 deep and group ids share
@@ -472,7 +505,7 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
 
 ### Layers
 
-- **`src/api/`** — Typed API client. `client.ts` wraps fetch with the `/api/v1` base path, parses the structured error envelope onto `ApiError` (incl. `details[]` and `requestId`), and exports `buildQuery()`, `unwrap()`, and `api.send()` for arbitrary-method data-plane calls. `RequestOptions.changeContext` sends `X-Orion-Change-Context` so a multi-request promotion's audit rows can be grouped. Domain modules: `channels.ts`, `workflows.ts`, `connectors.ts`, `traces.ts`, `trace-dlq.ts`, `packages.ts`, `engine.ts`, `audit.ts`, `backup.ts`, `functions.ts`, `data.ts`, `plugins.ts`, `cron.ts`, `models.ts`. All types hand-written in `types.ts`.
+- **`src/api/`** — Typed API client. `client.ts` wraps fetch with the `/api/v2` base path, sends the admin credential and applies the probe-and-hold-back rule (`auth.ts`, above), parses the structured error envelope onto `ApiError` (incl. `details[]`, `requestId` and 2.0's `connector`), and exports `buildQuery()`, `unwrap()`, and `api.send()` for arbitrary-method data-plane calls. `RequestOptions.changeContext` sends `X-Orion-Change-Context` so a multi-request promotion's audit rows can be grouped. Domain modules: `channels.ts`, `workflows.ts`, `connectors.ts`, `traces.ts`, `trace-dlq.ts`, `packages.ts`, `engine.ts`, `audit.ts`, `backup.ts`, `functions.ts`, `data.ts`, `plugins.ts`, `cron.ts`, `models.ts`, `runtime.ts` (2.0). All types hand-written in `types.ts`.
 - **`src/hooks/`** — TanStack Query wrappers. One hook file per domain (`use-channels.ts`, `use-workflows.ts`, etc.). Query keys are `["entity", params]` arrays. Mutations invalidate via `queryClient.invalidateQueries`. The client default is `staleTime: 30_000` (a page visited twice in a row does not refetch its lists; polled queries keep their own `refetchInterval`, and invalidation ignores staleness), and every paginated list hook sets `placeholderData: keepPreviousData` so a page turn holds the last page instead of dropping to a skeleton.
 - **`src/pages/`** — Route-level components. Named exports like `ChannelsPage`, `WorkflowDetailPage`. Data fetching via hooks, not inline.
 - **`src/components/ui/`** — Shadcn-style primitives using `React.forwardRef`, CVA variants, and
@@ -621,8 +654,9 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   stopped by the global `prefers-reduced-motion` rule at the end of `index.css`.
 - **`src/lib/storage.ts`** — `readStorage` / `writeStorage` / `readStorageJson` /
   `writeStorageJson`: `localStorage` behind the one contract every per-browser preference needs
-  (a read that answers `null` and a write that does nothing when the accessor throws). No other
-  file touches `localStorage`.
+  (a read that answers `null` and a write that does nothing when the accessor throws), plus
+  `readSessionStorage` / `writeSessionStorage` for the one credential (the admin key). No other
+  file touches browser storage.
 - **`src/hooks/use-entity-index.ts`** — `useEntityIndex()`: the whole registry (`REGISTRY_LIMIT`
   rows of channels, workflows and connectors, the cap exported from `lib/use-pagination.ts`)
   indexed and built into the system graph once, for the map, the dashboard, a neighbourhood and
@@ -701,9 +735,8 @@ Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
   not depend on the visualizer package.
 - **`src/lib/workflow-mapper.ts`** — Maps API `Workflow` (has `workflow_id`) to
   `@goplasmatic/dataflow-ui` `Workflow` type (has `id`). Walks the step tree rather than casting:
-  the visualizer requires `function.input`, which the API type leaves optional. Translates
-  `on_rejection`/`on_failure` to the 3.x `halt_on` / `continue_on_error` the dataflow-ui 3.x
-  visualizer draws.
+  the visualizer requires `function.input`, which the API type leaves optional. dataflow-ui 4
+  draws `on_rejection`/`on_failure` itself, so they pass through.
 - **`src/lib/cron.ts`** — Reading a cron channel: `isCronChannel`, `cronTransport` (the one
   reader of `transport_config` as a schedule), `CRON_REFUSED_CONFIG_KEYS` +
   `stripCronRefusedConfig` (what a protocol switch must drop), `lintCronExpression` (six fields,
@@ -804,11 +837,11 @@ Forms (`channel-form.tsx`, `connector-form.tsx`, `workflow-form.tsx`, `plugin-fo
 
 ### API Proxy
 
-Dev server proxies `/api`, `/health`, `/healthz`, `/readyz`, `/metrics` to `process.env.ORION_URL` (default `http://localhost:8080`). The API client prepends `/api/v1` to all paths.
+Dev server proxies `/api`, `/health`, `/healthz`, `/readyz`, `/metrics` to `process.env.ORION_URL` (default `http://localhost:8080`). The API client prepends `/api/v2` to all paths. With `ORION_ADMIN_AUTHORIZATION` set (`Bearer <key>`), the dev proxy — like the image's nginx (`nginx.conf.template`) — adds it to requests that carry no `Authorization` of their own, so nobody is asked for a key. Anyone who can reach that UI then acts with the key: only behind your own sign-in, and prefer a read-only key.
 
 ### Visualization Libraries
 
-- **`@goplasmatic/dataflow-ui`** (3.15) — `WorkflowVisualizer` renders workflow task pipelines with tree/flow/graph views and optional debug tracing; it draws `loop.setup` and `for_each`, which `lib/workflow-mapper.ts` passes through. It has **no initial or controlled selection** prop, so the Structure lens (`components/workflow/structure-lens.tsx`) selects the workflow row by position after mount — a stopgap until [GoPlasmatic/dataflow-rs#70](https://github.com/GoPlasmatic/dataflow-rs/issues/70) ships. CSS imported in `main.tsx`.
+- **`@goplasmatic/dataflow-ui`** (4.0) — `WorkflowVisualizer` renders workflow task pipelines with tree/flow/graph views and optional debug tracing; it draws `loop.setup`, `for_each` and the v4 step policies, which `lib/workflow-mapper.ts` passes through. The Structure lens and the form preview open on the workflow with `initialSelection="first-workflow"` (4.0's answer to dataflow-rs#70, replacing the click-the-explorer-row stopgap). Its WebAssembly engine (`dataflow_wasm_bg.wasm`, ~3.6 MB) is a separate asset fetched only when the engine initialises. CSS imported in `main.tsx`.
 - **`@goplasmatic/datalogic-ui`** — `DataLogicEditor` renders JSONLogic expressions as interactive flow diagrams. Read-only (`editable={false}`) in viewers; editable with `onChange` in the workflow form's condition editor and the channel config's validation / key-logic / JWT authorization-logic fields (via the shared `LogicField` in `config-field.tsx`). CSS imported in `main.tsx`.
 - **`@xyflow/react`** is pinned exactly (no caret) to the version `@goplasmatic/dataflow-ui`
   declares as an *exact* dependency. A root range that resolves past it makes npm nest a
@@ -820,7 +853,14 @@ Dev server proxies `/api`, `/health`, `/healthz`, `/readyz`, `/metrics` to `proc
 
 ### Pagination
 
-Server-side offset/limit pagination via `usePagination()` + `PaginationFooter`. `PaginatedResponse<T>` is `{ data, total?, limit, offset }` — **`total` is optional**, because the trace list omits it unless asked with `?include_total=true`. Treat an absent total as "unknown", never zero; the footer falls back to a row-count range and infers "has next" from a full page.
+**2.0 lists are cursor-paged** (`Page<T>`, above): `useCursorList(key, fetchPage)` loads a page
+at a time and accumulates (`hasMore` / `loadMore`), and `LoadMoreFooter` is its footer — there is
+no page N and no "previous" to offer. The filters stay in the URL (`useListState`); the depth
+loaded does not, because a cursor is opaque. Pages move to it as their modules are ported.
+
+The 1.12 offset/limit pagination (`usePagination()` + `PaginationFooter`, `PaginatedResponse<T>`
+= `{ data, total?, limit, offset }`) remains until its last caller is ported. **`total` is
+optional** on both: treat an absent total as "unknown", never zero.
 
 ## Conventions
 
