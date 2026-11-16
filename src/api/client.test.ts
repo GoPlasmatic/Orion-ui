@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, afterEach } from "vitest"
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
+import { resetAdminAuthForTests } from "@/api/auth"
 import { api, ApiError, buildQuery } from "@/api/client"
 
 function mockFetch(status: number, body: string | null, contentType = "application/json") {
@@ -14,6 +15,10 @@ function mockFetch(status: number, body: string | null, contentType = "applicati
   vi.stubGlobal("fetch", spy)
   return spy
 }
+
+beforeEach(() => {
+  resetAdminAuthForTests()
+})
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -43,12 +48,13 @@ describe("client error handling", () => {
     await expect(api.delete("admin/workflows/wf-1")).resolves.toBeUndefined()
   })
 
-  it("prefixes relative paths with /api/v1 and passes absolute paths through", async () => {
+  it("prefixes relative paths with /api/v2 and passes absolute paths through", async () => {
     const spy = mockFetch(200, "{}")
     await api.get("admin/engine/status")
     await api.get("/health")
-    expect(spy.mock.calls[0][0]).toBe("/api/v1/admin/engine/status")
-    expect(spy.mock.calls[1][0]).toBe("/health")
+    // A fresh tab probes the admin plane once first (api/auth.ts).
+    const urls = spy.mock.calls.map((c) => c[0])
+    expect(urls.slice(-2)).toEqual(["/api/v2/admin/engine/status", "/health"])
   })
 
   it("api.send uses the given method and omits an undefined body", async () => {

@@ -32,6 +32,42 @@ export interface DataResponse<T> {
   data: T
 }
 
+/**
+ * One page of a 2.0 list (`Page_*` in the spec): `{ data, limit, next_cursor?,
+ * total? }`. Paging is **cursor-only** and newest first — `offset`, `sort_by`
+ * and `sort_order` are gone. Pass `next_cursor` back as `?cursor=` for the
+ * next page; absent means this was the last. `total` is served only with
+ * `?include_total=true` (a count is a full scan), so an absent total is
+ * "unknown", never zero.
+ */
+export interface Page<T> {
+  data: T[]
+  limit?: number | null
+  next_cursor?: string | null
+  total?: number | null
+}
+
+/** What a page request may send. */
+export interface PageParams {
+  limit?: number
+  cursor?: string
+  include_total?: boolean
+}
+
+/**
+ * The connector failure behind a data-plane error (2.0): its normalised class
+ * and the provider's own documented code. The provider's message is never
+ * sent — it can name hosts and values.
+ */
+export interface ConnectorErrorDetail {
+  /** `invalid_input` | `unauthorized` | `forbidden` | `not_found` | `conflict` | `rate_limited` | `unavailable` | `deadline` | `cancelled` | `provider_failure` | `contract_violation`, open for later classes. */
+  class?: string
+  /** The provider's own SHOUTY_CASE code (`MONGO_DUPLICATE_KEY`). */
+  provider_code?: string
+  /** Whether the provider says a retry can succeed. */
+  retryable?: boolean
+}
+
 // Field-pathed entry on a validation failure, carried in the error envelope's
 // `details`. Omitted by the server when empty.
 export type ErrorFieldCode =
@@ -1333,26 +1369,19 @@ export interface HealthResponse {
   // "ok" | "degraded"
   status: string
   /**
-   * Per-subsystem state. Always: `database`, `engine` (a constant "ok"),
-   * `connectors`, `channels`, `background_tasks`, `engine_reload` (1.4 — the
-   * last reload failed, so this node serves the previous generation) and
-   * `plugins` (1.6 — `disabled` when the sandbox is off and nothing needs it;
-   * `degraded` when an active plugin did not load) and `models` (1.8 — the
-   * same three states, and additionally `degraded` while this node's admission
-   * worker is down, which is the state in which a new registration would wait
-   * for its verdict forever). Conditionally: `kafka`
-   * when enabled, `cron` when the node has something to say about schedules
-   * (on, or off while an active cron channel is quarantined),
-   * `config_propagation` and `cluster_redis` in cluster mode.
+   * Per-subsystem state, each `ok` | `degraded` | `error` | `disabled`.
+   * Orion 2.0 serves `database`, `engine` (a constant "ok"), `connectors`,
+   * `channels`, `background_tasks`, `engine_reload` (the last build of the
+   * desired revision failed, so this node serves the previous one) and
+   * `plugins` (`disabled` when the sandbox is off and nothing needs it), plus
+   * `cron` on a node that schedules. 1.x's `kafka`, `cluster_redis`,
+   * `config_propagation`, `models` and `packages` are gone: Kafka and the
+   * cluster store are `orion-ext`'s and report on `/readyz`, and models and
+   * package apply no longer exist in Community. The record stays open — an
+   * edition may add a component.
    *
-   * `degraded` on `engine_reload`, `config_propagation` and `cron` does not
-   * fail `/readyz`: the node still serves every request correctly.
-   *
-   * `packages` (1.9) appears only when `[packages] apply` names artifacts: it
-   * is `applying` — and `/readyz` answers 503 — until every configured package
-   * is applied and serving, then `ok` for good, because readiness is a startup
-   * condition here. `failed` means one did not apply and the node is on its
-   * way out with a non-zero exit.
+   * `degraded` on `engine_reload` and `cron` does not fail `/readyz`: the node
+   * still serves every request correctly.
    */
   components: Record<string, ComponentState>
   /**
@@ -2504,4 +2533,129 @@ export interface AdmitModelOptions {
   // Run admission inline and answer with the verdict recorded, rather than
   // queueing it and answering 202.
   wait?: boolean
+}
+
+// ── Orion 2.0: probes and runtime capabilities ──────────────────────────────
+
+/** `GET /healthz`: liveness. Always `{status: "ok"}` while the process serves; it checks no dependency. */
+export interface LivenessResponse {
+  status: string
+}
+
+/**
+ * `GET /readyz`: whether this node should take traffic (`ready` | `not_ready`,
+ * 503 when not). In 2.0 it has its own shape, distinct from `/health`.
+ */
+export interface ReadinessResponse {
+  status: "ready" | "not_ready" | (string & {})
+  components: {
+    /** `ok` | `error`. */
+    database: string
+    /** Always `ok`; kept for shape. */
+    engine: string
+    /** Whether startup has completed. */
+    initialized: boolean
+    /** `ok` | `degraded` | `error`. */
+    background_tasks: string
+    /** Each channel driver that runs its own listener (an edition's protocol, e.g. `kafka`), by protocol. */
+    channel_drivers?: Record<string, string>
+    /** The cluster's shared-state store (`orion-ext` with `[cluster]`), e.g. `{name: "redis", status: "ok"}`. */
+    cluster_store?: { name: string; status: string } | null
+  }
+}
+
+/** The edition a node runs, and the distribution tier a provider package declares — a ladder, in this order. */
+export type EditionTier = "community" | "standard" | "enterprise"
+export const EDITION_TIERS = ["community", "standard", "enterprise"] as const satisfies readonly EditionTier[]
+
+/** The kind of a deployment member. */
+export type EntityKind = "workflow" | "channel" | "connection" | "plugin"
+
+/** A deployment member: an entity at a revision (`revision` ≥ 1). */
+export interface EntityRef {
+  kind: EntityKind
+  id: string
+  revision: number
+}
+
+/** The three connector provider implementation kinds. */
+export type ImplementationKind = "rust" | "workflow" | "wasm"
+
+/** What a channel driver declares (`runtime-capabilities.channel_driver_info[]`). */
+export interface ChannelDriverInfo {
+  protocol: string
+  supports_sync: boolean
+  supports_async: boolean
+  registers_http_routes: boolean
+  supports_oauth2_login: boolean
+  /** The `orion-json-schema/1` document a channel's `transport_config` must satisfy, when the driver publishes one. */
+  transport_schema?: Record<string, unknown> | null
+  ingress_guards?: { rate_limit: boolean; validation: boolean; deduplication: boolean; backpressure: boolean } | null
+  http_hook?: { validation: boolean; deduplication: boolean; backpressure: boolean } | null
+}
+
+/** One connector provider backend this node registers. */
+export interface ProviderBackendInfo {
+  kind: ImplementationKind
+  /** A `rust` driver's id (`org.orion.postgresql`), or a `workflow`/`wasm` package's digest. */
+  driver_id: string
+  /** A `rust` driver's provider digest — what a connection revision over it names as `provider_digest`. */
+  package_digest?: string | null
+  /** The operations a `connector_call` may name, by canonical name, with their aliases and schemas. */
+  operations?: Record<string, { aliases?: string[]; input_schema?: Record<string, unknown> | null; output_schema?: Record<string, unknown> | null }> | null
+  /** The connections the backend calls beside its own, by alias: what a connection over it binds. */
+  dependencies?: Record<string, { operations?: string[]; optional?: boolean; provider?: string | null }> | null
+}
+
+/** A deployment member this node could not serve, and why. */
+export interface QuarantinedEntity {
+  entity: EntityRef
+  reason: string
+}
+
+/** This node's reconciler: what it serves and how it got there. */
+export interface NodeStatus {
+  node_id: string
+  /** Changes on every process start. */
+  boot_id: string
+  /** The revision the node is converging on. */
+  desired_revision: number
+  /** The revision the node serves; `0` before it served any. */
+  applied_revision: number
+  applied_manifest_digest?: string | null
+  /** Whether some member of the applied revision is quarantined. */
+  configuration_degraded: boolean
+  quarantined_entities: QuarantinedEntity[]
+  /** Why the last attempt to build the desired revision failed, while it does. */
+  last_error?: string | null
+  backoff_attempt: number
+  backoff_delay_ms: number
+  security_lease_expires_at_ms: number
+  /** The revisions the node keeps built, ascending. */
+  retained_revisions: number[]
+}
+
+/**
+ * `GET admin/runtime-capabilities` — answered **bare** (no `data` envelope).
+ * What this node runs: the contract revision, the edition, its channel
+ * drivers and provider backends, the deployment head it knows of, and its
+ * reconciler's state. It replaces 1.x's `engine/status.capabilities` as the
+ * one answer to "can this server do X".
+ */
+export interface RuntimeCapabilities {
+  /** The contract revision (`2`). A client built for another should say so rather than guess. */
+  api_version: number
+  edition: EditionTier
+  admission_policy_id: string
+  /** The channel protocols this node serves (`rest`, `http`, `cron`, …). */
+  channel_drivers: string[]
+  channel_driver_info: ChannelDriverInfo[]
+  schema_profiles: string[]
+  /** The WebAssembly plugin worlds this node runs. */
+  wasm_worlds: string[]
+  provider_backends: ProviderBackendInfo[]
+  /** `revision` is `0` before the first apply. */
+  deployment_head: { revision: number; epoch: number }
+  native_scheduler: { in_flight: number; max_in_flight: number }
+  node_status: NodeStatus
 }

@@ -11,9 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "generate:api": "node contracts/patch-spec.mjs && openapi-typescript contracts/openapi.json -o src/api/schema.d.ts",
-    "check:contract": "openapi-typescript contracts/openapi.json -o .contract-check.d.ts && diff .contract-check.d.ts src/api/schema.d.ts && rm .contract-check.d.ts",
-    "patch:api": "node contracts/patch-spec.mjs"
+    "generate:api": "openapi-typescript contracts/openapi.json -o src/api/schema.d.ts",
+    "check:contract": "openapi-typescript contracts/openapi.json -o .contract-check.d.ts && diff .contract-check.d.ts src/api/schema.d.ts && rm .contract-check.d.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

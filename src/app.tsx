@@ -7,6 +7,7 @@ import {
   useLocation,
 } from "react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { isAuthError } from "@/api/client"
 import { Toaster } from "sonner"
 import { ThemeProvider } from "@/lib/theme-provider"
 import { useTheme } from "@/lib/use-theme"
@@ -45,7 +46,9 @@ import { NotFoundPage } from "@/pages/not-found"
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      // A 401 or 403 cannot be retried into success: the credential has to
+      // change first, and a retried 401 counts toward the server's lockout.
+      retry: (failures, error) => !isAuthError(error) && failures < 1,
       refetchOnWindowFocus: false,
       refetchIntervalInBackground: false,
       // Serve entity lists and detail reads from cache for half a minute

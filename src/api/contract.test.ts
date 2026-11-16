@@ -7,8 +7,17 @@
  * route (admin/backup vs admin/backups), a removed endpoint, or a query param
  * the server ignores (the old audit action/resource_type filters).
  *
- * The data-plane catch-all (`/api/v1/data/{channel}`) is intentionally not in
+ * The data-plane catch-all (`/api/v2/data/{channel}`) is intentionally not in
  * the spec, so dataApi is checked for prefix shape only.
+ *
+ * It also holds each function to its endpoint's **envelope**: an endpoint
+ * answering a `Data_*` schema must be unwrapped, and one answering a bare
+ * object (the resources new in 2.0) or a `Page_*` must not be.
+ *
+ * The 2.0 port (PLAN-2.0.md) moves the API layer over module by module. Calls
+ * that still speak 1.12 are listed in `PENDING_V2`, and each of those is held
+ * to *still failing* — so porting one without removing it from the list fails
+ * too, and the list only shrinks.
  */
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -17,6 +26,7 @@ import { resolve } from "node:path"
 
 interface SpecOperation {
   parameters?: Array<{ name: string; in: string }>
+  responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>
 }
 
 const spec = JSON.parse(
@@ -74,11 +84,12 @@ const { pluginsApi } = await import("@/api/plugins")
 const { cronApi } = await import("@/api/cron")
 const { cacheApi } = await import("@/api/cache")
 const { modelsApi } = await import("@/api/models")
+const { runtimeApi } = await import("@/api/runtime")
 
 /** Resolve a client path ("admin/workflows/x?y=1" or "/health") to spec-path + query. */
 function normalize(rawPath: string): { url: string; query: string | undefined } {
   const [pathPart, query] = rawPath.split("?")
-  const url = pathPart.startsWith("/") ? pathPart : `/api/v1/${pathPart}`
+  const url = pathPart.startsWith("/") ? pathPart : `/api/v2/${pathPart}`
   return { url, query }
 }
 
@@ -100,29 +111,36 @@ function findSpecPath(url: string): string | undefined {
   return matches[0]
 }
 
-function assertInSpec({ method, path }: CapturedCall, label: string) {
+/** Why a call does not match the spec, or null when it does. */
+function specMismatch({ method, path }: CapturedCall, label: string): string | null {
   const { url, query } = normalize(path)
 
   const specPath = findSpecPath(url)
-  expect(specPath, `${label}: ${url} has no matching path in the OpenAPI spec`).toBeDefined()
+  if (!specPath) return `${label}: ${url} has no matching path in the OpenAPI spec`
 
-  const op = spec.paths[specPath!][method]
-  expect(
-    op,
-    `${label}: ${method.toUpperCase()} is not documented for ${specPath} in the OpenAPI spec`
-  ).toBeDefined()
+  const op = spec.paths[specPath][method]
+  if (!op) return `${label}: ${method.toUpperCase()} is not documented for ${specPath} in the OpenAPI spec`
 
   if (query) {
-    const declared = (op.parameters ?? [])
-      .filter((p) => p.in === "query")
-      .map((p) => p.name)
+    const declared = (op.parameters ?? []).filter((p) => p.in === "query").map((p) => p.name)
     for (const key of new URLSearchParams(query).keys()) {
-      expect(
-        declared,
-        `${label}: query param "${key}" is not declared for ${method.toUpperCase()} ${specPath} — the server will silently ignore it`
-      ).toContain(key)
+      if (!declared.includes(key)) {
+        return `${label}: query param "${key}" is not declared for ${method.toUpperCase()} ${specPath} — the server will silently ignore it`
+      }
     }
   }
+  return null
+}
+
+/** The envelope an operation's success answer comes in: `data` (`Data_*`), `page` (`Page_*`) or `bare`. */
+function responseEnvelope({ method, path }: CapturedCall): "data" | "page" | "bare" | undefined {
+  const specPath = findSpecPath(normalize(path).url)
+  const op = specPath ? spec.paths[specPath][method] : undefined
+  const ok = Object.entries(op?.responses ?? {}).find(([code]) => code.startsWith("2"))?.[1]
+  const ref = ok?.content?.["application/json"]?.schema?.$ref
+  if (!ref) return undefined
+  const name = ref.split("/").pop()!
+  return name.startsWith("Data_") ? "data" : name.startsWith("Page_") ? "page" : "bare"
 }
 
 /**
@@ -131,6 +149,9 @@ function assertInSpec({ method, path }: CapturedCall, label: string) {
  * that is missing here.
  */
 const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
+  runtimeApi: {
+    capabilities: () => runtimeApi.capabilities(),
+  },
   workflowsApi: {
     list: () => workflowsApi.list({ limit: 10, offset: 0, status: "active", tag: "t" }),
     get: () => workflowsApi.get("wf-1"),
@@ -348,6 +369,86 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
   },
 }
 
+/**
+ * Calls that still speak the 1.12 API, by `module.function`. Phase 1 of the
+ * port moves the surfaces 2.0 kept (traces, DLQ, cron, audit, engine); phases
+ * 2–4 replace the per-entity CRUD modules with deployments, definitions and
+ * connections. Each entry must still fail; remove it when it is ported.
+ */
+const PENDING_V2 = new Set<string>([
+  "workflowsApi.list",
+  "workflowsApi.get",
+  "workflowsApi.create",
+  "workflowsApi.update",
+  "workflowsApi.delete",
+  "workflowsApi.changeStatus",
+  "workflowsApi.changeStatusDryRun",
+  "workflowsApi.setRollout",
+  "workflowsApi.listVersions",
+  "workflowsApi.createVersion",
+  "workflowsApi.test",
+  "workflowsApi.validate",
+  "workflowsApi.dependencies",
+  "workflowsApi.import",
+  "workflowsApi.export",
+  "channelsApi.list",
+  "channelsApi.get",
+  "channelsApi.create",
+  "channelsApi.update",
+  "channelsApi.delete",
+  "channelsApi.validate",
+  "channelsApi.changeStatus",
+  "channelsApi.changeStatusDryRun",
+  "channelsApi.listVersions",
+  "channelsApi.createVersion",
+  "channelsApi.import",
+  "channelsApi.export",
+  "connectorsApi.list",
+  "connectorsApi.get",
+  "connectorsApi.create",
+  "connectorsApi.update",
+  "connectorsApi.delete",
+  "connectorsApi.validate",
+  "connectorsApi.test",
+  "connectorsApi.import",
+  "connectorsApi.export",
+  "engineApi.reload",
+  "auditApi.list",
+  "tracesApi.list",
+  "traceDlqApi.list",
+  "packagesApi.list",
+  "packagesApi.list?current",
+  "packagesApi.get",
+  "pluginsApi.list",
+  "pluginsApi.get",
+  "pluginsApi.create",
+  "pluginsApi.update",
+  "pluginsApi.delete",
+  "pluginsApi.validate",
+  "pluginsApi.changeStatus",
+  "pluginsApi.changeStatusDryRun",
+  "pluginsApi.listVersions",
+  "pluginsApi.createVersion",
+  "pluginsApi.dependencies",
+  "pluginsApi.import",
+  "pluginsApi.export",
+  "cronApi.listOccurrences",
+  "modelsApi.list",
+  "modelsApi.get",
+  "modelsApi.create",
+  "modelsApi.update",
+  "modelsApi.delete",
+  "modelsApi.validate",
+  "modelsApi.changeStatus",
+  "modelsApi.changeStatusDryRun",
+  "modelsApi.admit",
+  "modelsApi.listVersions",
+  "modelsApi.createVersion",
+  "modelsApi.dependencies",
+  "modelsApi.import",
+  "modelsApi.export",
+])
+
 const MODULES: Record<string, object> = {
   workflowsApi,
   channelsApi,
@@ -363,6 +464,7 @@ const MODULES: Record<string, object> = {
   cronApi,
   cacheApi,
   modelsApi,
+  runtimeApi,
 }
 
 describe("API layer ↔ OpenAPI contract", () => {
@@ -373,14 +475,36 @@ describe("API layer ↔ OpenAPI contract", () => {
   for (const [moduleName, fns] of Object.entries(INVOCATIONS)) {
     describe(moduleName, () => {
       for (const [fnName, invoke] of Object.entries(fns)) {
-        it(`${fnName} hits a documented endpoint`, async () => {
-          await invoke()
-          expect(calls, `${moduleName}.${fnName} should issue exactly one request`).toHaveLength(1)
-          assertInSpec(calls[0], `${moduleName}.${fnName}`)
+        const label = `${moduleName}.${fnName}`
+        const pending = PENDING_V2.has(label)
+        it(`${fnName} hits a documented endpoint${pending ? " (pending the 2.0 port)" : ""}`, async () => {
+          const result = await invoke()
+          expect(calls, `${label} should issue exactly one request`).toHaveLength(1)
+          const mismatch = specMismatch(calls[0], label)
+          if (pending) {
+            expect(mismatch, `${label} now matches the 2.0 spec — remove it from PENDING_V2`).not.toBeNull()
+            return
+          }
+          expect(mismatch).toBeNull()
+          // A function that post-processes the answer is not judged here; one
+          // that hands back the stub or its \`data\` must have chosen right.
+          const envelope = responseEnvelope(calls[0])
+          if (result === RESPONSE_STUB) {
+            expect(envelope, `${label} returns the \`{data}\` envelope itself — unwrap it`).not.toBe("data")
+          } else if (result === RESPONSE_STUB.data) {
+            expect(envelope, `${label} unwraps a ${envelope} answer, which has no \`data\` envelope`).toBe("data")
+          }
         })
       }
     })
   }
+
+  it("lists only real functions as pending", () => {
+    for (const label of PENDING_V2) {
+      const [moduleName, fnName] = label.split(".")
+      expect(Object.keys(INVOCATIONS[moduleName] ?? {}), `PENDING_V2 names ${label}, which has no invocation`).toContain(fnName)
+    }
+  })
 
   it("covers every function of every API module", () => {
     for (const [moduleName, mod] of Object.entries(MODULES)) {
@@ -397,12 +521,12 @@ describe("API layer ↔ OpenAPI contract", () => {
   // The dynamic data-plane handler is a catch-all and deliberately absent from
   // the spec; pin the path shapes the UI constructs instead.
   describe("dataApi (catch-all, not in spec)", () => {
-    it("sync send posts to /api/v1/data/{channel}", async () => {
+    it("sync send posts to /api/v2/data/{channel}", async () => {
       await dataApi.processSync("orders", { data: {} })
       expect(calls[0]).toEqual({ method: "post", path: "data/orders" })
     })
 
-    it("async send posts to /api/v1/data/{channel}/async", async () => {
+    it("async send posts to /api/v2/data/{channel}/async", async () => {
       await dataApi.processAsync("orders", { data: {} })
       expect(calls[0]).toEqual({ method: "post", path: "data/orders/async" })
     })

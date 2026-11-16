@@ -59,7 +59,7 @@ export function useDocsServed() {
   return useQuery({
     queryKey: ["openapi-served"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/openapi.json", { method: "HEAD" })
+      const res = await fetch("/api/v2/openapi.json", { method: "HEAD" })
       return res.ok || res.status === 405
     },
     staleTime: 10 * 60 * 1000,

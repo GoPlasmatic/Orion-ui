@@ -7,6 +7,8 @@ import { ErrorBoundary } from "@/components/shared/error-boundary"
 import { NAV_SHORTCUTS, navItemFor } from "@/lib/nav"
 import { setFallbackTitle } from "@/lib/page-title"
 import { readStorage, writeStorage } from "@/lib/storage"
+import { useAdminAuth } from "@/hooks/use-admin-auth"
+import { AdminKeyDialog } from "./admin-key-dialog"
 
 /** A `g` followed by a key within this long jumps to the page the key names. */
 const CHORD_MS = 1500
@@ -28,6 +30,17 @@ export function AppLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const chordAt = useRef(0)
+  const auth = useAdminAuth()
+  const [keyDialogOpen, setKeyDialogOpen] = useState(false)
+  // Ask once each time the server starts wanting a key; a cancelled dialog
+  // stays closed (the header's chip reopens it) rather than returning on
+  // every held-back request.
+  const [askedFor, setAskedFor] = useState<string | null>(null)
+  const episode = auth.status === "needed" ? `${auth.reason}:${auth.key ?? ""}` : null
+  if (episode !== askedFor) {
+    setAskedFor(episode)
+    if (episode) setKeyDialogOpen(true)
+  }
 
   const toggleCollapsed = () => {
     const next = !collapsed
@@ -101,7 +114,11 @@ export function AppLayout() {
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <Header onOpenSearch={() => setPaletteOpen(true)} onOpenMenu={() => setDrawerOpen(true)} />
+        <Header
+          onOpenSearch={() => setPaletteOpen(true)}
+          onOpenMenu={() => setDrawerOpen(true)}
+          onOpenKey={() => setKeyDialogOpen(true)}
+        />
         {/* The width constraint lives on <main> itself, not on an inner wrapper:
             pages that fill the viewport (System Map's graph) size themselves with
             `h-full`, which only resolves against a parent with a definite height.
@@ -115,6 +132,7 @@ export function AppLayout() {
         </main>
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      {keyDialogOpen && <AdminKeyDialog onClose={() => setKeyDialogOpen(false)} />}
     </div>
   )
 }

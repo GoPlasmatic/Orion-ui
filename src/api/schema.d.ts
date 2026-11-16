@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/api/v1/admin/audit-logs": {
+    "/api/v2/admin/audit-logs": {
         parameters: {
             query?: never;
             header?: never;
@@ -20,7 +20,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/backups": {
+    "/api/v2/admin/authoring/lint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lint a provider package manifest and schema bundle
+         * @description Validates `connector.json`, `distribution.json`, and implementation files, returning the lint report (`valid` and `errors`).
+         */
+        post: operations["authoring_lint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/authoring/pack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pack a provider package into a deterministic content-addressed bundle
+         * @description Validates the package files, computes canonical SHA-256 digests and `inventory.json`, and returns the packed bundle ready for upload.
+         */
+        post: operations["authoring_pack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/authoring/scaffold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate a deterministic v2 provider package scaffold
+         * @description Generates starter manifest, distribution, and implementation files for a `rust`, `workflow`, or `wasm` provider package.
+         */
+        post: operations["authoring_scaffold"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/backups": {
         parameters: {
             query?: never;
             header?: never;
@@ -36,7 +96,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/cache/namespaces/{namespace}/invalidate": {
+    "/api/v2/admin/cache/namespaces/{namespace}/invalidate": {
         parameters: {
             query?: never;
             header?: never;
@@ -58,103 +118,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/channels": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_channels"];
-        put?: never;
-        post: operations["create_channel"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/channels/export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["export_channels"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/channels/import": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["import_channels"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/channels/validate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["validate_channel"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/channels/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_channel"];
-        put: operations["update_channel"];
-        post?: never;
-        delete: operations["delete_channel"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/channels/{id}/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch: operations["change_channel_status"];
-        trace?: never;
-    };
-    "/api/v1/admin/channels/{id}/trigger": {
+    "/api/v2/admin/channels/{id}/trigger": {
         parameters: {
             query?: never;
             header?: never;
@@ -170,39 +134,172 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/channels/{id}/versions": {
+    "/api/v2/admin/connections": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["list_channel_versions"];
+        /**
+         * List every stored connection revision
+         * @description Returns every stored revision of every connection, ordered by connection then revision, with its provider digest and configuration digest.
+         */
+        get: operations["list_connections"];
         put?: never;
-        post: operations["create_new_channel_version"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/connectors": {
+    "/api/v2/admin/connections/{id}/revisions": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["list_connectors"];
+        /**
+         * List one connection's revisions
+         * @description Returns every stored revision of the connection, oldest first. Empty for a connection with none.
+         */
+        get: operations["list_connection_revisions"];
         put?: never;
-        post: operations["create_connector"];
+        /**
+         * Create an immutable connection revision
+         * @description Refuses a raw secret in public_config and a malformed secret locator, then judges the configuration as the node will read it — public_config with each secret reference at its locator path, the references unresolved. Over a built-in driver it is typed and checked as the connector it serves (`http`, `db` or `cache`), exactly as `orion-cli compile` checks it; over an uploaded provider package it must satisfy the package's declared `configuration_schema`. Over a provider that declares dependencies (a `workflow` provider package, or a composed `rust` provider whose description declares them), `bindings` must bind each required dependency alias to a stored connection over a provider that declares no dependencies of its own (the one the dependency names, when it names one), and nothing else; a deployment member for the connection must then require each bound connection. A composed `rust` provider also sees the bindings in its own `validate_connection`. A refusal names each problem by field in `details`. Then persists an immutable, content-addressed connection revision: the same revision with the same content answers it again, with different content it is a conflict.
+         */
+        post: operations["create_connection_revision"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/connectors/circuit-breakers": {
+    "/api/v2/admin/connections/{id}/revisions/{revision}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one connection revision */
+        get: operations["get_connection_revision"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/connections/{id}/revisions/{revision}/probes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Probe a connection revision's backend
+         * @description Probes the stored revision through the provider it names — nothing in the request can choose another — recorded in the audit log first because it reaches a real backend. Over a built-in driver it connects for real, with the revision's secret references resolved as the node resolves them at load: `org.orion.postgresql`, `org.orion.mysql` and `org.orion.sqlite` run `SELECT 1` through the node's own connector pool (refusing a private address unless `allow_private_urls`); `org.orion.http` resolves the configured URL's host and opens a TCP connection to it (no HTTP request is sent and no credential is presented; the same private-address rule applies); `org.orion.memory-cache` reads a probe key. Over an uploaded provider package it validates the configuration and runs the provider's health check within an admitted run budget. A probe that ran answers `200` whatever it found: `healthy` is the finding, `details.probe` says which check ran and `details.error` why it failed — never a resolved secret.
+         */
+        post: operations["probe_connection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/connector-packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List uploaded and admitted connector provider packages
+         * @description Returns a page of ingested provider packages, ordered by digest, each with its admission and revocation state.
+         */
+        get: operations["list_connector_packages"];
+        put?: never;
+        /**
+         * Upload a verified connector provider package
+         * @description Verifies archive bounds, digests, and publisher/version immutability, then stores the package in the deployment store. A `workflow` package is also held to the hermetic rules — one entry workflow per operation, only the dataflow built-ins, `crypto`, `jwt_sign`, `jwt_verify`, plugin functions and `connector_call` on its declared dependencies, and no secret node or reference — and refused with `details` naming each problem by file and path.
+         */
+        post: operations["upload_connector_package"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/connector-packages/{digest}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one connector provider package
+         * @description The package stored under the digest, with its manifest, distribution and inventory, and the admission recorded for it.
+         */
+        get: operations["get_connector_package"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/connector-packages/{digest}/admission": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Admit an uploaded connector provider package
+         * @description Evaluates the active edition admission policy against the uploaded package and records its admission, with a durable fingerprint. Putting the admission again re-evaluates it. A `workflow` package is checked against the hermetic rules again first, and once admitted is registered as a provider backend under its digest.
+         */
+        put: operations["admit_connector_package"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/connector-packages/{digest}/revocations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke an admitted connector provider package
+         * @description Records a revocation of the package's admission in the deployment store and the runtime admission ledger, blocking new invocations and deployments. A `workflow` package's backend is unregistered.
+         */
+        post: operations["revoke_connector_package"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/connectors/circuit-breakers": {
         parameters: {
             query?: never;
             header?: never;
@@ -218,7 +315,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/connectors/circuit-breakers/{key}": {
+    "/api/v2/admin/connectors/circuit-breakers/{key}": {
         parameters: {
             query?: never;
             header?: never;
@@ -234,87 +331,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/connectors/export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["export_connectors"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/connectors/import": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["import_connectors"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/connectors/validate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["validate_connector"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/connectors/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_connector"];
-        put: operations["update_connector"];
-        post?: never;
-        delete: operations["delete_connector"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/connectors/{id}/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["test_connector"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/cron/occurrences": {
+    "/api/v2/admin/cron/occurrences": {
         parameters: {
             query?: never;
             header?: never;
@@ -330,7 +347,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/cron/occurrences/{id}": {
+    "/api/v2/admin/cron/occurrences/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -346,7 +363,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/cron/occurrences/{id}/cancel": {
+    "/api/v2/admin/cron/occurrences/{id}/cancel": {
         parameters: {
             query?: never;
             header?: never;
@@ -362,7 +379,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/cron/occurrences/{id}/retry": {
+    "/api/v2/admin/cron/occurrences/{id}/retry": {
         parameters: {
             query?: never;
             header?: never;
@@ -378,7 +395,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/cron/status": {
+    "/api/v2/admin/cron/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -394,7 +411,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/engine/reload": {
+    "/api/v2/admin/definitions": {
         parameters: {
             query?: never;
             header?: never;
@@ -403,14 +420,139 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["engine_reload"];
+        /**
+         * Upload a definition a deployment manifest can name
+         * @description Validates a workflow, channel or plugin definition as the node will load it — a workflow is parsed strictly and compiled, refusing anything that would quarantine it; a channel's routing and guards are checked; a plugin's manifest is read and its component compiled and self-tested — and stores its canonical form. The answered `digest` is what a manifest member's `definition_digest` names. Idempotent: the same definition is one digest however it is spelled.
+         */
+        post: operations["upload_definition"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/engine/status": {
+    "/api/v2/admin/definitions/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a workflow definition once, without deploying it
+         * @description Refuses a workflow definition `POST /definitions` would refuse, then runs it once on this node's engine — its functions, plugins and connectors, so tasks reach **live backends** — against the given `data` and `metadata`, normalised the way an ingress builds them with this node's `[vars]` stamped in. Nothing is stored and nothing is stubbed. The trace is kept on every outcome, so a run that stopped short still answers `200` with the steps that ran and the `error` that stopped it. Recorded in the audit log before the run.
+         */
+        post: operations["test_definition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/definitions/{digest}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a stored definition */
+        get: operations["get_definition"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/deployment-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan and validate a candidate deployment manifest
+         * @description Validates canonical manifest invariants, provider admission status, and connection references against the requested base revision, and checks that this node could build the candidate. Answers the reviewed manifest digest an apply must name, and the members the candidate adds, updates and removes. Nothing is stored: planning the same candidate on the same base answers the same plan.
+         */
+        post: operations["create_deployment_plan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/deployments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Page through committed deployment revisions
+         * @description The deployment head, its epoch and the revision this node serves, with one page of committed revisions, newest first, each without its manifest — `GET /deployments/{revision}` reads one in full. Pass `next_cursor` back as `?cursor=` for the next page.
+         */
+        get: operations["list_deployments"];
+        put?: never;
+        /**
+         * Commit the next deployment revision: an apply or a rollback
+         * @description An apply (`manifest` with its `reviewed_manifest_digest`) plans the manifest again, refuses it unless it plans to the digest that was reviewed, and commits it. A rollback (`rollback_to`) commits an earlier revision's manifest as a new revision, re-checking its providers' admissions as of now. Either is a compare-and-swap against `base_revision` in one database transaction, idempotent on `idempotency_key` per principal (a replay answers the receipt it committed), and then reconciles the local node.
+         */
+        post: operations["create_deployment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/deployments/{revision}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a committed deployment revision
+         * @description Returns the canonical manifest and metadata for a committed deployment revision.
+         */
+        get: operations["get_deployment_revision"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/deployments/{revision}/convergence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Evaluate node or cluster convergence for a deployment revision
+         * @description Reports whether the target node (`?target=this-node`) or all observed cluster replicas (`?target=observed`) have converged to the specified deployment revision.
+         */
+        get: operations["get_deployment_convergence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/admin/engine/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -426,7 +568,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/functions": {
+    "/api/v2/admin/functions": {
         parameters: {
             query?: never;
             header?: never;
@@ -442,30 +584,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/models": {
+    "/api/v2/admin/runtime-capabilities": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["list_models"];
-        put?: never;
-        post: operations["create_model"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/models/export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["export_models"];
+        /**
+         * Discover runtime capabilities and edition boundaries
+         * @description Returns the v2 contract revision this server speaks (`api_version` — a client that speaks another must stop), its edition (`community`, `standard` or `enterprise`), registered channel drivers and provider backends (each built-in driver with the digest a connection revision names), the plugin Wasm world, the deployment head, and this node's reconciler status.
+         */
+        get: operations["get_runtime_capabilities"];
         put?: never;
         post?: never;
         delete?: never;
@@ -474,279 +604,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/models/import": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["import_models"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/models/validate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["validate_model"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/models/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_model"];
-        put: operations["update_model"];
-        post?: never;
-        delete: operations["delete_model"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/models/{id}/admit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["admit_model"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/models/{id}/dependencies": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["model_dependencies"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/models/{id}/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch: operations["change_model_status"];
-        trace?: never;
-    };
-    "/api/v1/admin/models/{id}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_model_versions"];
-        put?: never;
-        post: operations["create_new_model_version"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/packages": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_packages"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/packages/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_package"];
-        put: operations["put_package"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/plugins": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_plugins"];
-        put?: never;
-        post: operations["create_plugin"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/plugins/export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["export_plugins"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/plugins/import": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["import_plugins"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/plugins/validate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["validate_plugin"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/plugins/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_plugin"];
-        put: operations["update_plugin"];
-        post?: never;
-        delete: operations["delete_plugin"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/plugins/{id}/dependencies": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["plugin_dependencies"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/plugins/{id}/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch: operations["change_plugin_status"];
-        trace?: never;
-    };
-    "/api/v1/admin/plugins/{id}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_plugin_versions"];
-        put?: never;
-        post: operations["create_new_plugin_version"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/trace-dlq": {
+    "/api/v2/admin/trace-dlq": {
         parameters: {
             query?: never;
             header?: never;
@@ -762,7 +620,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/trace-dlq/purge": {
+    "/api/v2/admin/trace-dlq/purge": {
         parameters: {
             query?: never;
             header?: never;
@@ -778,7 +636,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/trace-dlq/{id}": {
+    "/api/v2/admin/trace-dlq/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -794,7 +652,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/trace-dlq/{id}/requeue": {
+    "/api/v2/admin/trace-dlq/{id}/requeue": {
         parameters: {
             query?: never;
             header?: never;
@@ -810,7 +668,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/traces": {
+    "/api/v2/admin/traces": {
         parameters: {
             query?: never;
             header?: never;
@@ -826,7 +684,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/traces/{id}": {
+    "/api/v2/admin/traces/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -834,7 +692,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * @description Fetch one trace. Access follows a two-lane rule (R12): present either a valid admin credential, or — for async submissions — the `trace_token` returned with the 202, in the `x-trace-token` header. Traces without a token (sync traces, DLQ retries, rows from before 1.0.0) are admin-plane only when admin auth is enabled.
+         * @description Fetch one trace. Access follows a two-lane rule: present either a valid admin credential, or — for async submissions — the `trace_token` returned with the 202, in the `x-trace-token` header. Traces without a token (sync traces, DLQ retries, rows from before 1.0.0) are admin-plane only when admin auth is enabled.
          *
          *     The `?token=` query parameter is a **deprecated** alternative for clients that cannot set headers. Prefer the header: a URL is not a private place, and the token leaks into browser history, proxy and CDN logs, `Referer` headers and anywhere a link is pasted. Reads authorised that way answer with a `Deprecation` header.
          *
@@ -849,167 +707,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/workflows": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_workflows"];
-        put?: never;
-        post: operations["create_workflow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/workflows/export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["export_workflows"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/workflows/import": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["import_workflows"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/workflows/validate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["validate_workflow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/workflows/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_workflow"];
-        put: operations["update_workflow"];
-        post?: never;
-        delete: operations["delete_workflow"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/workflows/{id}/dependencies": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["workflow_dependencies"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/workflows/{id}/rollout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch: operations["update_rollout"];
-        trace?: never;
-    };
-    "/api/v1/admin/workflows/{id}/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch: operations["change_workflow_status"];
-        trace?: never;
-    };
-    "/api/v1/admin/workflows/{id}/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["test_workflow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/workflows/{id}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_workflow_versions"];
-        put?: never;
-        post: operations["create_new_workflow_version"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/data/{channel}": {
+    "/api/v2/data/{channel}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1022,12 +720,13 @@ export interface paths {
          * Invoke a channel synchronously
          * @description Invoke a channel's workflow synchronously.
          *
-         *     This is a **templated** path, not a static one. Orion serves the whole data plane from a single catch-all route (`/api/v1/data/{*path}`) and resolves the target channel at request time, so no per-channel path exists in this document:
+         *     This is a **templated** path, not a static one. Orion serves the whole data plane from a single catch-all route (`/api/v2/data/{*path}`) and resolves the target channel at request time, so no per-channel path exists in this document:
          *
-         *     * **Simple HTTP channels** — a single path segment matched against the channel `name`, e.g. `POST /api/v1/data/order-intake`.
+         *     * **Simple HTTP channels** — a single path segment matched against the channel `name`, e.g. `POST /api/v2/data/order-intake`.
          *     * **REST channels** — each active channel registers its own method and path pattern (`config.rest.routes`) at engine-reload time; those patterns may span several segments and declare their own path parameters, which arrive in the workflow as `metadata.params`, percent-decoded exactly once (`a%2Fb` becomes `a/b`). Static segments match byte-exact — the path is case-sensitive per RFC 3986. Any HTTP method is accepted — `GET`, `PUT`, `PATCH` and `DELETE` behave identically to the `POST` documented here, with the verb exposed as `metadata.http_method`. Query the admin channel API for the routes a given deployment actually serves.
+         *     * **Hooked channels** — a channel whose protocol's driver answers its requests itself (an edition's event stream or GraphQL endpoint; `http_hook` in `GET /api/v2/admin/runtime-capabilities`). The body is handed to the driver as received and need not be JSON, so the `415`/`400` rows below do not apply to it; the rate limit, `auth` and the origin allow-list still run first. The status, headers and body (possibly a `text/event-stream` that stays open) are the driver's. Each workflow run it makes is traced with the protocol as its `mode`. Such a channel cannot be submitted to `/async` (`405`).
          *
-         *     Append `/async` to submit to the queue instead — see `POST /api/v1/data/{channel}/async`.
+         *     Append `/async` to submit to the queue instead — see `POST /api/v2/data/{channel}/async`.
          *
          *     Authentication is per channel and off by default: `admin_auth` covers the admin plane only. A channel carrying an `auth` block in its config (`api_key` or `hmac`) authenticates every caller on this path and on `/async` alike; a channel without one is open to anyone who can reach the port. `validation_logic` and `origin_allow_list` complement it but are not authentication — `Origin` is client-supplied.
          */
@@ -1038,7 +737,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/data/{channel}/async": {
+    "/api/v2/data/{channel}/async": {
         parameters: {
             query?: never;
             header?: never;
@@ -1051,9 +750,9 @@ export interface paths {
          * Submit to a channel asynchronously
          * @description Queue a channel's workflow for background execution and return immediately.
          *
-         *     Accepts the same body and resolves the channel exactly as `POST /api/v1/data/{channel}` (including REST route patterns — append `/async` to any of them). All ingress guards still apply before the queue hand-off: the origin allow-list, the rate limit, `validation_logic`, deduplication and backpressure. The response cache is sync-only, so an async submission never returns a cached body.
+         *     Accepts the same body and resolves the channel exactly as `POST /api/v2/data/{channel}` (including REST route patterns — append `/async` to any of them). All ingress guards still apply before the queue hand-off: the origin allow-list, the rate limit, `validation_logic`, deduplication and backpressure. The response cache is sync-only, so an async submission never returns a cached body.
          *
-         *     Poll `GET /api/v1/admin/traces/{id}` with the returned `trace_id` for the result, presenting the returned `trace_token` via the `x-trace-token` header or `?token=` query parameter. The token scopes the poll to this submission (R12); an admin credential also works.
+         *     Poll `GET /api/v2/admin/traces/{id}` with the returned `trace_id` for the result, presenting the returned `trace_token` via the `x-trace-token` header or `?token=` query parameter. The token scopes the poll to this submission; an admin credential also works.
          *
          *     `trace_id` is always present. Async submission is a request for a result to be fetched later, so the trace row is written before the 202 is sent even when `trace_storage.mode` is `off` — that setting still applies in full to the synchronous endpoint, where the caller already has the answer.
          */
@@ -1071,7 +770,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Detailed health report. Always reachable, but when `admin_auth.enabled` is true the topology detail (`git_hash`, `build_timestamp`, `workflows_loaded`, the circuit-breaker map, connector load failures and quarantined channels — names and failure reasons, and each `[packages] apply` entry by name, version and state) is included only for requests presenting a valid admin credential; anonymous callers get status, version, uptime and coarse per-component states. Probes should use `/healthz` and `/readyz`. */
+        /** @description Detailed health report. Always reachable, but when `admin_auth.enabled` is true the topology detail (`git_hash`, `build_timestamp`, `workflows_loaded`, the circuit-breaker map, connector load failures and quarantined channels — names and failure reasons) is included only for requests presenting a valid admin credential; anonymous callers get status, version, uptime and coarse per-component states. Probes should use `/healthz` and `/readyz`. */
         get: operations["health_check"];
         put?: never;
         post?: never;
@@ -1090,7 +789,7 @@ export interface paths {
         };
         /**
          * Liveness probe
-         * @description Liveness probe. Returns `200 {"status":"ok"}` as long as the process is running and the HTTP server is accepting connections — it performs no dependency checks, so a database or Redis outage must not restart the pod. Use `/readyz` for rotation decisions and `/health` for a detailed report. Unauthenticated, so probes work without provisioning an admin key.
+         * @description Liveness probe. Returns `200 {"status":"ok"}` as long as the process is running and the HTTP server is accepting connections — it performs no dependency checks, so a database outage must not restart the pod. Use `/readyz` for rotation decisions and `/health` for a detailed report. Unauthenticated, so probes work without provisioning an admin key.
          */
         get: operations["liveness_probe"];
         put?: never;
@@ -1111,7 +810,7 @@ export interface paths {
         /**
          * @description Prometheus exposition endpoint. Registered only when `metrics.enabled` is true — otherwise the path 404s, so a deployment with metrics off is not mistaken for a working scrape target.
          *
-         *     On this listener it is guarded by the same admin credential as `/api/v1/admin/*` when `admin_auth.enabled` is true, so scrapers must be configured with the key. Setting `metrics.bind_addr` instead moves the endpoint to a dedicated unauthenticated listener on a private interface and removes it from this one entirely.
+         *     On this listener it is guarded by the same admin credential as `/api/v2/admin/*` when `admin_auth.enabled` is true, so scrapers must be configured with the key. Setting `metrics.bind_addr` instead moves the endpoint to a dedicated unauthenticated listener on a private interface and removes it from this one entirely.
          */
         get: operations["metrics_endpoint"];
         put?: never;
@@ -1131,9 +830,9 @@ export interface paths {
         };
         /**
          * Readiness probe
-         * @description Readiness probe. Reports `ready` only when the database responds, startup has completed, every background task the node cannot work without is still running, — in cluster mode — the shared Redis answers `PING`, and — with Kafka enabled — the ingest consumer is not degraded. The `components.engine` field is a constant `"ok"` kept for response-shape stability: the engine snapshot is lock-free and cannot be unavailable once the process serves. Both conditional checks matter because those degradations are otherwise silent: without Redis, deduplication fails open, the shared response cache misses, and cluster rate limiting stops enforcing; with the consumer down, no message is ingested — all while the data plane keeps returning 200s.
+         * @description Readiness probe. Reports `ready` only when the database responds, startup has completed, every background task the node cannot work without is still running, and, in cluster mode, the cluster store responds. Cluster mode (Orion Standard and Enterprise) keeps the shared dedup store, response cache and rate limits in a store the edition supplies; `components.cluster_store` reports it as `{name, status}`, `status` being `ok` or `error`, and an `error` makes the node not ready, because dedup would otherwise fail open while the data plane answers 200s. The component is absent on a single node, which keeps all three in process. Both pings run concurrently, each bounded by `engine.health_check_timeout_secs`. The `components.engine` field is a constant `"ok"` kept for response-shape stability: the engine snapshot is lock-free and cannot be unavailable once the process serves.
          *
-         *     The `components.background_tasks` is `error` when a required task — the trace dispatcher, the persistence workers, the audit writer, the DLQ retry consumer, the cluster epoch watcher — has stopped for good; each of those fails silently otherwise, dropping traces or audit rows while the data plane keeps answering 200s. The `components.cluster_redis` field is present only in cluster mode, and `components.kafka` only when `kafka.enabled` is true. `components.packages` is present only when `[packages] apply` names artifacts: `applying` (not ready) until every one is applied and serving, then `ok`; `failed` while a node whose package failed to apply shuts down. Unauthenticated, so probes work without provisioning an admin key.
+         *     The `components.background_tasks` is `error` when a required task — the trace dispatcher, the persistence workers, the audit writer, the DLQ retry consumer, the cluster reconciler — has stopped for good; each of those fails silently otherwise, dropping traces or audit rows while the data plane keeps answering 200s. Unauthenticated, so probes work without provisioning an admin key.
          */
         get: operations["readiness_probe"];
         put?: never;
@@ -1148,32 +847,54 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description What the bucket said about the object, when `validate` got that far. */
-        ArtifactHead: {
-            /** @description The object's ETag, unquoted, when the bucket sent one. */
-            etag?: string | null;
+        /**
+         * @description Request body for admitting an uploaded provider package
+         *     (`PUT /api/v2/admin/connector-packages/{digest}/admission`). The body is
+         *     optional.
+         */
+        AdmitPackageRequest: {
+            /** @description The provider lock the admission must verify against. */
+            lock?: unknown;
+        };
+        /** @description The admission recorded (`PUT /api/v2/admin/connector-packages/{digest}/admission`). */
+        AdmitPackageResponse: {
+            admission: components["schemas"]["ProviderAdmissionDto"];
+        };
+        /** @description Commit a reviewed candidate manifest. */
+        ApplyDeploymentRequest: {
             /**
              * Format: int64
-             * @description `Content-Length`, when the bucket sent one.
+             * @description The head the candidate was planned on; anything else is
+             *     `DEPLOYMENT_HEAD_CONFLICT`.
              */
-            size?: number | null;
+            base_revision: number;
+            idempotency_key: string;
+            manifest: components["schemas"]["DeploymentManifest"];
+            /** @description The audit reason the revision records. */
+            reason: string;
+            /**
+             * @description The digest `POST /deployment-plans` answered for this candidate on
+             *     this base. A candidate that plans to anything else is
+             *     `REVIEWED_DIGEST_MISMATCH`, and nothing is committed.
+             */
+            reviewed_manifest_digest: string;
         };
-        /** @description Acknowledgement returned by `POST /api/v1/data/{channel}/async`. */
+        /** @description Acknowledgement returned by `POST /api/v2/data/{channel}/async`. */
         AsyncSubmitResponse: {
             /**
-             * @description Id to poll via `GET /api/v1/admin/traces/{id}`. Always present: a 202
+             * @description Id to poll via `GET /api/v2/admin/traces/{id}`. Always present: a 202
              *     is a receipt for a result, so the row it names is written before this
-             *     response is sent (R11).
+             *     response is sent.
              */
             trace_id: string;
             /**
-             * @description Capability token scoping the poll to this submission (R12): present
+             * @description Capability token scoping the poll to this submission: present
              *     it via the `x-trace-token` header or `?token=` query parameter.
              *     Shown once, here — only its hash is stored.
              */
             trace_token: string;
         };
-        /** @description One row of `GET /api/v1/admin/audit-logs`. */
+        /** @description One row of `GET /api/v2/admin/audit-logs`. */
         AuditLogEntryResponse: {
             action: string;
             created_at: string;
@@ -1183,8 +904,9 @@ export interface components {
             resource_id: string;
             resource_type: string;
         };
-        /** @description The backup `POST /api/v1/admin/backups` just wrote. */
-        BackupFile: {
+        /** @description The backup `POST /api/v2/admin/backups` just wrote. */
+        BackupFileResponse: {
+            /** @description RFC 3339, UTC. */
             created_at: string;
             filename: string;
             /** @description Absolute path on the node that served the request. */
@@ -1193,27 +915,117 @@ export interface components {
             size_bytes: number;
         };
         /**
-         * @description One row of `GET /api/v1/admin/backups`. Deliberately not [`BackupFile`]:
-         *     the listing reads `mtime` off the directory entry and has no `path`, so
-         *     the two responses differ by two fields.
+         * @description One row of `GET /api/v2/admin/backups`. Deliberately not
+         *     [`BackupFileResponse`]: the listing reads `mtime` off the directory entry
+         *     and so carries the file's modification time as `created_at`.
          */
-        BackupListItem: {
+        BackupListItemResponse: {
+            /**
+             * @description RFC 3339, UTC: when the file was last written, which for a backup is when
+             *     it was made.
+             */
+            created_at: string;
             filename: string;
-            modified_at: string;
             /** Format: int64 */
             size_bytes: number;
         };
-        /** @description `POST /api/v1/admin/cache/namespaces/{namespace}/invalidate`. */
+        /** @description `POST /api/v2/admin/cache/namespaces/{namespace}/invalidate`. */
         CacheInvalidatedResponse: {
             /** @description The namespace whose version was bumped. */
             namespace: string;
             /**
              * Format: int64
-             * @description How many response-cache stores the bump reached: the default store,
-             *     each in-memory store on the node that answered, and each Redis cache
-             *     connector. A shared Redis carries the bump to every node.
+             * @description How many response-cache stores the bump reached: the default store
+             *     and each in-memory store on the node that answered. In a cluster the
+             *     default store is the cluster store, which carries the bump to every
+             *     node.
              */
             stores: number;
+        };
+        /**
+         * @description One entry of `GET /api/v2/admin/functions`.
+         *
+         *     Every name a workflow may use, not only the functions Orion input-schema
+         *     validates: those omit `map`, `filter`, `parse_json` and the rest, which are
+         *     the ones people actually type — in the deployment that reported it
+         *     such names were 425 of 631 tasks, `map` alone 310. A completion
+         *     source offering the connector functions and none of those is not an
+         *     incomplete catalogue, it is the wrong one.
+         *
+         *     A projection of [`FunctionEntry`] rather than the entry itself, because the
+         *     wire shape is pinned by the OpenAPI document in GoPlasmatic/Orion-docs and
+         *     the two are allowed to grow at different rates: `writes` and the connector
+         *     rule are the analysis's business and are not served.
+         */
+        CatalogueEntry: {
+            /** @description `connector`, `control`, `data`, `compute`, or `utility`. */
+            category: string;
+            description: string;
+            /**
+             * @description **Absent**, not null, when the function declares no input schema —
+             *     which is the honest JSON encoding of "there is nothing here", and what
+             *     a consumer branches on.
+             */
+            input_fields?: Record<string, never>[] | null;
+            name: string;
+            /** @description Present only on a `source: "plugin"` entry. */
+            plugin?: Record<string, never> | null;
+            /**
+             * @description What a second run of this function does — see [`RetrySafety`]. Served
+             *     for every entry, built-ins included: "is it safe to retry this task?"
+             *     is a question about every function a workflow can name, not only the
+             *     ones Orion declares an input schema for. `{"kind": …}`: `pure`,
+             *     `read`, `idempotent_write`, `unsafe_write`, or `depends_on` with the
+             *     `input` that decides it.
+             */
+            retry_safety: Record<string, never>;
+            /**
+             * @description `orion` for a handler Orion implements and input-schema validates,
+             *     `engine` for a dataflow-rs built-in the engine executes itself,
+             *     `plugin` for a WebAssembly plugin's function.
+             */
+            source: string;
+        };
+        /**
+         * @description A channel: everything but its identity and its workflow, which is the
+         *     Workflow its manifest member `requires`.
+         */
+        ChannelDefinition: {
+            channel_type?: components["schemas"]["ChannelType"];
+            config?: unknown;
+            description?: string | null;
+            methods?: string[] | null;
+            name: string;
+            /** Format: int64 */
+            priority?: number;
+            /**
+             * @description The channel driver that serves it (`rest`, `http`, `cron` in
+             *     Community), lowercased.
+             */
+            protocol: string;
+            route_pattern?: string | null;
+            tags?: string[];
+            transport_config?: unknown;
+        };
+        /** @description One channel driver, as `/runtime-capabilities` describes it. */
+        ChannelDriverInfo: {
+            http_hook?: components["schemas"]["HttpHookGuards"] | null;
+            ingress_guards?: components["schemas"]["IngressGuards"] | null;
+            /** @description The protocol id a channel names. */
+            protocol: string;
+            /** @description Its channels claim routes on the HTTP data plane. */
+            registers_http_routes: boolean;
+            /** @description Serves `channel_type: "async"` channels. */
+            supports_async: boolean;
+            /** @description Its channels may configure `oauth2_login`. */
+            supports_oauth2_login: boolean;
+            /** @description Serves `channel_type: "sync"` channels. */
+            supports_sync: boolean;
+            /**
+             * @description The `orion-json-schema/1` document its channels' `transport_config`
+             *     must satisfy, when the driver publishes one.
+             */
+            transport_schema?: Record<string, never> | null;
         };
         /** @description A channel a generation refused to serve. */
         ChannelLoadIssueResponse: {
@@ -1226,70 +1038,20 @@ export interface components {
             workflow_id?: string | null;
         };
         /** @enum {string} */
-        ChannelProtocol: "rest" | "http" | "kafka" | "cron";
-        /**
-         * @description API-friendly representation of a Channel with parsed JSON fields.
-         *
-         *     This — not the server's `Channel` row struct — is what every channel
-         *     endpoint returns.
-         */
-        ChannelResponse: {
-            channel_id: string;
-            channel_type: string;
-            /**
-             * @description Channel config with `auth.keys` / `auth.secret` values masked (H3) —
-             *     the server's conversion is the only constructor of this shape, so
-             *     masking is a step no handler can skip.
-             */
-            config: unknown;
-            consumer_group?: string | null;
-            /**
-             * @description `sha256:…` over the canonical importable content (K10). Computed on
-             *     the stored (unmasked) config: entities authored with `env://`
-             *     references hash identically to their exported artifact; entities
-             *     holding literal secrets hash over what they store, which a masked
-             *     export can never reproduce.
-             */
-            content_hash: string;
-            created_at: string;
-            description?: string | null;
-            methods?: unknown;
-            name: string;
-            /** Format: int64 */
-            priority: number;
-            protocol: string;
-            route_pattern?: string | null;
-            status: string;
-            /**
-             * @description Wire name `tags`, stored column `tags_json` (K6) — the same contract
-             *     workflows have carried since 0.x.
-             */
-            tags: unknown;
-            topic?: string | null;
-            transport_config: unknown;
-            updated_at: string;
-            /** Format: int64 */
-            version: number;
-            workflow_id?: string | null;
-        };
-        ChannelStatusChangeRequest: {
-            status: components["schemas"]["EntityStatus"];
-        };
-        /** @enum {string} */
         ChannelType: "sync" | "async";
-        /** @description `POST /api/v1/admin/connectors/circuit-breakers/{key}`. */
-        CircuitBreakerReset: {
+        /** @description A reset breaker (`POST /api/v2/admin/connectors/circuit-breakers/{key}`). */
+        CircuitBreakerResetResponse: {
             /**
              * @description Whether the breaker existed on the node that served the request.
-             *     Breakers are node-local; in cluster mode the reset is broadcast over
-             *     the epoch bus regardless, so `false` here is not a failure (F21).
+             *     Breakers are node-local; in cluster mode the reset reaches every node
+             *     regardless, so `false` here is not a failure.
              */
             found_on_this_node: boolean;
             key: string;
             reset: boolean;
         };
-        /** @description `GET /api/v1/admin/connectors/circuit-breakers`. */
-        CircuitBreakerStates: {
+        /** @description This node's circuit breakers (`GET /api/v2/admin/connectors/circuit-breakers`). */
+        CircuitBreakerStatesResponse: {
             /** @description `channel:connector` → `closed` | `open` | `half_open`. Node-local. */
             breakers: {
                 [key: string]: string;
@@ -1301,77 +1063,84 @@ export interface components {
             enabled: boolean;
             /** @description Which node's map this is. */
             instance_id: string;
-            /** @description Always `"node"` — breaker state is per-replica, never cluster-wide (F21). */
+            /** @description Always `"node"` — breaker state is per-replica, never cluster-wide. */
             scope: string;
         };
-        ConnectorDependency: {
-            connector: string;
-            /** @description The task function that uses it (`db_read`, `http_call`, …). */
-            function: string;
+        /** @description The `cluster_store` component of a [`ReadinessComponents`]. */
+        ClusterStoreReadiness: {
+            /** @description The store's name, e.g. `redis`. */
+            name: string;
+            /** @description `ok` | `error`. */
+            status: string;
         };
         /**
-         * @description One item of `GET /api/v1/admin/connectors/export`.
-         *
-         *     Declared separately from [`crate::storage::models::ConnectorResponse`]
-         *     because an export has to emit the shape `/import` *accepts*, not the shape
-         *     the read endpoints return: `config` is the parsed object here, where the
-         *     read shape carries `config_json` as a string. Publishing the read type for
-         *     this route promised three fields the body does not carry (`config_json`,
-         *     `created_at`, `updated_at`) and hid the one it does.
+         * @description One health probe of a connection revision
+         *     (`POST /api/v2/admin/connections/{id}/revisions/{revision}/probes`). A probe
+         *     that ran answers `200` whatever it found: `healthy` is the finding.
          */
-        ConnectorExportItem: {
+        ConnectionProbeResponse: {
+            connection_id: string;
+            details: components["schemas"]["ProbeDetails"];
+            /** @description The built-in driver, or the backend id of the provider package. */
+            driver_id: string;
+            healthy: boolean;
+            /** Format: int64 */
+            latency_ms: number;
+            /** Format: int64 */
+            revision: number;
+        };
+        /** @description An immutable connection revision (`GET /api/v2/admin/connections/{id}/revisions/{revision}`). */
+        ConnectionRevisionResponse: {
             /**
-             * @description The parsed connector config, with every secret replaced by `******`.
-             *     `env://`-style references survive the masking as references.
+             * @description Over a provider that declares dependencies (a `workflow` provider
+             *     package, or a composed `rust` provider whose `describe()` declares
+             *     them): the connection each dependency alias calls
+             *     (`alias -> connection_id`). Empty for any other provider.
              */
-            config: unknown;
-            connector_type: string;
+            bindings: {
+                [key: string]: string;
+            };
             /**
-             * @description `sha256:…` over the canonical importable content (K10), computed on the
-             *     stored (unmasked) config. Ignored by `/import`, like the other extras.
+             * @description The digest over the public settings, the locators and the bindings:
+             *     what a manifest member for this revision names as its
+             *     `definition_digest`.
              */
-            content_hash: string;
-            enabled: boolean;
-            id: string;
-            name: string;
-            /** @description Selection labels (K6); filter the export with `?tag=`. */
-            tags: unknown;
+            configuration_digest: string;
+            connection_id: string;
+            provider_digest: string;
+            /** @description The connection's settings, as created. */
+            public_config: unknown;
+            /** Format: int64 */
+            revision: number;
+            /** @description Config path → secret reference (`env://`, `vault://`, …). */
+            secret_locators: {
+                [key: string]: string;
+            };
         };
         /**
-         * @description One row of `GET /api/v1/admin/connectors`: the stored connector with
-         *     secrets masked, plus the registry's view of whether it actually loaded.
-         *
-         *     Declared separately from [`crate::storage::models::ConnectorResponse`]
-         *     because `PaginatedEnvelope<ConnectorResponse>` would under-describe the row
-         *     by exactly the three fields an operator reads the list for.
+         * @description The normalised class of a connector failure.
+         * @enum {string}
          */
-        ConnectorListItem: {
-            /** @description The same masked config, parsed — the shape `POST`/`PUT` accept. */
-            config: unknown;
-            /** @description Connector config with every secret replaced by `******`, verbatim. */
-            config_json: string;
-            connector_type: string;
-            /** @description `sha256:…` over the canonical importable content (K10). */
-            content_hash: string;
-            created_at: string;
-            enabled: boolean;
-            id: string;
+        ConnectorErrorClass: "invalid_input" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "rate_limited" | "unavailable" | "deadline" | "cancelled" | "provider_failure" | "contract_violation";
+        /**
+         * @description What a data-plane error body says about the connector failure behind it.
+         *     The provider's message is never sent (it can name hosts and values); its
+         *     code is, because providers document their codes as contract.
+         */
+        ConnectorErrorDetail: {
             /**
-             * @description Why the connector failed to load. Present only when
-             *     `load_status = "failed"`.
+             * @description The failure's class (`provider_failure`, `unavailable`,
+             *     `rate_limited`, `contract_violation`, …). A string, so a class added
+             *     later does not break a tolerant client.
              */
-            load_error?: string | null;
-            /** @description Which load stage failed. Present only when `load_status = "failed"`. */
-            load_error_stage?: string | null;
+            class?: string;
             /**
-             * @description `loaded`, `failed`, or `disabled`.
-             * @example loaded
+             * @description The provider's own code (`MONGO_DUPLICATE_KEY`): a static
+             *     SHOUTY_CASE name the provider documents.
              */
-            load_status: string;
-            name: string;
-            /** @description Selection labels (K6); filter the list with `?tag=`. */
-            tags: string[];
-            updated_at: string;
+            provider_code?: string;
+            /** @description Whether the provider advised that retrying may succeed. */
+            retryable?: boolean;
         };
         /** @description An enabled connector the registry could not load. */
         ConnectorLoadIssueResponse: {
@@ -1386,171 +1155,137 @@ export interface components {
             stage: string;
         };
         /**
-         * @description A connector as the admin API shows it.
-         *
-         *     `config_json` stays a string — it is the stored document verbatim — but
-         *     with every secret replaced by `******`: the server's `mask_connector` is
-         *     the only supported way to build one, and the unmasked row struct cannot be
-         *     serialized (D27), so a handler that forgets to mask does not compile.
+         * @description One connector provider package and its admission record
+         *     (`GET /api/v2/admin/connector-packages/{digest}`).
          */
-        ConnectorResponse: {
-            /**
-             * @description The same masked config, parsed — the shape `POST`/`PUT` accept, so a
-             *     read response can be edited and written straight back.
-             *
-             *     `null` only when the stored document does not parse, which is the same
-             *     condition that empties `content_hash`.
-             */
-            config: unknown;
-            /**
-             * @description Connector config with every secret replaced by `******`, as the stored
-             *     document verbatim.
-             *
-             *     Kept for the life of the 1.x line, but `config` is the field to read:
-             *     both `POST` and `PUT` take the config as an *object*, so a client that
-             *     reads this one has to `JSON.parse` it before it can write it back.
-             */
-            config_json: string;
-            connector_type: string;
-            /**
-             * @description `sha256:…` over the canonical importable content (K10), computed on
-             *     the stored (unmasked) config — see the note on
-             *     [`ChannelResponse::content_hash`]. Empty for a row whose stored JSON
-             *     no longer parses: corrupt content equals nothing.
-             */
-            content_hash: string;
-            created_at: string;
-            enabled: boolean;
-            id: string;
-            name: string;
-            /** @description Wire name `tags`, stored column `tags_json` (K6). */
-            tags: unknown;
-            updated_at: string;
+        ConnectorPackageResponse: {
+            admission?: components["schemas"]["ProviderAdmissionDto"] | null;
+            package: components["schemas"]["ConnectorPackageSummary"];
         };
-        /**
-         * @description Typed enum for the connector `type` field on create/update requests.
-         *     Wire format is lowercase ("http", "kafka", "db", "cache", "es");
-         *     deserialization is case-insensitive so "HTTP" or "Kafka" also parse.
-         *
-         *     `"storage"` was accepted through the whole 0.x line with no handler behind
-         *     it and was removed in 1.0 (proposal F15). It came back in #265 with
-         *     `storage_presign` and `storage_head` behind it — presign and metadata only,
-         *     no data path — so the variant is live again and the removal note applies
-         *     only to rows stored by a 0.x server.
-         * @enum {string}
-         */
-        ConnectorType: "http" | "kafka" | "db" | "cache" | "es" | "smtp" | "storage";
-        CreateChannelRequest: {
-            channel_id?: string | null;
-            channel_type: components["schemas"]["ChannelType"];
-            config?: unknown;
-            consumer_group?: string | null;
-            description?: string | null;
-            methods?: string[] | null;
-            name: string;
-            /** Format: int64 */
-            priority?: number;
-            protocol: components["schemas"]["ChannelProtocol"];
-            route_pattern?: string | null;
-            /**
-             * @description Selection labels (K6), same contract as workflow tags — filter with
-             *     `?tag=` on list and export.
-             */
-            tags?: string[];
-            topic?: string | null;
-            transport_config?: unknown;
-            workflow_id?: string | null;
-        };
-        CreateConnectorRequest: {
-            config?: unknown;
-            connector_type: components["schemas"]["ConnectorType"];
-            /**
-             * @description Whether the connector loads into the registry. Defaults to true (K1).
-             *
-             *     `/export` has always emitted this field; until K1 the create path
-             *     silently dropped it, so a *disabled* connector promoted through
-             *     export → import came back **enabled** in the target environment.
-             */
-            enabled?: boolean | null;
-            id?: string | null;
-            name: string;
-            /**
-             * @description Selection labels (K6), same contract as workflow tags — filter with
-             *     `?tag=` on list and export.
-             */
-            tags?: string[];
-        };
-        /**
-         * @description What `POST /models` and the import accept.
-         *
-         *     `manifest` is the manifest as a JSON object; `artifact` says where the
-         *     bytes are and what digest the author claims for them. Nothing is
-         *     uploaded: the server never holds model bytes, it fetches them from the
-         *     connector at admission.
-         */
-        CreateModelRequest: {
-            /** @description The object-storage reference. `size` is optional and advisory. */
-            artifact: components["schemas"]["ModelArtifactRef"];
+        /** @description A stored connector provider package (`GET /api/v2/admin/connector-packages`). */
+        ConnectorPackageSummary: {
+            /** @description Admitted and not revoked. */
+            admitted: boolean;
+            artifact_state: components["schemas"]["PackageArtifactState"];
+            /** @description The package digest: `sha256:<64 lowercase hex>`. */
+            digest: string;
+            /** @description The package's `distribution.json`. */
+            distribution: unknown;
+            implementation: components["schemas"]["ImplementationKind"];
+            /** @description The package's `inventory.json`. */
+            inventory: unknown;
+            /** @description The package's `connector.json`. */
             manifest: unknown;
+            provider_id: string;
+            publisher: string;
+            revoked: boolean;
             /**
-             * @description Must equal the manifest's `name` when given; the manifest is the
-             *     source of truth for the id.
+             * @description The tier `distribution.json` declares; `community` when it declares
+             *     none.
              */
-            model_id?: string | null;
-            /**
-             * @description A detached Ed25519 signature over the digest string, base64, when
-             *     the deployment requires one; stored either way.
-             */
-            signature?: string | null;
-            tags?: string[];
+            tier: components["schemas"]["EditionTier"];
+            version: string;
         };
-        /**
-         * @description What `POST /plugins` and the import accept.
-         *
-         *     `manifest` is either the TOML text (a string) or the manifest as a JSON
-         *     object — the CLI sends the file it read, an export round-trips the
-         *     object. `component` is the component bytes as base64; it may be omitted
-         *     when `digest` names an artifact this instance already holds, which is
-         *     what an export without `?include_artifacts=true` produces.
-         */
-        CreatePluginRequest: {
-            /** @description The component, base64-encoded. */
-            component?: string | null;
-            /** @description `sha256:…` of a component already stored, when `component` is absent. */
-            digest?: string | null;
-            manifest: unknown;
-            /**
-             * @description Must equal the manifest's `name` when given; the manifest is the
-             *     source of truth for the id.
-             */
-            plugin_id?: string | null;
-            /**
-             * @description A detached Ed25519 signature over the digest string, base64. Required
-             *     when the node's `[plugins.trust]` names public keys; ignored, but
-             *     stored, when it does not.
-             */
-            signature?: string | null;
-            tags?: string[];
-        };
-        CreateWorkflowRequest: {
-            condition?: unknown;
-            continue_on_error?: boolean;
-            description?: string | null;
-            /**
-             * @description Engine-managed loop over `tasks`, spelled `loop` on the wire to match
-             *     dataflow-rs. Absent — the overwhelmingly common case — runs the task
-             *     list exactly once.
-             */
-            loop?: unknown;
-            name: string;
+        /** @description Node/cluster convergence on a committed deployment revision (`GET /api/v2/admin/deployments/{revision}/convergence`). */
+        ConvergenceStatusResponse: {
+            converged: boolean;
+            converged_nodes: string[];
+            degraded_nodes: string[];
+            pending_nodes: string[];
             /** Format: int64 */
-            priority?: number;
-            tags?: string[];
-            tasks: unknown;
-            workflow_id?: string | null;
+            target_revision: number;
         };
         /**
-         * @description One occurrence in full: `GET /api/v1/admin/cron/occurrences/{id}`.
+         * @description Request body to create an immutable connection revision
+         *     (`POST /api/v2/admin/connections/{id}/revisions`). The connection is the
+         *     one the path names.
+         */
+        CreateConnectionRevisionRequest: {
+            /**
+             * @description Over a provider that declares dependencies (a `workflow` provider
+             *     package, or a composed `rust` provider whose `describe()` declares
+             *     them): which connection each dependency alias calls
+             *     (`alias -> connection_id`). Every required alias must be bound, and
+             *     each target must be a stored connection over a provider that declares
+             *     no dependencies of its own; a deployment member for this connection
+             *     must require each bound connection. Absent means none, as it must be
+             *     for any other provider.
+             */
+            bindings?: {
+                [key: string]: string;
+            };
+            provider_digest: string;
+            /**
+             * @description The connection's settings. Never a secret: a credential-shaped key or
+             *     value is refused.
+             */
+            public_config: unknown;
+            /**
+             * Format: int64
+             * @description The revision to create: one past the highest stored, for a change.
+             *     Creating a revision that is stored with the same content answers it
+             *     again; with different content, `IMMUTABLE_CONNECTION_CONFLICT`.
+             */
+            revision: number;
+            /**
+             * @description Where each credential comes from: a config path (`connection_string`,
+             *     `auth.token`, `auth.client_secret`, …) to a secret reference such as
+             *     `env://ORDERS_DB_URL`. Placed at that path when the connection is
+             *     used. Absent means none.
+             */
+            secret_locators?: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * @description A created (or, for identical content, the stored) connection revision
+         *     (`POST /api/v2/admin/connections/{id}/revisions`, `201`).
+         */
+        CreateConnectionRevisionResponse: {
+            connection: components["schemas"]["ConnectionRevisionResponse"];
+        };
+        /** @description Request body for planning a candidate deployment (`POST /api/v2/admin/deployment-plans`). */
+        CreateDeploymentPlanRequest: {
+            /**
+             * Format: int64
+             * @description The head the candidate is planned on: `0` before the first apply.
+             */
+            base_revision: number;
+            manifest: components["schemas"]["DeploymentManifest"];
+        };
+        /**
+         * @description Request body for `POST /api/v2/admin/deployments`: commit the next
+         *     revision on top of `base_revision`, under compare-and-swap and an
+         *     idempotency key. Either a reviewed manifest (an apply) or an earlier
+         *     revision to deploy again (a rollback, `rollback_to`).
+         */
+        CreateDeploymentRequest: components["schemas"]["ApplyDeploymentRequest"] | components["schemas"]["RollbackDeploymentRequest"];
+        /**
+         * @description A committed apply or rollback (`POST /api/v2/admin/deployments`, `202`):
+         *     the revision is committed, and nodes converge on it.
+         */
+        CreateDeploymentResponse: {
+            /** Format: int64 */
+            committed_revision: number;
+            /**
+             * @description This node's convergence on the committed revision, after it tried to
+             *     build it.
+             */
+            evaluation: components["schemas"]["ConvergenceStatusResponse"];
+            /**
+             * @description Why this node could not build the committed revision, when it could
+             *     not. The revision stays committed; the node keeps serving what it had.
+             */
+            local_error?: string | null;
+            receipt: components["schemas"]["DeploymentReceiptResponse"];
+            /**
+             * @description What committing this revision does not do — a rollback does not
+             *     reverse an external effect already made. Empty for an apply.
+             */
+            warnings: string[];
+        };
+        /**
+         * @description One occurrence in full: `GET /api/v2/admin/cron/occurrences/{id}`.
          *
          *     Adds what the summary leaves out — the failure reason, the trace to read the
          *     run in, and the lease bookkeeping that answers "which node has it, and until
@@ -1608,7 +1343,7 @@ export interface components {
             status: string;
             /**
              * @description The trace this attempt wrote, readable at
-             *     `GET /api/v1/admin/traces/{id}`. `null` before admission, and when trace
+             *     `GET /api/v2/admin/traces/{id}`. `null` before admission, and when trace
              *     storage dropped the row — the occurrence is kept either way, because it
              *     is scheduling correctness state rather than optional observability.
              */
@@ -1618,7 +1353,7 @@ export interface components {
             workflow_id?: string | null;
         };
         /**
-         * @description One row of `GET /api/v1/admin/cron/occurrences`.
+         * @description One row of `GET /api/v2/admin/cron/occurrences`.
          *
          *     The list projection: what happened and when, without the diagnostic detail.
          *     Narrower than [`CronOccurrenceResponse`] for readability rather than for
@@ -1654,7 +1389,7 @@ export interface components {
         };
         /**
          * @description One channel's schedule as the runtime sees it right now:
-         *     `GET /api/v1/admin/cron/status`.
+         *     `GET /api/v2/admin/cron/status`.
          *
          *     Deliberately a separate response rather than fields on the channel. The
          *     channel row is an immutable authored definition; where its cursor has got to
@@ -1716,17 +1451,11 @@ export interface components {
             slots_held?: number | null;
             timezone: string;
         };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_BackupFile: {
-            /** @description The backup `POST /api/v1/admin/backups` just wrote. */
+        /** @description `{"data": T}` — the envelope an operational admin 2xx carries. */
+        Data_BackupFileResponse: {
+            /** @description The backup `POST /api/v2/admin/backups` just wrote. */
             data: {
+                /** @description RFC 3339, UTC. */
                 created_at: string;
                 filename: string;
                 /** @description Absolute path on the node that served the request. */
@@ -1735,114 +1464,39 @@ export interface components {
                 size_bytes: number;
             };
         };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_CacheInvalidatedResponse: {
-            /** @description `POST /api/v1/admin/cache/namespaces/{namespace}/invalidate`. */
+        /** @description `{"data": T}` — the envelope an operational admin 2xx carries. */
+        Data_CacheInvalidatedResponse: {
+            /** @description `POST /api/v2/admin/cache/namespaces/{namespace}/invalidate`. */
             data: {
                 /** @description The namespace whose version was bumped. */
                 namespace: string;
                 /**
                  * Format: int64
-                 * @description How many response-cache stores the bump reached: the default store,
-                 *     each in-memory store on the node that answered, and each Redis cache
-                 *     connector. A shared Redis carries the bump to every node.
+                 * @description How many response-cache stores the bump reached: the default store
+                 *     and each in-memory store on the node that answered. In a cluster the
+                 *     default store is the cluster store, which carries the bump to every
+                 *     node.
                  */
                 stores: number;
             };
         };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_ChannelResponse: {
-            /**
-             * @description API-friendly representation of a Channel with parsed JSON fields.
-             *
-             *     This — not the server's `Channel` row struct — is what every channel
-             *     endpoint returns.
-             */
-            data: {
-                channel_id: string;
-                channel_type: string;
-                /**
-                 * @description Channel config with `auth.keys` / `auth.secret` values masked (H3) —
-                 *     the server's conversion is the only constructor of this shape, so
-                 *     masking is a step no handler can skip.
-                 */
-                config: unknown;
-                consumer_group?: string | null;
-                /**
-                 * @description `sha256:…` over the canonical importable content (K10). Computed on
-                 *     the stored (unmasked) config: entities authored with `env://`
-                 *     references hash identically to their exported artifact; entities
-                 *     holding literal secrets hash over what they store, which a masked
-                 *     export can never reproduce.
-                 */
-                content_hash: string;
-                created_at: string;
-                description?: string | null;
-                methods?: unknown;
-                name: string;
-                /** Format: int64 */
-                priority: number;
-                protocol: string;
-                route_pattern?: string | null;
-                status: string;
-                /**
-                 * @description Wire name `tags`, stored column `tags_json` (K6) — the same contract
-                 *     workflows have carried since 0.x.
-                 */
-                tags: unknown;
-                topic?: string | null;
-                transport_config: unknown;
-                updated_at: string;
-                /** Format: int64 */
-                version: number;
-                workflow_id?: string | null;
-            };
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_CircuitBreakerReset: {
-            /** @description `POST /api/v1/admin/connectors/circuit-breakers/{key}`. */
+        /** @description `{"data": T}` — the envelope an operational admin 2xx carries. */
+        Data_CircuitBreakerResetResponse: {
+            /** @description A reset breaker (`POST /api/v2/admin/connectors/circuit-breakers/{key}`). */
             data: {
                 /**
                  * @description Whether the breaker existed on the node that served the request.
-                 *     Breakers are node-local; in cluster mode the reset is broadcast over
-                 *     the epoch bus regardless, so `false` here is not a failure (F21).
+                 *     Breakers are node-local; in cluster mode the reset reaches every node
+                 *     regardless, so `false` here is not a failure.
                  */
                 found_on_this_node: boolean;
                 key: string;
                 reset: boolean;
             };
         };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_CircuitBreakerStates: {
-            /** @description `GET /api/v1/admin/connectors/circuit-breakers`. */
+        /** @description `{"data": T}` — the envelope an operational admin 2xx carries. */
+        Data_CircuitBreakerStatesResponse: {
+            /** @description This node's circuit breakers (`GET /api/v2/admin/connectors/circuit-breakers`). */
             data: {
                 /** @description `channel:connector` → `closed` | `open` | `half_open`. Node-local. */
                 breakers: {
@@ -1855,73 +1509,14 @@ export interface components {
                 enabled: boolean;
                 /** @description Which node's map this is. */
                 instance_id: string;
-                /** @description Always `"node"` — breaker state is per-replica, never cluster-wide (F21). */
+                /** @description Always `"node"` — breaker state is per-replica, never cluster-wide. */
                 scope: string;
             };
         };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_ConnectorResponse: {
+        /** @description `{"data": T}` — the envelope an operational admin 2xx carries. */
+        Data_CronOccurrenceResponse: {
             /**
-             * @description A connector as the admin API shows it.
-             *
-             *     `config_json` stays a string — it is the stored document verbatim — but
-             *     with every secret replaced by `******`: the server's `mask_connector` is
-             *     the only supported way to build one, and the unmasked row struct cannot be
-             *     serialized (D27), so a handler that forgets to mask does not compile.
-             */
-            data: {
-                /**
-                 * @description The same masked config, parsed — the shape `POST`/`PUT` accept, so a
-                 *     read response can be edited and written straight back.
-                 *
-                 *     `null` only when the stored document does not parse, which is the same
-                 *     condition that empties `content_hash`.
-                 */
-                config: unknown;
-                /**
-                 * @description Connector config with every secret replaced by `******`, as the stored
-                 *     document verbatim.
-                 *
-                 *     Kept for the life of the 1.x line, but `config` is the field to read:
-                 *     both `POST` and `PUT` take the config as an *object*, so a client that
-                 *     reads this one has to `JSON.parse` it before it can write it back.
-                 */
-                config_json: string;
-                connector_type: string;
-                /**
-                 * @description `sha256:…` over the canonical importable content (K10), computed on
-                 *     the stored (unmasked) config — see the note on
-                 *     [`ChannelResponse::content_hash`]. Empty for a row whose stored JSON
-                 *     no longer parses: corrupt content equals nothing.
-                 */
-                content_hash: string;
-                created_at: string;
-                enabled: boolean;
-                id: string;
-                name: string;
-                /** @description Wire name `tags`, stored column `tags_json` (K6). */
-                tags: unknown;
-                updated_at: string;
-            };
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_CronOccurrenceResponse: {
-            /**
-             * @description One occurrence in full: `GET /api/v1/admin/cron/occurrences/{id}`.
+             * @description One occurrence in full: `GET /api/v2/admin/cron/occurrences/{id}`.
              *
              *     Adds what the summary leaves out — the failure reason, the trace to read the
              *     run in, and the lease bookkeeping that answers "which node has it, and until
@@ -1979,7 +1574,7 @@ export interface components {
                 status: string;
                 /**
                  * @description The trace this attempt wrote, readable at
-                 *     `GET /api/v1/admin/traces/{id}`. `null` before admission, and when trace
+                 *     `GET /api/v2/admin/traces/{id}`. `null` before admission, and when trace
                  *     storage dropped the row — the occurrence is kept either way, because it
                  *     is scheduling correctness state rather than optional observability.
                  */
@@ -1989,16 +1584,9 @@ export interface components {
                 workflow_id?: string | null;
             };
         };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_DlqPurgeResult: {
-            /** @description `POST /api/v1/admin/trace-dlq/purge`. */
+        /** @description `{"data": T}` — the envelope an operational admin 2xx carries. */
+        Data_DlqPurgeResponse: {
+            /** @description What a DLQ purge deleted (`POST /api/v2/admin/trace-dlq/purge`). */
             data: {
                 /**
                  * Format: int64
@@ -2012,39 +1600,9 @@ export interface components {
                 purged: number;
             };
         };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_EngineReloadedResponse: {
-            /** @description `POST /api/v1/admin/engine/reload`. */
-            data: {
-                /**
-                 * Format: int64
-                 * @description The id of the generation this reload published. `0` from a server
-                 *     that predates it.
-                 */
-                generation: number;
-                load_issues?: components["schemas"]["EngineLoadIssues"] | null;
-                reloaded: boolean;
-                /** Format: int64 */
-                workflows_count: number;
-            };
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_EngineStatusResponse: {
-            /** @description `GET /api/v1/admin/engine/status`. */
+        /** @description `{"data": T}` — the envelope an operational admin 2xx carries. */
+        Data_EngineStatusResponse: {
+            /** @description `GET /api/v2/admin/engine/status`. */
             data: {
                 /** Format: int64 */
                 active_workflows: number;
@@ -2064,287 +1622,22 @@ export interface components {
                 workflows_count: number;
             };
         };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_ImportResult: {
-            /**
-             * @description Result of a bulk import, in both dry-run and real modes (R18, K2) — the
-             *     body under `{"data": …}` that all three `/import` endpoints answer with.
-             */
-            data: {
-                /** @description `true` when the request carried `?dry_run=true`; nothing was written. */
-                dry_run: boolean;
-                /** @description One entry per failed item, carrying its index in the request array. */
-                errors: components["schemas"]["ImportItemError"][];
-                /**
-                 * Format: int64
-                 * @description Items rejected. Non-zero with a **200** status: check this field, not
-                 *     the status code.
-                 */
-                failed: number;
-                /**
-                 * Format: int64
-                 * @description Items written — created, updated, or given a new version. In a dry
-                 *     run, the count that would be written.
-                 */
-                imported: number;
-                /** @description One `{index, id, action}` entry per non-failed item (K2). */
-                results: components["schemas"]["ImportItemResult"][];
-                /**
-                 * Format: int64
-                 * @description Items skipped under `on_conflict=skip` (K2).
-                 */
-                skipped: number;
-                /**
-                 * Format: int64
-                 * @description Content-identical items under `on_conflict=new_version` (K2): nothing
-                 *     written, not counted in `imported`. Re-importing the same artifact
-                 *     therefore reports 0 imports and N unchanged.
-                 */
-                unchanged: number;
-            };
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_ModelDependencies: {
-            /** @description What depends on a model: the active workflows naming it. */
-            data: {
-                /**
-                 * @description Always `true`: a task whose `input.model` is an expression resolves
-                 *     its model per message, so a reference of that kind is not listed and
-                 *     not gated on.
-                 */
-                dynamic_references_unlisted: boolean;
-                model_id: string;
-                /** Format: int64 */
-                version: number;
-                /**
-                 * @description Active workflows with a `model_infer` task whose `input.model` is
-                 *     this id as a literal — the ones an archive or delete is refused for.
-                 */
-                workflows: components["schemas"]["ModelDependant"][];
-            };
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_ModelResponse: {
-            /**
-             * @description One version of a model, as every model endpoint returns it.
-             *
-             *     `manifest` is the validated manifest as JSON — what was registered, with
-             *     nothing the server inferred added to it. `inputs` and `outputs` are the
-             *     tensor names it declares, repeated at the top level so a client need not
-             *     walk the manifest to learn the model's signature. `artifact` is where the
-             *     bytes are; `admission` and `stats` are what a node found when it fetched
-             *     them — `stats` is `null` until admission passes. `health` is present only
-             *     on the single-entity read, and only when the serving node has an opinion:
-             *     it says whether *this node* has the version resident.
-             */
-            data: {
-                /** @description The manifest ABI the model was registered against. */
-                abi: string;
-                admission: components["schemas"]["ModelAdmission"];
-                artifact: components["schemas"]["ModelArtifactRef"];
-                /**
-                 * @description `sha256:…` over the importable content (manifest, artifact reference
-                 *     without its size, tags) — the same projection the upsert import
-                 *     compares. The signature, the admission verdict and the stats are not
-                 *     in it: see `content::model_content`.
-                 */
-                content_hash: string;
-                created_at: string;
-                /**
-                 * @description `sha256:…` of the artifact bytes, as claimed at registration — the
-                 *     identity a generation, a trace and a package all name the model by.
-                 */
-                digest: string;
-                /** @description The artifact format the manifest declares (`onnx`). */
-                format: string;
-                health?: components["schemas"]["ModelHealth"] | null;
-                /** @description The input tensor names, in the manifest's order. */
-                inputs: string[];
-                manifest: unknown;
-                model_id: string;
-                /** @description The author's own version string from the manifest, informational. */
-                model_version: string;
-                /** @description The output tensor names, in the manifest's order. */
-                outputs: string[];
-                /**
-                 * @description The detached Ed25519 signature over `digest` the registration carried,
-                 *     base64, when there was one. Not part of the content hash: the digest
-                 *     is the identity, and the signature only attests to it.
-                 */
-                signature?: string | null;
-                stats?: components["schemas"]["ModelStats"] | null;
-                status: string;
-                tags: unknown;
-                updated_at: string;
-                /** Format: int64 */
-                version: number;
-            };
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_PackageDetail: {
-            /** @description `GET /api/v1/admin/packages/{name}` — one package's receipts. */
-            data: {
-                current?: components["schemas"]["PackageReceiptResponse"] | null;
-                name: string;
-                /** @description Every receipt for this package, newest first. */
-                versions: components["schemas"]["PackageReceiptResponse"][];
-            };
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_PackageReceiptResponse: {
-            /** @description A package receipt as the admin API shows it (K14). */
-            data: {
-                /**
-                 * @description Canonical content hash of the artifact this receipt records, e.g.
-                 *     `sha256:…`. Opaque to the server — compared for equality, never parsed.
-                 */
-                content_hash: string;
-                created_at: string;
-                inventory?: components["schemas"]["PackageInventory"] | null;
-                name: string;
-                /** @description Who recorded this receipt (admin key id, or `anonymous`). */
-                principal: string;
-                /**
-                 * @description `staged` or `applied`.
-                 * @example applied
-                 */
-                state: string;
-                updated_at: string;
-                version: string;
-            };
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_PluginDependencies: {
-            /** @description What depends on a plugin: the active workflows calling its functions. */
-            data: {
-                functions: string[];
-                plugin_id: string;
-                /** Format: int64 */
-                version: number;
-                /**
-                 * @description Active workflows whose tasks call any of `functions` — the ones an
-                 *     archive or delete is refused for.
-                 */
-                workflows: string[];
-            };
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_PluginResponse: {
-            /**
-             * @description One version of a plugin, as every plugin endpoint returns it.
-             *
-             *     `manifest` is the validated manifest as JSON — what was uploaded, with
-             *     nothing the server inferred added to it. `functions` is the list of
-             *     names it declares, repeated at the top level so a client need not walk
-             *     the manifest to learn what the plugin adds to the vocabulary. `health` is
-             *     present only on the single-entity read, and only when the serving node
-             *     has an opinion: it says whether *this node* loaded the digest.
-             */
-            data: {
-                /** @description The WIT package version the component was built against. */
-                abi: string;
-                /**
-                 * @description `sha256:…` over the importable content (manifest, digest, tags) — the
-                 *     same projection the upsert import compares.
-                 */
-                content_hash: string;
-                created_at: string;
-                /**
-                 * @description `sha256:…` of the component bytes — the identity a generation, a
-                 *     trace, a package and the catalogue all name the artifact by.
-                 */
-                digest: string;
-                functions: string[];
-                health?: components["schemas"]["PluginHealth"] | null;
-                manifest: unknown;
-                plugin_id: string;
-                /** @description The author's own version string from the manifest, informational. */
-                plugin_version: string;
-                /**
-                 * @description The detached Ed25519 signature over `digest` the upload carried, base64,
-                 *     when there was one. Not part of the content hash: the digest is the
-                 *     identity, and the signature only attests to it.
-                 */
-                signature?: string | null;
-                status: string;
-                tags: unknown;
-                updated_at: string;
-                /** Format: int64 */
-                version: number;
-            };
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_TraceDetail: {
-            /** @description `GET /api/v1/admin/traces/{id}` — the list row plus the payloads. */
+        /** @description `{"data": T}` — the envelope an operational admin 2xx carries. */
+        Data_TraceDetailResponse: {
+            /** @description `GET /api/v2/admin/traces/{id}` — the list row plus the payloads. */
             data: {
                 channel: string;
                 channel_id?: string | null;
                 completed_at?: string | null;
                 created_at: string;
-                /** Format: int64 */
+                /** Format: double */
                 duration_ms?: number | null;
                 /** @description Present only when `status = "failed"`. */
                 error?: string | null;
                 id: string;
                 /**
                  * @description The full engine message. Present only when `status = "completed"`.
-                 *     `context.metadata` is stripped from the projection (S14).
+                 *     `context.metadata` is stripped from the projection.
                  */
                 message?: unknown;
                 mode: string;
@@ -2354,15 +1647,8 @@ export interface components {
                 task_trace_json?: unknown;
             };
         };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_TraceDlqEntryResponse: {
+        /** @description `{"data": T}` — the envelope an operational admin 2xx carries. */
+        Data_TraceDlqEntryResponse: {
             /** @description One DLQ entry with its failed payload — `GET`/`requeue` on a single id. */
             data: {
                 channel: string;
@@ -2371,117 +1657,64 @@ export interface components {
                 id: string;
                 /** Format: int64 */
                 max_retries: number;
-                metadata_json: string;
+                /** @description The submission's metadata, as a JSON document. */
+                metadata: Record<string, never>;
                 next_retry_at: string;
-                payload_json: string;
+                /** @description The failed message, as the JSON document it was. */
+                payload: Record<string, never>;
                 /** Format: int64 */
                 retry_count: number;
                 trace_id: string;
                 updated_at: string;
             };
         };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_Vec_BackupListItem: {
+        /** @description `{"data": T}` — the envelope an operational admin 2xx carries. */
+        Data_Vec_BackupListItemResponse: {
             data: {
+                /**
+                 * @description RFC 3339, UTC: when the file was last written, which for a backup is when
+                 *     it was made.
+                 */
+                created_at: string;
                 filename: string;
-                modified_at: string;
                 /** Format: int64 */
                 size_bytes: number;
             }[];
         };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_Vec_ChannelResponse: {
+        /** @description `{"data": T}` — the envelope an operational admin 2xx carries. */
+        Data_Vec_CatalogueEntry: {
             data: {
-                channel_id: string;
-                channel_type: string;
+                /** @description `connector`, `control`, `data`, `compute`, or `utility`. */
+                category: string;
+                description: string;
                 /**
-                 * @description Channel config with `auth.keys` / `auth.secret` values masked (H3) —
-                 *     the server's conversion is the only constructor of this shape, so
-                 *     masking is a step no handler can skip.
+                 * @description **Absent**, not null, when the function declares no input schema —
+                 *     which is the honest JSON encoding of "there is nothing here", and what
+                 *     a consumer branches on.
                  */
-                config: unknown;
-                consumer_group?: string | null;
-                /**
-                 * @description `sha256:…` over the canonical importable content (K10). Computed on
-                 *     the stored (unmasked) config: entities authored with `env://`
-                 *     references hash identically to their exported artifact; entities
-                 *     holding literal secrets hash over what they store, which a masked
-                 *     export can never reproduce.
-                 */
-                content_hash: string;
-                created_at: string;
-                description?: string | null;
-                methods?: unknown;
+                input_fields?: Record<string, never>[] | null;
                 name: string;
-                /** Format: int64 */
-                priority: number;
-                protocol: string;
-                route_pattern?: string | null;
-                status: string;
+                /** @description Present only on a `source: "plugin"` entry. */
+                plugin?: Record<string, never> | null;
                 /**
-                 * @description Wire name `tags`, stored column `tags_json` (K6) — the same contract
-                 *     workflows have carried since 0.x.
+                 * @description What a second run of this function does — see [`RetrySafety`]. Served
+                 *     for every entry, built-ins included: "is it safe to retry this task?"
+                 *     is a question about every function a workflow can name, not only the
+                 *     ones Orion declares an input schema for. `{"kind": …}`: `pure`,
+                 *     `read`, `idempotent_write`, `unsafe_write`, or `depends_on` with the
+                 *     `input` that decides it.
                  */
-                tags: unknown;
-                topic?: string | null;
-                transport_config: unknown;
-                updated_at: string;
-                /** Format: int64 */
-                version: number;
-                workflow_id?: string | null;
+                retry_safety: Record<string, never>;
+                /**
+                 * @description `orion` for a handler Orion implements and input-schema validates,
+                 *     `engine` for a dataflow-rs built-in the engine executes itself,
+                 *     `plugin` for a WebAssembly plugin's function.
+                 */
+                source: string;
             }[];
         };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_Vec_ConnectorExportItem: {
-            data: {
-                /**
-                 * @description The parsed connector config, with every secret replaced by `******`.
-                 *     `env://`-style references survive the masking as references.
-                 */
-                config: unknown;
-                connector_type: string;
-                /**
-                 * @description `sha256:…` over the canonical importable content (K10), computed on the
-                 *     stored (unmasked) config. Ignored by `/import`, like the other extras.
-                 */
-                content_hash: string;
-                enabled: boolean;
-                id: string;
-                name: string;
-                /** @description Selection labels (K6); filter the export with `?tag=`. */
-                tags: unknown;
-            }[];
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_Vec_CronScheduleStatusResponse: {
+        /** @description `{"data": T}` — the envelope an operational admin 2xx carries. */
+        Data_Vec_CronScheduleStatusResponse: {
             data: {
                 channel_id: string;
                 channel_name: string;
@@ -2539,302 +1772,197 @@ export interface components {
             }[];
         };
         /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
+         * @description One deployable definition, as `POST /api/v2/admin/definitions` takes it
+         *     and the artifact store holds it: its kind and the document of that kind.
+         *     The artifact's digest covers the whole value, so a manifest member's kind
+         *     is bound to the definition it names. Identity is not part of it: a
+         *     member's `id` and `revision` say which entity this definition is.
          */
-        DataEnvelope_Vec_FunctionSchemaItem: {
-            data: {
-                /**
-                 * @description Other accepted spellings — `validation` carries `validate`. Omitted
-                 *     when there are none.
-                 */
-                aliases?: string[];
-                /** @description `connector`, `control`, `data`, `compute`, or `utility`. */
-                category: string;
-                description: string;
-                /**
-                 * @description **Absent** for an engine built-in, which declares no input schema and
-                 *     is therefore not input-validated at create time.
-                 */
-                input_fields?: unknown[] | null;
-                name: string;
-                /**
-                 * @description What a second run of this function does, as
-                 *     `{"kind": "..."}` — `pure`, `read`, `idempotent_write`, `unsafe_write`,
-                 *     or `depends_on` with the `input` that decides it (`http_call` on its
-                 *     `method`, `data_write` on its `op`).
-                 *
-                 *     A different question from whether an *error* was transient: this is
-                 *     what a retry costs when it is. Orion retries tasks in several places —
-                 *     the trace DLQ, a Kafka redelivery, `http_call`'s transport retry — and
-                 *     this is how an author or a tool knows which of those are safe over a
-                 *     given function.
-                 */
-                retry_safety: unknown;
-                /**
-                 * @description `orion` for a handler Orion implements and input-schema validates,
-                 *     `engine` for a dataflow-rs built-in the engine executes itself.
-                 */
-                source: string;
-            }[];
+        Definition: {
+            definition: components["schemas"]["WorkflowDefinition"];
+            /** @enum {string} */
+            kind: "workflow";
+        } | {
+            definition: components["schemas"]["ChannelDefinition"];
+            /** @enum {string} */
+            kind: "channel";
+        } | {
+            definition: components["schemas"]["PluginDefinition"];
+            /** @enum {string} */
+            kind: "plugin";
         };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_Vec_ModelResponse: {
-            data: {
-                /** @description The manifest ABI the model was registered against. */
-                abi: string;
-                admission: components["schemas"]["ModelAdmission"];
-                artifact: components["schemas"]["ModelArtifactRef"];
-                /**
-                 * @description `sha256:…` over the importable content (manifest, artifact reference
-                 *     without its size, tags) — the same projection the upsert import
-                 *     compares. The signature, the admission verdict and the stats are not
-                 *     in it: see `content::model_content`.
-                 */
-                content_hash: string;
-                created_at: string;
-                /**
-                 * @description `sha256:…` of the artifact bytes, as claimed at registration — the
-                 *     identity a generation, a trace and a package all name the model by.
-                 */
-                digest: string;
-                /** @description The artifact format the manifest declares (`onnx`). */
-                format: string;
-                health?: components["schemas"]["ModelHealth"] | null;
-                /** @description The input tensor names, in the manifest's order. */
-                inputs: string[];
-                manifest: unknown;
-                model_id: string;
-                /** @description The author's own version string from the manifest, informational. */
-                model_version: string;
-                /** @description The output tensor names, in the manifest's order. */
-                outputs: string[];
-                /**
-                 * @description The detached Ed25519 signature over `digest` the registration carried,
-                 *     base64, when there was one. Not part of the content hash: the digest
-                 *     is the identity, and the signature only attests to it.
-                 */
-                signature?: string | null;
-                stats?: components["schemas"]["ModelStats"] | null;
-                status: string;
-                tags: unknown;
-                updated_at: string;
-                /** Format: int64 */
-                version: number;
-            }[];
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_Vec_PluginResponse: {
-            data: {
-                /** @description The WIT package version the component was built against. */
-                abi: string;
-                /**
-                 * @description `sha256:…` over the importable content (manifest, digest, tags) — the
-                 *     same projection the upsert import compares.
-                 */
-                content_hash: string;
-                created_at: string;
-                /**
-                 * @description `sha256:…` of the component bytes — the identity a generation, a
-                 *     trace, a package and the catalogue all name the artifact by.
-                 */
-                digest: string;
-                functions: string[];
-                health?: components["schemas"]["PluginHealth"] | null;
-                manifest: unknown;
-                plugin_id: string;
-                /** @description The author's own version string from the manifest, informational. */
-                plugin_version: string;
-                /**
-                 * @description The detached Ed25519 signature over `digest` the upload carried, base64,
-                 *     when there was one. Not part of the content hash: the digest is the
-                 *     identity, and the signature only attests to it.
-                 */
-                signature?: string | null;
-                status: string;
-                tags: unknown;
-                updated_at: string;
-                /** Format: int64 */
-                version: number;
-            }[];
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_Vec_WorkflowResponse: {
-            data: {
-                condition: unknown;
-                /**
-                 * @description `sha256:…` over the canonical importable content (K10) — the same
-                 *     projection the upsert import compares and the package CLI hashes, so
-                 *     equal hashes mean "importing one over the other is a no-op".
-                 */
-                content_hash: string;
-                continue_on_error: boolean;
-                created_at: string;
-                description?: string | null;
-                /**
-                 * @description The engine-managed loop over `tasks`, or absent for a workflow that
-                 *     runs its task list exactly once. Skipped on serialize rather than sent
-                 *     as `null`, so a response from a server that has the feature and one
-                 *     from a server that does not are byte-identical for the common case.
-                 */
-                loop?: unknown;
-                name: string;
-                /** Format: int64 */
-                priority: number;
-                /** Format: int64 */
-                rollout_percentage: number;
-                status: string;
-                tags: unknown;
-                tasks: unknown;
-                updated_at: string;
-                /** Format: int64 */
-                version: number;
-                workflow_id: string;
-            }[];
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_WorkflowDependencies: {
-            /** @description `GET /api/v1/admin/workflows/{id}/dependencies` (K9). */
-            data: {
-                /** @description Channel names targeted by `channel_call` tasks, statically. */
-                channels: string[];
-                /**
-                 * @description Connector names the tasks reference, with the referencing function —
-                 *     duplicates collapsed, task order kept.
-                 */
-                connectors: components["schemas"]["ConnectorDependency"][];
-                /**
-                 * @description True when a `channel_call` resolves its target with `channel_logic`
-                 *     at runtime — the static `channels` list is then incomplete by
-                 *     construction, and closure tooling must treat this workflow as having
-                 *     unknowable channel dependencies.
-                 */
-                has_dynamic_channel_calls: boolean;
-                /**
-                 * @description The plugins whose functions the tasks name, resolved against this
-                 *     node's generation: the active version and digest each function
-                 *     currently comes from. A function this generation does not dispatch
-                 *     appears under `unresolved_functions` instead — a plugin archived since
-                 *     the workflow was written, or one this node could not load.
-                 */
-                plugins?: components["schemas"]["PluginDependency"][];
-                /**
-                 * @description Function names the tasks call that this generation's registry does
-                 *     not know. Empty for a workflow that would activate here.
-                 */
-                unresolved_functions?: string[];
-                /**
-                 * Format: int64
-                 * @description The version whose tasks were walked (the latest).
-                 */
-                version: number;
-                workflow_id: string;
-            };
-        };
-        /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
-         */
-        DataEnvelope_WorkflowResponse: {
+        /** @description One advisory on an uploaded definition ([`DefinitionResponse::advisories`]). */
+        DefinitionAdvisory: {
             /**
-             * @description API-friendly representation of a Workflow with parsed JSON fields.
-             *
-             *     This — not the server's `Workflow` row struct — is what every workflow
-             *     endpoint returns.
+             * @description A stable id for the kind of finding (`engine.unguarded_validation`,
+             *     `logic.escaped_template_key`, `engine.advisory`). A later version
+             *     may add ids, so this is an identifier, not an enum.
              */
-            data: {
-                condition: unknown;
-                /**
-                 * @description `sha256:…` over the canonical importable content (K10) — the same
-                 *     projection the upsert import compares and the package CLI hashes, so
-                 *     equal hashes mean "importing one over the other is a no-op".
-                 */
-                content_hash: string;
-                continue_on_error: boolean;
-                created_at: string;
-                description?: string | null;
-                /**
-                 * @description The engine-managed loop over `tasks`, or absent for a workflow that
-                 *     runs its task list exactly once. Skipped on serialize rather than sent
-                 *     as `null`, so a response from a server that has the feature and one
-                 *     from a server that does not are byte-identical for the common case.
-                 */
-                loop?: unknown;
-                name: string;
-                /** Format: int64 */
-                priority: number;
-                /** Format: int64 */
-                rollout_percentage: number;
-                status: string;
-                tags: unknown;
-                tasks: unknown;
-                updated_at: string;
-                /** Format: int64 */
-                version: number;
-                workflow_id: string;
-            };
+            check: string;
+            message: string;
+            /** @description Where in the definition it was found, as the engine names it. */
+            path: string;
+        };
+        /** @description A stored definition (`POST`/`GET /api/v2/admin/definitions`). */
+        DefinitionResponse: {
+            /**
+             * @description What the engine reports about a workflow and does not refuse — a
+             *     `$`-prefixed key it emits with one `$` stripped, a `validation` whose
+             *     failure stops nothing. Informational: the definition was stored.
+             *     Empty for a channel or a plugin.
+             */
+            advisories: components["schemas"]["DefinitionAdvisory"][];
+            /**
+             * @description `sha256:…` of the canonical definition: what a manifest member's
+             *     `definition_digest` names.
+             */
+            digest: string;
+            kind: components["schemas"]["EntityKind"];
+            /** Format: int64 */
+            size_bytes: number;
+        };
+        /** @description A member the base deploys at one revision and the candidate at another. */
+        DeploymentEntityUpdate: {
+            /** Format: int64 */
+            from_revision: number;
+            id: string;
+            kind: components["schemas"]["EntityKind"];
+            /** Format: int64 */
+            to_revision: number;
+        };
+        /** @description The committed deployment head. */
+        DeploymentHead: {
+            /** Format: int64 */
+            epoch: number;
+            /**
+             * Format: int64
+             * @description `0` before the first apply.
+             */
+            revision: number;
         };
         /**
-         * @description The `{"data": …}` envelope every admin 2xx carries (R17).
-         *
-         *     Generic so each resource gets a described response without a hand-written
-         *     wrapper struct per endpoint. utoipa inlines the type parameter, so
-         *     `DataEnvelope<WorkflowResponse>` publishes the full shape. Before R22, 44
-         *     of the 48 2xx responses had no `content` block at all.
+         * @description A deployment manifest: the providers a deployment pins and the members
+         *     it deploys (`POST /deployment-plans`, `POST /deployments`, and read back
+         *     by `GET /deployments/{revision}`).
          */
-        DataEnvelope_WorkflowTestResult: {
-            /** @description `POST /api/v1/admin/workflows/{id}/test` — a dry run against sample input. */
-            data: {
-                errors: unknown[];
-                /** @description Whether the workflow's condition matched the supplied input. */
-                matched: boolean;
-                /** @description The message data after the pipeline ran. */
-                output: unknown;
-                /**
-                 * @description Per-step execution trace: `task_id` and `result`
-                 *     (`executed` | `skipped` | `failed`) for each step.
-                 */
-                trace: unknown;
-            };
+        DeploymentManifest: {
+            members: components["schemas"]["ManifestMember"][];
+            /**
+             * @description The digest of the provider lock the providers were resolved under,
+             *     when they were.
+             */
+            provider_lock_digest?: string | null;
+            /**
+             * @description The uploaded provider packages the members run on. A connection over
+             *     a built-in driver needs no entry.
+             */
+            providers: components["schemas"]["ManifestProvider"][];
+            /**
+             * Format: int64
+             * @description Always [`DEPLOYMENT_MANIFEST_SCHEMA_VERSION`]; anything else is
+             *     `MANIFEST_VERSION_UNSUPPORTED`.
+             */
+            schema_version: number;
         };
-        /** @description `POST /api/v1/admin/trace-dlq/purge`. */
-        DlqPurgeResult: {
+        /**
+         * @description A candidate deployment, checked against its base
+         *     (`POST /api/v2/admin/deployment-plans`). Nothing is stored: the plan is a
+         *     function of the request and the store, and `reviewed_manifest_digest` is
+         *     what an apply must name to commit exactly this candidate.
+         */
+        DeploymentPlanResponse: {
+            /** @description Members the base does not deploy at all. */
+            added_entities: components["schemas"]["EntityRef"][];
+            /** Format: int64 */
+            base_revision: number;
+            /** @description Members the base deploys and the candidate drops: they stop serving. */
+            removed_entities: components["schemas"]["EntityRef"][];
+            /**
+             * @description The candidate's canonical manifest digest. An apply names it as its
+             *     `reviewed_manifest_digest`.
+             */
+            reviewed_manifest_digest: string;
+            /** @description Members the base deploys at another revision. */
+            updated_entities: components["schemas"]["DeploymentEntityUpdate"][];
+        };
+        /**
+         * @description The durable receipt of a committed apply or rollback. A replay of the
+         *     same idempotency key answers the receipt the first request committed.
+         */
+        DeploymentReceiptResponse: {
+            /** Format: int64 */
+            committed_revision: number;
+            /** @description RFC 3339 in UTC (`Z`), on the database clock. */
+            created_at: string;
+            /** Format: int64 */
+            epoch: number;
+            idempotency_key: string;
+            manifest_digest: string;
+            operation_id: string;
+            /** @description The admin key id that committed it, or `anonymous`. */
+            principal: string;
+            /** @description The node that took the write: what `?target=this-node` waits on. */
+            receiving_node_id: string;
+            request_hash: string;
+        };
+        /**
+         * @description A committed deployment revision with its manifest
+         *     (`GET /api/v2/admin/deployments/{revision}`).
+         */
+        DeploymentRevisionResponse: components["schemas"]["DeploymentRevisionSummary"] & {
+            /** @description The canonical manifest. A compacted revision's has no members. */
+            manifest: components["schemas"]["DeploymentManifest"];
+        };
+        /**
+         * @description A committed deployment revision without its manifest: one row of
+         *     `GET /api/v2/admin/deployments`.
+         */
+        DeploymentRevisionSummary: {
+            /** @description RFC 3339 in UTC (`Z`), on the database clock. */
+            created_at: string;
+            created_by: string;
+            manifest_digest: string;
+            /** @description Members in the manifest; `0` once compacted. */
+            member_count: number;
+            /**
+             * @description The collector dropped this revision's members: it can no longer be
+             *     rolled back to.
+             */
+            members_compacted: boolean;
+            /**
+             * Format: int64
+             * @description The head it was committed on; absent for the first revision.
+             */
+            parent_revision?: number | null;
+            reason: string;
+            /** Format: int64 */
+            revision: number;
+        };
+        /**
+         * @description One page of committed revisions, newest first, with the head they were
+         *     read against (`GET /api/v2/admin/deployments`).
+         */
+        DeploymentsPage: {
+            /**
+             * Format: int64
+             * @description The revision this node serves.
+             */
+            applied_revision: number;
+            data: components["schemas"]["DeploymentRevisionSummary"][];
+            /** Format: int64 */
+            epoch: number;
+            /** Format: int64 */
+            head_revision: number;
+            /** Format: int64 */
+            limit: number;
+            /**
+             * @description Pass back as `?cursor=` for the next, older page; absent on the last.
+             *     Opaque: do not parse it.
+             */
+            next_cursor?: string | null;
+        };
+        /** @description What a DLQ purge deleted (`POST /api/v2/admin/trace-dlq/purge`). */
+        DlqPurgeResponse: {
             /**
              * Format: int64
              * @description Echo of the requested age bound.
@@ -2846,12 +1974,29 @@ export interface components {
              */
             purged: number;
         };
+        /**
+         * @description An edition, and the distribution tier a provider package declares.
+         *
+         *     The tiers are a ladder in declaration order (`community` < `standard` <
+         *     `enterprise`): a node admits a package whose tier is at or below its own
+         *     edition ([`Self::admits`]). Community is built here; Standard and
+         *     Enterprise are editions composed outside this repository.
+         * @enum {string}
+         */
+        EditionTier: "community" | "standard" | "enterprise";
+        /**
+         * @description What the host observed of an external effect.
+         *
+         *     Ordered by uncertainty: once an attempt or a child records
+         *     [`EffectStatus::Unknown`], a later local pre-send rejection cannot
+         *     downgrade the logical invocation back to [`EffectStatus::NotStarted`].
+         * @enum {string}
+         */
+        EffectStatus: "not_started" | "completed" | "unknown";
         /** @description Node capabilities a plan can predict quarantines from. */
         EngineCapabilities: {
             /** @description `cron.enabled`: whether this node schedules cron channels. */
             cron: boolean;
-            /** @description `models.enabled`: whether this node carries the model runtime. */
-            models: boolean;
             /** @description `plugins.enabled`: whether this node runs the plugin sandbox. */
             plugins: boolean;
         };
@@ -2859,23 +2004,9 @@ export interface components {
         EngineLoadIssues: {
             channels: components["schemas"]["ChannelLoadIssueResponse"][];
             connectors: components["schemas"]["ConnectorLoadIssueResponse"][];
-            models: components["schemas"]["ModelLoadIssueResponse"][];
             plugins: components["schemas"]["PluginLoadIssueResponse"][];
         };
-        /** @description `POST /api/v1/admin/engine/reload`. */
-        EngineReloadedResponse: {
-            /**
-             * Format: int64
-             * @description The id of the generation this reload published. `0` from a server
-             *     that predates it.
-             */
-            generation: number;
-            load_issues?: components["schemas"]["EngineLoadIssues"] | null;
-            reloaded: boolean;
-            /** Format: int64 */
-            workflows_count: number;
-        };
-        /** @description `GET /api/v1/admin/engine/status`. */
+        /** @description `GET /api/v2/admin/engine/status`. */
         EngineStatusResponse: {
             /** Format: int64 */
             active_workflows: number;
@@ -2894,8 +2025,21 @@ export interface components {
             /** Format: int64 */
             workflows_count: number;
         };
-        /** @enum {string} */
-        EntityStatus: "draft" | "active" | "archived";
+        /**
+         * @description The kind of a deployment member.
+         * @enum {string}
+         */
+        EntityKind: "workflow" | "channel" | "connection" | "plugin";
+        /** @description An entity at a revision. */
+        EntityRef: {
+            id: string;
+            kind: components["schemas"]["EntityKind"];
+            /**
+             * Format: int64
+             * @description At least 1.
+             */
+            revision: number;
+        };
         /**
          * @description The object under the `error` key.
          *
@@ -2906,6 +2050,7 @@ export interface components {
          */
         ErrorDetail: {
             code: string;
+            connector?: components["schemas"]["ConnectorErrorDetail"] | null;
             details?: components["schemas"]["ErrorFieldDetail"][];
             message: string;
             request_id?: string | null;
@@ -2939,425 +2084,214 @@ export interface components {
         ErrorResponse: {
             error: components["schemas"]["ErrorDetail"];
         };
-        /** @description One entry of the function catalogue from `GET /api/v1/admin/functions`. */
-        FunctionSchemaItem: {
+        /**
+         * @description `GET /health`: the detailed report. The fields after `components` are
+         *     served only to a caller that may read the admin plane.
+         */
+        HealthResponse: {
+            /** @description Each background task's state and restarts. */
+            background_tasks?: unknown;
+            build_timestamp?: string | null;
+            /** @description The quarantined channels. */
+            channels?: unknown;
             /**
-             * @description Other accepted spellings — `validation` carries `validate`. Omitted
-             *     when there are none.
+             * @description Per-subsystem state, each `ok`, `degraded`, `error` or `disabled`:
+             *     `database`, `engine`, `connectors`, `channels`, `background_tasks`,
+             *     `engine_reload`, `plugins`, and `cron` when this node schedules.
              */
-            aliases?: string[];
-            /** @description `connector`, `control`, `data`, `compute`, or `utility`. */
-            category: string;
-            description: string;
-            /**
-             * @description **Absent** for an engine built-in, which declares no input schema and
-             *     is therefore not input-validated at create time.
-             */
-            input_fields?: unknown[] | null;
-            name: string;
-            /**
-             * @description What a second run of this function does, as
-             *     `{"kind": "..."}` — `pure`, `read`, `idempotent_write`, `unsafe_write`,
-             *     or `depends_on` with the `input` that decides it (`http_call` on its
-             *     `method`, `data_write` on its `op`).
-             *
-             *     A different question from whether an *error* was transient: this is
-             *     what a retry costs when it is. Orion retries tasks in several places —
-             *     the trace DLQ, a Kafka redelivery, `http_call`'s transport retry — and
-             *     this is how an author or a tool knows which of those are safe over a
-             *     given function.
-             */
-            retry_safety: unknown;
-            /**
-             * @description `orion` for a handler Orion implements and input-schema validates,
-             *     `engine` for a dataflow-rs built-in the engine executes itself.
-             */
-            source: string;
-        };
-        /** @description A liveness / readiness / health probe body. */
-        HealthStatus: {
-            /**
-             * @description Per-subsystem state: `database`, `engine`, `connectors`, `channels`,
-             *     plus `kafka` when `kafka.enabled` (O10), `cluster_redis` in
-             *     cluster mode, and `packages` when `[packages] apply` names artifacts.
-             */
-            components: unknown;
-            /** @description Build provenance and detail, served only to an admin caller (O9). */
+            components: {
+                [key: string]: string;
+            };
+            /** @description The breaker map (node-local) and the connectors that failed to load. */
+            connectors?: unknown;
+            /** @description The scheduler's own health, on a node that schedules. */
+            cron?: unknown;
+            /** @description Build provenance and detail, served only to an admin caller. */
             git_hash?: string | null;
+            /** @description The plugins loaded, and those that failed to. */
+            plugins?: unknown;
             /** @description `ok` | `degraded`. */
             status: string;
             /** Format: int64 */
             uptime_seconds: number;
             version: string;
+            workflows_loaded?: number | null;
         };
-        /** @description One entry of `errors[]`: a failed item, by its index in the request array. */
-        ImportItemError: {
-            error: string;
-            /** Format: int64 */
-            index: number;
+        /** @description The guards a hooked driver declares beyond the always-on ones. */
+        HttpHookGuards: {
+            /** @description The concurrency permit, held for the request and any stream it opens. */
+            backpressure: boolean;
+            /** @description Idempotency-key deduplication, once per request. */
+            deduplication: boolean;
+            /** @description `validation_logic`, judged against each run's `data`. */
+            validation: boolean;
         };
         /**
-         * @description One entry of `results[]`: what a non-failed item did (K2).
+         * @description The three connector implementation kinds.
          *
-         *     `action` stays a `String` on the wire so a client one release behind the
-         *     server still parses a report whose vocabulary grew; compare it against
-         *     [`ImportAction::as_str`] values.
-         */
-        ImportItemResult: {
-            /**
-             * @description `created`, `updated_draft`, `updated` (connectors), `new_version`,
-             *     `unchanged`, or `skipped`.
-             */
-            action: string;
-            /**
-             * @description The item's conflict key (`workflow_id`, `channel_id`, connector
-             *     `name`), or `null` when the item named none and the store generated
-             *     one.
-             */
-            id?: string | null;
-            /** Format: int64 */
-            index: number;
-        };
-        /**
-         * @description Result of a bulk import, in both dry-run and real modes (R18, K2) — the
-         *     body under `{"data": …}` that all three `/import` endpoints answer with.
-         */
-        ImportResult: {
-            /** @description `true` when the request carried `?dry_run=true`; nothing was written. */
-            dry_run: boolean;
-            /** @description One entry per failed item, carrying its index in the request array. */
-            errors: components["schemas"]["ImportItemError"][];
-            /**
-             * Format: int64
-             * @description Items rejected. Non-zero with a **200** status: check this field, not
-             *     the status code.
-             */
-            failed: number;
-            /**
-             * Format: int64
-             * @description Items written — created, updated, or given a new version. In a dry
-             *     run, the count that would be written.
-             */
-            imported: number;
-            /** @description One `{index, id, action}` entry per non-failed item (K2). */
-            results: components["schemas"]["ImportItemResult"][];
-            /**
-             * Format: int64
-             * @description Items skipped under `on_conflict=skip` (K2).
-             */
-            skipped: number;
-            /**
-             * Format: int64
-             * @description Content-identical items under `on_conflict=new_version` (K2): nothing
-             *     written, not counted in `imported`. Re-importing the same artifact
-             *     therefore reports 0 imports and N unchanged.
-             */
-            unchanged: number;
-        };
-        /**
-         * @description The admission verdict on a model version: whether a node has fetched the
-         *     artifact, confirmed its digest and loaded it — and if not, why.
-         *
-         *     `state` is `pending` until a node has probed the artifact, then `passed`
-         *     or `failed`. The other fields are set alongside a verdict and absent on a
-         *     pending one, so `{"state":"pending"}` is the whole of a fresh version's
-         *     admission.
-         */
-        ModelAdmission: {
-            /**
-             * Format: date-time
-             * @description When the verdict was recorded.
-             */
-            at?: string | null;
-            /** @description The node that recorded it. */
-            node?: string | null;
-            reason?: string | null;
-            /** @description The stage a `failed` verdict stopped at. */
-            stage?: string | null;
-            state: string;
-        };
-        /**
-         * @description Where a model version's bytes are: an object in a storage connector's
-         *     bucket, and the digest the author claims for it.
-         *
-         *     The reference *is* the content — a model row never carries bytes — so
-         *     `connector`, `key` and `digest` are what the content hash covers. `size`
-         *     is a hint the registration may carry and admission confirms; it is not
-         *     content, and it is omitted from the wire when unknown.
-         */
-        ModelArtifactRef: {
-            /** @description The object-storage connector the artifact is read through. */
-            connector: string;
-            /**
-             * @description `sha256:<hex>` of the artifact bytes, as claimed at registration and
-             *     confirmed by admission.
-             */
-            digest: string;
-            /** @description The object key within that connector's bucket. */
-            key: string;
-            /**
-             * Format: int64
-             * @description The artifact's size in bytes, when known.
-             */
-            size?: number | null;
-        };
-        /** @description One active workflow that names a model, and where. */
-        ModelDependant: {
-            /**
-             * @description The ids of the tasks calling `model_infer` with this model as a
-             *     literal `input.model`.
-             */
-            task_ids: string[];
-            /** Format: int64 */
-            version: number;
-            workflow_id: string;
-        };
-        /** @description What depends on a model: the active workflows naming it. */
-        ModelDependencies: {
-            /**
-             * @description Always `true`: a task whose `input.model` is an expression resolves
-             *     its model per message, so a reference of that kind is not listed and
-             *     not gated on.
-             */
-            dynamic_references_unlisted: boolean;
-            model_id: string;
-            /** Format: int64 */
-            version: number;
-            /**
-             * @description Active workflows with a `model_infer` task whose `input.model` is
-             *     this id as a literal — the ones an archive or delete is refused for.
-             */
-            workflows: components["schemas"]["ModelDependant"][];
-        };
-        /** @description Whether the node answering has a model version resident, and if not, why. */
-        ModelHealth: {
-            device?: string | null;
-            /** @description The stage and reason when `failed`. */
-            reason?: string | null;
-            /**
-             * Format: int64
-             * @description Bytes the loaded session holds, when loaded.
-             */
-            resident_bytes?: number | null;
-            runtime?: string | null;
-            /**
-             * @description `disabled` (models are off on this node); `pending` or `rejected`
-             *     while the version's admission has not passed; `admitted` for the
-             *     active version and `inactive` for a draft or archived one; and, on a
-             *     node that loads models, `loaded` (resident in a runtime), `evicted`
-             *     (was resident, dropped under `models.max_loaded_bytes`) or `failed`
-             *     (the generation could not carry it) for the version it serves.
-             */
-            state?: string;
-        };
-        /** @description A model version a generation could not carry. */
-        ModelLoadIssueResponse: {
-            digest: string;
-            model: string;
-            reason: string;
-            /** @description `disabled`, `admission`, `manifest`, `artifact` or `adapter`. */
-            stage: string;
-            /** Format: int64 */
-            version: number;
-        };
-        /**
-         * @description One version of a model, as every model endpoint returns it.
-         *
-         *     `manifest` is the validated manifest as JSON — what was registered, with
-         *     nothing the server inferred added to it. `inputs` and `outputs` are the
-         *     tensor names it declares, repeated at the top level so a client need not
-         *     walk the manifest to learn the model's signature. `artifact` is where the
-         *     bytes are; `admission` and `stats` are what a node found when it fetched
-         *     them — `stats` is `null` until admission passes. `health` is present only
-         *     on the single-entity read, and only when the serving node has an opinion:
-         *     it says whether *this node* has the version resident.
-         */
-        ModelResponse: {
-            /** @description The manifest ABI the model was registered against. */
-            abi: string;
-            admission: components["schemas"]["ModelAdmission"];
-            artifact: components["schemas"]["ModelArtifactRef"];
-            /**
-             * @description `sha256:…` over the importable content (manifest, artifact reference
-             *     without its size, tags) — the same projection the upsert import
-             *     compares. The signature, the admission verdict and the stats are not
-             *     in it: see `content::model_content`.
-             */
-            content_hash: string;
-            created_at: string;
-            /**
-             * @description `sha256:…` of the artifact bytes, as claimed at registration — the
-             *     identity a generation, a trace and a package all name the model by.
-             */
-            digest: string;
-            /** @description The artifact format the manifest declares (`onnx`). */
-            format: string;
-            health?: components["schemas"]["ModelHealth"] | null;
-            /** @description The input tensor names, in the manifest's order. */
-            inputs: string[];
-            manifest: unknown;
-            model_id: string;
-            /** @description The author's own version string from the manifest, informational. */
-            model_version: string;
-            /** @description The output tensor names, in the manifest's order. */
-            outputs: string[];
-            /**
-             * @description The detached Ed25519 signature over `digest` the registration carried,
-             *     base64, when there was one. Not part of the content hash: the digest
-             *     is the identity, and the signature only attests to it.
-             */
-            signature?: string | null;
-            stats?: components["schemas"]["ModelStats"] | null;
-            status: string;
-            tags: unknown;
-            updated_at: string;
-            /** Format: int64 */
-            version: number;
-        };
-        /**
-         * @description What admission read out of a model, on the node that admitted it. Absent
-         *     from a response until admission passes. The graph numbers are read from
-         *     the ONNX protobuf itself, so they are the same on every node and every
-         *     runtime; the probe numbers are the admitting node's.
-         */
-        ModelStats: {
-            /**
-             * Format: int64
-             * @description The artifact's size as fetched — the confirmed twin of
-             *     [`ModelArtifactRef::size`].
-             */
-            artifact_bytes?: number;
-            /** @description The device the probe loaded the model on. */
-            device?: string;
-            /**
-             * Format: int64
-             * @description The ONNX IR version the model declares.
-             */
-            ir_version?: number;
-            /**
-             * Format: int64
-             * @description Node count of the graph, of every subgraph body it carries (`If`,
-             *     `Loop`, `Scan`) and of every model-local function.
-             */
-            nodes?: number;
-            /**
-             * @description The distinct operators those nodes ask a runtime for, sorted, each
-             *     qualified by its domain unless that is the default one — so
-             *     `ai.onnx.ml.LinearRegressor`, but plain `Gemm`. What the graph needs
-             *     implemented, which is what a row cannot otherwise say: it holds the
-             *     artifact's reference, not its bytes. Empty on a version admitted
-             *     before this was recorded.
-             */
-            operators?: string[];
-            /**
-             * Format: int64
-             * @description The default-domain opset the model imports.
-             */
-            opset?: number;
-            /**
-             * Format: int64
-             * @description Every value the graph carries, counted from the graph itself: each
-             *     initializer, each tensor or list of numbers a node holds in an
-             *     attribute, through every subgraph body and every model-local
-             *     function. Moving weights from one of those fields to another does
-             *     not move this number, which is what lets `models.max_parameters`
-             *     bound it.
-             */
-            parameters?: number;
-            /**
-             * @description What each named dimension in the manifest's shapes was bound to for
-             *     the probe. Absent when the manifest declares fixed shapes, which is
-             *     most of them; present when it does not, because `probe_ms` over a
-             *     variable axis says nothing without the size behind it.
-             */
-            probe_dims?: {
-                [key: string]: number;
-            };
-            /**
-             * Format: double
-             * @description The admission probe's wall time per inference, in milliseconds: the
-             *     median of five runs over zero-filled inputs on `runtime` and `device`.
-             *     Admission requires it within `models.max_probe_ms`.
-             */
-            probe_ms?: number;
-            /**
-             * @description The runtime the probe ran on — the admitting node's
-             *     `models.default_runtime` row for the manifest's format.
-             */
-            runtime?: string;
-        };
-        ModelValidationEnvelope: {
-            data: components["schemas"]["ModelValidationResponse"];
-        };
-        /**
-         * @description The `/validate` envelope for models: the shared shape plus what the
-         *     synchronous half learned about the object.
-         */
-        ModelValidationResponse: components["schemas"]["ValidationResponse"] & {
-            head?: components["schemas"]["ArtifactHead"] | null;
-        };
-        /**
-         * @description How an `/import` treats an item whose conflict key is already stored.
-         *     `fail` refuses the item (default), `skip` leaves the stored entity alone,
-         *     `new_version` upserts: an existing draft is updated in place, an active
-         *     entity whose content differs gets a new draft version, and a
-         *     content-identical item is reported `unchanged` and writes nothing.
-         * @default fail
+         *     Channels are not among them: a channel is a native ingress or scheduler
+         *     driver, whereas a connector provider may be a Rust driver, a
+         *     workflow-group composite, or a Wasm component.
          * @enum {string}
          */
-        OnConflict: "fail" | "skip" | "new_version";
-        /** @description `GET /api/v1/admin/packages/{name}` — one package's receipts. */
-        PackageDetail: {
-            current?: components["schemas"]["PackageReceiptResponse"] | null;
-            name: string;
-            /** @description Every receipt for this package, newest first. */
-            versions: components["schemas"]["PackageReceiptResponse"][];
+        ImplementationKind: "rust" | "workflow" | "wasm";
+        /** @description The guards an ingress driver's deliveries pass. */
+        IngressGuards: {
+            backpressure: boolean;
+            deduplication: boolean;
+            rate_limit: boolean;
+            validation: boolean;
         };
         /**
-         * @description The entities one package version carried, by the key each kind is
-         *     matched on: `plugin_id`, `model_id`, the connector's `name`,
-         *     `workflow_id`, `channel_id`. Each list is sorted and free of
-         *     duplicates, so two applies of one artifact record identical JSON.
+         * @description A provider package's lint report (`POST /api/v2/admin/authoring/lint`):
+         *     `200` when linting ran (`valid` indicates whether all checks passed),
+         *     `400` (`ErrorEnvelope`) when a file does not decode.
          */
-        PackageInventory: {
-            channels?: string[];
-            connectors?: string[];
-            models?: string[];
-            plugins?: string[];
-            workflows?: string[];
+        LintResponse: {
+            /** @description Each problem, `CODE: where`. */
+            errors: string[];
+            implementation?: components["schemas"]["ImplementationKind"] | null;
+            /**
+             * @description The provider id `connector.json` declares; absent when it could not
+             *     be read.
+             */
+            provider_id?: string | null;
+            valid: boolean;
+            /**
+             * @description The version `connector.json` declares; absent when it could not be
+             *     read.
+             */
+            version?: string | null;
         };
-        /** @description A package receipt as the admin API shows it (K14). */
-        PackageReceiptResponse: {
+        /** @description `GET /healthz`: the process is serving. */
+        LivenessResponse: {
+            /** @description Always `ok`. */
+            status: string;
+        };
+        /**
+         * @description One member of a manifest: an entity at a revision, the definition (or,
+         *     for a connection, the configuration) it is, and what it needs.
+         */
+        ManifestMember: {
             /**
-             * @description Canonical content hash of the artifact this receipt records, e.g.
-             *     `sha256:…`. Opaque to the server — compared for equality, never parsed.
+             * @description A workflow, channel or plugin's stored definition; a connection
+             *     revision's `configuration_digest`.
              */
-            content_hash: string;
-            created_at: string;
-            inventory?: components["schemas"]["PackageInventory"] | null;
-            name: string;
-            /** @description Who recorded this receipt (admin key id, or `anonymous`). */
-            principal: string;
+            definition_digest: string;
+            entity: components["schemas"]["EntityRef"];
             /**
-             * @description `staged` or `applied`.
-             * @example applied
+             * @description The provider package (by digest, one of the manifest's `providers`)
+             *     that owns this member. Absent for a member no package owns.
              */
-            state: string;
-            updated_at: string;
+            owning_package?: string | null;
+            /**
+             * @description The members this one needs, each at the revision it uses. Absent
+             *     means none.
+             */
+            requires?: components["schemas"]["EntityRef"][];
+            /**
+             * @description A channel's workflow rollout: disjoint bucket intervals covering
+             *     `[0, 100)`. Absent means the channel serves one workflow revision.
+             */
+            rollouts?: components["schemas"]["RolloutInterval"][];
+        };
+        /**
+         * @description One provider a manifest pins: a publisher, an id, a semantic version
+         *     and the package digest.
+         */
+        ManifestProvider: {
+            /** @description `sha256:<64 lowercase hex>`. */
+            digest: string;
+            provider_id: string;
+            publisher: string;
             version: string;
         };
+        /** @description The node's native work scheduler. */
+        NativeSchedulerStatus: {
+            /** Format: int64 */
+            in_flight: number;
+            /** Format: int64 */
+            max_in_flight: number;
+        };
+        /** @description One node's reconciler status. */
+        NodeStatus: {
+            /** @description The manifest digest of the applied revision; absent before one. */
+            applied_manifest_digest?: string | null;
+            /**
+             * Format: int64
+             * @description The revision the node serves; `0` before it served any.
+             */
+            applied_revision: number;
+            /** Format: int32 */
+            backoff_attempt: number;
+            /** Format: int64 */
+            backoff_delay_ms: number;
+            /** @description Changes on every process start. */
+            boot_id: string;
+            /** @description Whether some member of the applied revision is quarantined. */
+            configuration_degraded: boolean;
+            /**
+             * Format: int64
+             * @description The revision the node is converging on.
+             */
+            desired_revision: number;
+            /**
+             * @description Why the last attempt to build the desired revision failed, while it
+             *     does.
+             */
+            last_error?: string | null;
+            node_id: string;
+            quarantined_entities: components["schemas"]["QuarantinedEntity"][];
+            /** @description The revisions the node keeps built, ascending. */
+            retained_revisions: number[];
+            /** Format: int64 */
+            security_lease_expires_at_ms: number;
+        };
+        /** @description A deterministically packed provider package (`POST /api/v2/admin/authoring/pack`). */
+        PackResponse: {
+            /** @description The package's files, `inventory.json` included, ready for upload. */
+            files: {
+                [key: string]: string;
+            };
+            package_digest: string;
+        };
         /**
-         * @description A package version's lifecycle state, mirroring the entity lifecycle one
-         *     level up: `staged` is the draft analogue (content may be re-put in place),
-         *     `applied` is the active analogue (immutable — a content change requires a
-         *     package version bump). There is no third state: history rows simply stop
-         *     being the newest applied version.
+         * @description Where a stored provider package's bytes are in their lifecycle.
          * @enum {string}
          */
-        PackageState: "staged" | "applied";
-        /** @description The paginated envelope: `data` plus the three counters, and nothing else. */
-        PaginatedEnvelope_AuditLogEntryResponse: {
-            data: {
+        PackageArtifactState: "active" | "draining" | "deleted";
+        /**
+         * @description A provider package's files, for the authoring tools that only read them
+         *     (`POST /api/v2/admin/authoring/lint` and `/authoring/pack`).
+         *
+         *     Separate from [`UploadPackageRequest`] so `admit` and `lock` cannot be sent
+         *     to an endpoint that has no admission to perform and would silently drop
+         *     them.
+         */
+        PackageFilesRequest: {
+            /** @description Relative path → the file, as UTF-8 text or `base64:<…>`. */
+            files: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * @description The envelope of every list: `data` plus how to get the next page.
+         *
+         *     One shape for every collection. A list pages by an opaque **cursor**, not an
+         *     offset: the lists are append-heavy ledgers read newest-first, so an offset
+         *     skips or repeats rows as new ones arrive and costs a scan of everything it
+         *     skips, while a cursor resumes at an exact position in constant time.
+         *
+         *     - `next_cursor` is present when a further page exists; pass it back as
+         *       `?cursor=`, unmodified. Absent on the last page. Do not parse it.
+         *     - `total` is **opt-in** (`?include_total=true`): counting the filtered set is
+         *       a full scan on Postgres and InnoDB, so it is computed only when asked. An
+         *       absent `total` means "not counted", never "no rows".
+         *     - `limit` is the page size applied. Absent from a complete catalogue that is
+         *       not paged at all.
+         */
+        Page_AuditLogEntryResponse: {
+            data?: {
                 action: string;
                 created_at: string;
                 details?: string | null;
@@ -3367,109 +2301,125 @@ export interface components {
                 resource_type: string;
             }[];
             /** Format: int64 */
-            limit: number;
+            limit?: number | null;
+            next_cursor?: string | null;
             /** Format: int64 */
-            offset: number;
-            /**
-             * Format: int64
-             * @description Total rows matching the filter, ignoring `limit`/`offset`.
-             */
-            total: number;
+            total?: number | null;
         };
-        /** @description The paginated envelope: `data` plus the three counters, and nothing else. */
-        PaginatedEnvelope_ChannelResponse: {
-            data: {
-                channel_id: string;
-                channel_type: string;
+        /**
+         * @description The envelope of every list: `data` plus how to get the next page.
+         *
+         *     One shape for every collection. A list pages by an opaque **cursor**, not an
+         *     offset: the lists are append-heavy ledgers read newest-first, so an offset
+         *     skips or repeats rows as new ones arrive and costs a scan of everything it
+         *     skips, while a cursor resumes at an exact position in constant time.
+         *
+         *     - `next_cursor` is present when a further page exists; pass it back as
+         *       `?cursor=`, unmodified. Absent on the last page. Do not parse it.
+         *     - `total` is **opt-in** (`?include_total=true`): counting the filtered set is
+         *       a full scan on Postgres and InnoDB, so it is computed only when asked. An
+         *       absent `total` means "not counted", never "no rows".
+         *     - `limit` is the page size applied. Absent from a complete catalogue that is
+         *       not paged at all.
+         */
+        Page_ConnectionRevisionResponse: {
+            data?: {
                 /**
-                 * @description Channel config with `auth.keys` / `auth.secret` values masked (H3) —
-                 *     the server's conversion is the only constructor of this shape, so
-                 *     masking is a step no handler can skip.
+                 * @description Over a provider that declares dependencies (a `workflow` provider
+                 *     package, or a composed `rust` provider whose `describe()` declares
+                 *     them): the connection each dependency alias calls
+                 *     (`alias -> connection_id`). Empty for any other provider.
                  */
-                config: unknown;
-                consumer_group?: string | null;
+                bindings: {
+                    [key: string]: string;
+                };
                 /**
-                 * @description `sha256:…` over the canonical importable content (K10). Computed on
-                 *     the stored (unmasked) config: entities authored with `env://`
-                 *     references hash identically to their exported artifact; entities
-                 *     holding literal secrets hash over what they store, which a masked
-                 *     export can never reproduce.
+                 * @description The digest over the public settings, the locators and the bindings:
+                 *     what a manifest member for this revision names as its
+                 *     `definition_digest`.
                  */
-                content_hash: string;
-                created_at: string;
-                description?: string | null;
-                methods?: unknown;
-                name: string;
+                configuration_digest: string;
+                connection_id: string;
+                provider_digest: string;
+                /** @description The connection's settings, as created. */
+                public_config: unknown;
                 /** Format: int64 */
-                priority: number;
-                protocol: string;
-                route_pattern?: string | null;
-                status: string;
-                /**
-                 * @description Wire name `tags`, stored column `tags_json` (K6) — the same contract
-                 *     workflows have carried since 0.x.
-                 */
-                tags: unknown;
-                topic?: string | null;
-                transport_config: unknown;
-                updated_at: string;
-                /** Format: int64 */
-                version: number;
-                workflow_id?: string | null;
+                revision: number;
+                /** @description Config path → secret reference (`env://`, `vault://`, …). */
+                secret_locators: {
+                    [key: string]: string;
+                };
             }[];
             /** Format: int64 */
-            limit: number;
+            limit?: number | null;
+            next_cursor?: string | null;
             /** Format: int64 */
-            offset: number;
-            /**
-             * Format: int64
-             * @description Total rows matching the filter, ignoring `limit`/`offset`.
-             */
-            total: number;
+            total?: number | null;
         };
-        /** @description The paginated envelope: `data` plus the three counters, and nothing else. */
-        PaginatedEnvelope_ConnectorListItem: {
-            data: {
-                /** @description The same masked config, parsed — the shape `POST`/`PUT` accept. */
-                config: unknown;
-                /** @description Connector config with every secret replaced by `******`, verbatim. */
-                config_json: string;
-                connector_type: string;
-                /** @description `sha256:…` over the canonical importable content (K10). */
-                content_hash: string;
-                created_at: string;
-                enabled: boolean;
-                id: string;
+        /**
+         * @description The envelope of every list: `data` plus how to get the next page.
+         *
+         *     One shape for every collection. A list pages by an opaque **cursor**, not an
+         *     offset: the lists are append-heavy ledgers read newest-first, so an offset
+         *     skips or repeats rows as new ones arrive and costs a scan of everything it
+         *     skips, while a cursor resumes at an exact position in constant time.
+         *
+         *     - `next_cursor` is present when a further page exists; pass it back as
+         *       `?cursor=`, unmodified. Absent on the last page. Do not parse it.
+         *     - `total` is **opt-in** (`?include_total=true`): counting the filtered set is
+         *       a full scan on Postgres and InnoDB, so it is computed only when asked. An
+         *       absent `total` means "not counted", never "no rows".
+         *     - `limit` is the page size applied. Absent from a complete catalogue that is
+         *       not paged at all.
+         */
+        Page_ConnectorPackageSummary: {
+            data?: {
+                /** @description Admitted and not revoked. */
+                admitted: boolean;
+                artifact_state: components["schemas"]["PackageArtifactState"];
+                /** @description The package digest: `sha256:<64 lowercase hex>`. */
+                digest: string;
+                /** @description The package's `distribution.json`. */
+                distribution: unknown;
+                implementation: components["schemas"]["ImplementationKind"];
+                /** @description The package's `inventory.json`. */
+                inventory: unknown;
+                /** @description The package's `connector.json`. */
+                manifest: unknown;
+                provider_id: string;
+                publisher: string;
+                revoked: boolean;
                 /**
-                 * @description Why the connector failed to load. Present only when
-                 *     `load_status = "failed"`.
+                 * @description The tier `distribution.json` declares; `community` when it declares
+                 *     none.
                  */
-                load_error?: string | null;
-                /** @description Which load stage failed. Present only when `load_status = "failed"`. */
-                load_error_stage?: string | null;
-                /**
-                 * @description `loaded`, `failed`, or `disabled`.
-                 * @example loaded
-                 */
-                load_status: string;
-                name: string;
-                /** @description Selection labels (K6); filter the list with `?tag=`. */
-                tags: string[];
-                updated_at: string;
+                tier: components["schemas"]["EditionTier"];
+                version: string;
             }[];
             /** Format: int64 */
-            limit: number;
+            limit?: number | null;
+            next_cursor?: string | null;
             /** Format: int64 */
-            offset: number;
-            /**
-             * Format: int64
-             * @description Total rows matching the filter, ignoring `limit`/`offset`.
-             */
-            total: number;
+            total?: number | null;
         };
-        /** @description The paginated envelope: `data` plus the three counters, and nothing else. */
-        PaginatedEnvelope_CronOccurrenceSummaryResponse: {
-            data: {
+        /**
+         * @description The envelope of every list: `data` plus how to get the next page.
+         *
+         *     One shape for every collection. A list pages by an opaque **cursor**, not an
+         *     offset: the lists are append-heavy ledgers read newest-first, so an offset
+         *     skips or repeats rows as new ones arrive and costs a scan of everything it
+         *     skips, while a cursor resumes at an exact position in constant time.
+         *
+         *     - `next_cursor` is present when a further page exists; pass it back as
+         *       `?cursor=`, unmodified. Absent on the last page. Do not parse it.
+         *     - `total` is **opt-in** (`?include_total=true`): counting the filtered set is
+         *       a full scan on Postgres and InnoDB, so it is computed only when asked. An
+         *       absent `total` means "not counted", never "no rows".
+         *     - `limit` is the page size applied. Absent from a complete catalogue that is
+         *       not paged at all.
+         */
+        Page_CronOccurrenceSummaryResponse: {
+            data?: {
                 /** Format: int64 */
                 attempt: number;
                 channel_id: string;
@@ -3496,147 +2446,29 @@ export interface components {
                 trigger: string;
             }[];
             /** Format: int64 */
-            limit: number;
+            limit?: number | null;
+            next_cursor?: string | null;
             /** Format: int64 */
-            offset: number;
-            /**
-             * Format: int64
-             * @description Total rows matching the filter, ignoring `limit`/`offset`.
-             */
-            total: number;
+            total?: number | null;
         };
-        /** @description The paginated envelope: `data` plus the three counters, and nothing else. */
-        PaginatedEnvelope_ModelResponse: {
-            data: {
-                /** @description The manifest ABI the model was registered against. */
-                abi: string;
-                admission: components["schemas"]["ModelAdmission"];
-                artifact: components["schemas"]["ModelArtifactRef"];
-                /**
-                 * @description `sha256:…` over the importable content (manifest, artifact reference
-                 *     without its size, tags) — the same projection the upsert import
-                 *     compares. The signature, the admission verdict and the stats are not
-                 *     in it: see `content::model_content`.
-                 */
-                content_hash: string;
-                created_at: string;
-                /**
-                 * @description `sha256:…` of the artifact bytes, as claimed at registration — the
-                 *     identity a generation, a trace and a package all name the model by.
-                 */
-                digest: string;
-                /** @description The artifact format the manifest declares (`onnx`). */
-                format: string;
-                health?: components["schemas"]["ModelHealth"] | null;
-                /** @description The input tensor names, in the manifest's order. */
-                inputs: string[];
-                manifest: unknown;
-                model_id: string;
-                /** @description The author's own version string from the manifest, informational. */
-                model_version: string;
-                /** @description The output tensor names, in the manifest's order. */
-                outputs: string[];
-                /**
-                 * @description The detached Ed25519 signature over `digest` the registration carried,
-                 *     base64, when there was one. Not part of the content hash: the digest
-                 *     is the identity, and the signature only attests to it.
-                 */
-                signature?: string | null;
-                stats?: components["schemas"]["ModelStats"] | null;
-                status: string;
-                tags: unknown;
-                updated_at: string;
-                /** Format: int64 */
-                version: number;
-            }[];
-            /** Format: int64 */
-            limit: number;
-            /** Format: int64 */
-            offset: number;
-            /**
-             * Format: int64
-             * @description Total rows matching the filter, ignoring `limit`/`offset`.
-             */
-            total: number;
-        };
-        /** @description The paginated envelope: `data` plus the three counters, and nothing else. */
-        PaginatedEnvelope_PackageReceiptResponse: {
-            data: {
-                /**
-                 * @description Canonical content hash of the artifact this receipt records, e.g.
-                 *     `sha256:…`. Opaque to the server — compared for equality, never parsed.
-                 */
-                content_hash: string;
-                created_at: string;
-                inventory?: components["schemas"]["PackageInventory"] | null;
-                name: string;
-                /** @description Who recorded this receipt (admin key id, or `anonymous`). */
-                principal: string;
-                /**
-                 * @description `staged` or `applied`.
-                 * @example applied
-                 */
-                state: string;
-                updated_at: string;
-                version: string;
-            }[];
-            /** Format: int64 */
-            limit: number;
-            /** Format: int64 */
-            offset: number;
-            /**
-             * Format: int64
-             * @description Total rows matching the filter, ignoring `limit`/`offset`.
-             */
-            total: number;
-        };
-        /** @description The paginated envelope: `data` plus the three counters, and nothing else. */
-        PaginatedEnvelope_PluginResponse: {
-            data: {
-                /** @description The WIT package version the component was built against. */
-                abi: string;
-                /**
-                 * @description `sha256:…` over the importable content (manifest, digest, tags) — the
-                 *     same projection the upsert import compares.
-                 */
-                content_hash: string;
-                created_at: string;
-                /**
-                 * @description `sha256:…` of the component bytes — the identity a generation, a
-                 *     trace, a package and the catalogue all name the artifact by.
-                 */
-                digest: string;
-                functions: string[];
-                health?: components["schemas"]["PluginHealth"] | null;
-                manifest: unknown;
-                plugin_id: string;
-                /** @description The author's own version string from the manifest, informational. */
-                plugin_version: string;
-                /**
-                 * @description The detached Ed25519 signature over `digest` the upload carried, base64,
-                 *     when there was one. Not part of the content hash: the digest is the
-                 *     identity, and the signature only attests to it.
-                 */
-                signature?: string | null;
-                status: string;
-                tags: unknown;
-                updated_at: string;
-                /** Format: int64 */
-                version: number;
-            }[];
-            /** Format: int64 */
-            limit: number;
-            /** Format: int64 */
-            offset: number;
-            /**
-             * Format: int64
-             * @description Total rows matching the filter, ignoring `limit`/`offset`.
-             */
-            total: number;
-        };
-        /** @description The paginated envelope: `data` plus the three counters, and nothing else. */
-        PaginatedEnvelope_TraceDlqSummaryResponse: {
-            data: {
+        /**
+         * @description The envelope of every list: `data` plus how to get the next page.
+         *
+         *     One shape for every collection. A list pages by an opaque **cursor**, not an
+         *     offset: the lists are append-heavy ledgers read newest-first, so an offset
+         *     skips or repeats rows as new ones arrive and costs a scan of everything it
+         *     skips, while a cursor resumes at an exact position in constant time.
+         *
+         *     - `next_cursor` is present when a further page exists; pass it back as
+         *       `?cursor=`, unmodified. Absent on the last page. Do not parse it.
+         *     - `total` is **opt-in** (`?include_total=true`): counting the filtered set is
+         *       a full scan on Postgres and InnoDB, so it is computed only when asked. An
+         *       absent `total` means "not counted", never "no rows".
+         *     - `limit` is the page size applied. Absent from a complete catalogue that is
+         *       not paged at all.
+         */
+        Page_TraceDlqSummaryResponse: {
+            data?: {
                 channel: string;
                 created_at: string;
                 error_message: string;
@@ -3650,97 +2482,62 @@ export interface components {
                 updated_at: string;
             }[];
             /** Format: int64 */
-            limit: number;
+            limit?: number | null;
+            next_cursor?: string | null;
             /** Format: int64 */
-            offset: number;
-            /**
-             * Format: int64
-             * @description Total rows matching the filter, ignoring `limit`/`offset`.
-             */
-            total: number;
+            total?: number | null;
         };
-        /** @description The paginated envelope: `data` plus the three counters, and nothing else. */
-        PaginatedEnvelope_WorkflowResponse: {
-            data: {
-                condition: unknown;
-                /**
-                 * @description `sha256:…` over the canonical importable content (K10) — the same
-                 *     projection the upsert import compares and the package CLI hashes, so
-                 *     equal hashes mean "importing one over the other is a no-op".
-                 */
-                content_hash: string;
-                continue_on_error: boolean;
+        /**
+         * @description The envelope of every list: `data` plus how to get the next page.
+         *
+         *     One shape for every collection. A list pages by an opaque **cursor**, not an
+         *     offset: the lists are append-heavy ledgers read newest-first, so an offset
+         *     skips or repeats rows as new ones arrive and costs a scan of everything it
+         *     skips, while a cursor resumes at an exact position in constant time.
+         *
+         *     - `next_cursor` is present when a further page exists; pass it back as
+         *       `?cursor=`, unmodified. Absent on the last page. Do not parse it.
+         *     - `total` is **opt-in** (`?include_total=true`): counting the filtered set is
+         *       a full scan on Postgres and InnoDB, so it is computed only when asked. An
+         *       absent `total` means "not counted", never "no rows".
+         *     - `limit` is the page size applied. Absent from a complete catalogue that is
+         *       not paged at all.
+         */
+        Page_TraceListItem: {
+            data?: {
+                /** @description Channel name as it was when the trace ran — a snapshot, not a key. */
+                channel: string;
+                channel_id?: string | null;
+                completed_at?: string;
                 created_at: string;
-                description?: string | null;
-                /**
-                 * @description The engine-managed loop over `tasks`, or absent for a workflow that
-                 *     runs its task list exactly once. Skipped on serialize rather than sent
-                 *     as `null`, so a response from a server that has the feature and one
-                 *     from a server that does not are byte-identical for the common case.
-                 */
-                loop?: unknown;
-                name: string;
-                /** Format: int64 */
-                priority: number;
-                /** Format: int64 */
-                rollout_percentage: number;
+                /** Format: double */
+                duration_ms?: number | null;
+                error_message?: string | null;
+                id: string;
+                /** @description `sync` | `async`. */
+                mode: string;
+                started_at?: string;
+                /** @description `pending` | `running` | `completed` | `failed`. */
                 status: string;
-                tags: unknown;
-                tasks: unknown;
                 updated_at: string;
-                /** Format: int64 */
-                version: number;
-                workflow_id: string;
             }[];
             /** Format: int64 */
-            limit: number;
+            limit?: number | null;
+            next_cursor?: string | null;
             /** Format: int64 */
-            offset: number;
-            /**
-             * Format: int64
-             * @description Total rows matching the filter, ignoring `limit`/`offset`.
-             */
-            total: number;
+            total?: number | null;
         };
-        /** @description What depends on a plugin: the active workflows calling its functions. */
-        PluginDependencies: {
-            functions: string[];
-            plugin_id: string;
-            /** Format: int64 */
-            version: number;
-            /**
-             * @description Active workflows whose tasks call any of `functions` — the ones an
-             *     archive or delete is refused for.
-             */
-            workflows: string[];
-        };
-        /** @description One plugin a workflow depends on, as this generation serves it. */
-        PluginDependency: {
-            /**
-             * @description `sha256:…` of the component the functions resolve to — what a
-             *     package records and a target is checked for.
-             */
-            digest: string;
-            /** @description The plugin's functions this workflow names, task order kept. */
-            functions: string[];
-            id: string;
-            /** Format: int64 */
-            version: number;
-        };
-        /** @description Whether the node answering loaded a plugin version, and if not, why. */
-        PluginHealth: {
-            /**
-             * Format: int64
-             * @description Compile time in milliseconds when loaded.
-             */
-            compile_ms?: number | null;
-            /** @description The stage and reason when `failed`. */
-            reason?: string | null;
-            /**
-             * @description `loaded`, `failed`, `disabled` (plugins are off on this node) or
-             *     `inactive` (the version is not the one this node's generation carries).
-             */
-            state?: string;
+        /**
+         * @description A WebAssembly plugin: its `plugin.toml` manifest as JSON and the
+         *     component itself, so one digest covers both.
+         */
+        PluginDefinition: {
+            /** @description The component, base64. */
+            component: string;
+            manifest: unknown;
+            /** @description A detached Ed25519 signature over the component digest, base64. */
+            signature?: string | null;
+            tags?: string[];
         };
         /** @description A plugin version a generation could not load. */
         PluginLoadIssueResponse: {
@@ -3749,81 +2546,23 @@ export interface components {
             reason: string;
             /**
              * @description `disabled`, `manifest`, `signature`, `artifact`, `compile`, `link`,
-             *     `size` or `self_test`.
+             *     `size`, `self_test` or `capacity`.
              */
             stage: string;
             /** Format: int64 */
             version: number;
         };
-        /**
-         * @description One version of a plugin, as every plugin endpoint returns it.
-         *
-         *     `manifest` is the validated manifest as JSON — what was uploaded, with
-         *     nothing the server inferred added to it. `functions` is the list of
-         *     names it declares, repeated at the top level so a client need not walk
-         *     the manifest to learn what the plugin adds to the vocabulary. `health` is
-         *     present only on the single-entity read, and only when the serving node
-         *     has an opinion: it says whether *this node* loaded the digest.
-         */
-        PluginResponse: {
-            /** @description The WIT package version the component was built against. */
-            abi: string;
-            /**
-             * @description `sha256:…` over the importable content (manifest, digest, tags) — the
-             *     same projection the upsert import compares.
-             */
-            content_hash: string;
-            created_at: string;
-            /**
-             * @description `sha256:…` of the component bytes — the identity a generation, a
-             *     trace, a package and the catalogue all name the artifact by.
-             */
-            digest: string;
-            functions: string[];
-            health?: components["schemas"]["PluginHealth"] | null;
-            manifest: unknown;
-            plugin_id: string;
-            /** @description The author's own version string from the manifest, informational. */
-            plugin_version: string;
-            /**
-             * @description The detached Ed25519 signature over `digest` the upload carried, base64,
-             *     when there was one. Not part of the content hash: the digest is the
-             *     identity, and the signature only attests to it.
-             */
-            signature?: string | null;
-            status: string;
-            tags: unknown;
-            updated_at: string;
-            /** Format: int64 */
-            version: number;
-        };
-        ProbeEnvelope: {
-            data: components["schemas"]["ProbeResult"];
-        };
-        /** @description What a probe found. */
-        ProbeResult: {
-            /**
-             * @description Connector type, so a caller need not re-read the connector to know
-             *     which kind of probe ran.
-             */
-            connector_type: string;
-            /** @description Failure detail. Present only when `reachable` is false. */
+        /** @description Which check a probe ran, and why it failed when it did. */
+        ProbeDetails: {
+            effect_status?: components["schemas"]["EffectStatus"] | null;
+            /** @description Why it failed; absent when it passed. Never a resolved secret. */
             error?: string | null;
+            error_class?: components["schemas"]["ConnectorErrorClass"] | null;
             /**
-             * @description What the probe did, named plainly — the operator is entitled to know
-             *     whether their production system was contacted and how.
+             * @description The check: `configuration`, `SELECT 1`, `TCP connect to the URL's
+             *     host`, `cache read of a probe key`, `provider health check`.
              */
             probe: string;
-            /** @description `true` when the backend answered. */
-            reachable: boolean;
-            /**
-             * @description R29: `false` when no probe exists for this connector (`es`, `kafka`,
-             *     or a `db` connector with a `mongodb://` URL) — a permanent capability
-             *     gap, not an outage. Without this field the two were indistinguishable
-             *     in the response shape, and operator tooling read "not implemented" as
-             *     downtime.
-             */
-            supported: boolean;
         };
         ProcessRequest: {
             /** @description The workflow payload. */
@@ -3834,7 +2573,7 @@ export interface components {
         /**
          * @description Synchronous data-plane response envelope.
          *
-         *     R23: deserializable under `cfg(test)` with `deny_unknown_fields`, so
+         *     Deserializable under `cfg(test)` with `deny_unknown_fields`, so
          *     `sync::tests` can round-trip what `response_envelope` actually emits back
          *     through this struct. A field added to the envelope and not to the mirror —
          *     or vice versa — fails the test instead of shipping a spec that describes a
@@ -3874,6 +2613,69 @@ export interface components {
             message: string;
             task_id?: string | null;
         };
+        /** @description A package's admission record (`PUT /api/v2/admin/connector-packages/{digest}/admission`). */
+        ProviderAdmissionDto: {
+            /**
+             * @description Changes when the policy or the package's verified inputs do: an
+             *     admission recorded under another fingerprint is invalid.
+             */
+            admission_fingerprint: string;
+            package_digest: string;
+            policy_id: string;
+            revoked: boolean;
+        };
+        /** @description One registered provider backend. */
+        ProviderBackendInfo: {
+            /**
+             * @description The connections the backend calls beside its own, by alias: what a
+             *     connection over it binds in `bindings`. Absent when it declares none.
+             */
+            dependencies?: {
+                [key: string]: components["schemas"]["ProviderDependencyInfo"];
+            } | null;
+            /**
+             * @description The backend id: a `rust` driver's id, or a `workflow`/`wasm`
+             *     package's digest.
+             */
+            driver_id: string;
+            kind: components["schemas"]["ImplementationKind"];
+            /**
+             * @description The operations the backend declares, by canonical name: what a
+             *     `connector_call` on it may name (or an alias), and the schemas its
+             *     input and answer are held to. Absent when it declares none.
+             */
+            operations?: {
+                [key: string]: components["schemas"]["ProviderOperationInfo"];
+            } | null;
+            /**
+             * @description A `rust` driver's provider digest, derived from its id — what a
+             *     connection revision over it names as its `provider_digest`, whether
+             *     the driver is Community's or one an edition compiled in. Absent for a
+             *     `workflow` or `wasm` backend, whose id is already its package digest.
+             */
+            package_digest?: string | null;
+        };
+        /** @description One dependency a provider backend declares. */
+        ProviderDependencyInfo: {
+            /** @description The operations the backend may call on the bound connection. */
+            operations?: string[];
+            /** @description Whether a connection may leave the alias unbound. */
+            optional?: boolean;
+            /**
+             * @description The provider id the bound connection must run on, when it must run
+             *     on one.
+             */
+            provider?: string | null;
+        };
+        /** @description One operation a provider backend declares. */
+        ProviderOperationInfo: {
+            /** @description Other names a `connector_call` may give it. */
+            aliases?: string[];
+            /** @description The `orion-json-schema/1` document its input is held to. */
+            input_schema?: Record<string, never> | null;
+            /** @description The `orion-json-schema/1` document its answer is held to. */
+            output_schema?: Record<string, never> | null;
+        };
         PurgeTraceDlqRequest: {
             /**
              * Format: int64
@@ -3884,55 +2686,186 @@ export interface components {
              */
             older_than_hours: number;
         };
-        /** @description Body of `PUT /api/v1/admin/packages/{name}`. */
-        PutPackageReceiptRequest: {
+        /** @description A member the node serves without, and why. */
+        QuarantinedEntity: {
+            entity: components["schemas"]["EntityRef"];
+            reason: string;
+        };
+        /** @description The parts of a [`ReadinessResponse`]. */
+        ReadinessComponents: {
+            /** @description `ok` | `degraded` | `error`. */
+            background_tasks: string;
             /**
-             * @description Canonical content hash of the artifact, e.g. `sha256:…`. Compared for
-             *     equality against later PUTs of the same version; never parsed.
+             * @description Each channel driver that runs its own listener (an edition's protocol,
+             *     e.g. `kafka`), by protocol: `ok` | `degraded` | `disabled`. A
+             *     `degraded` driver makes the node not ready. Absent when the node
+             *     composes none.
              */
-            content_hash: string;
-            inventory?: components["schemas"]["PackageInventory"] | null;
-            /** @description `staged` before the artifact's entities are activated, `applied` after. */
-            state: components["schemas"]["PackageState"];
-            /** @description Package version this receipt records, e.g. `1.4.0`. */
+            channel_drivers?: {
+                [key: string]: string;
+            };
+            cluster_store?: components["schemas"]["ClusterStoreReadiness"] | null;
+            /** @description `ok` | `error`. */
+            database: string;
+            /**
+             * @description Always `ok`: the engine snapshot is lock-free and cannot be
+             *     unavailable once the process serves. Kept for shape stability.
+             */
+            engine: string;
+            /** @description Whether startup has completed. */
+            initialized: boolean;
+        };
+        /** @description `GET /readyz`: whether this node should take traffic. */
+        ReadinessResponse: {
+            components: components["schemas"]["ReadinessComponents"];
+            /** @description `ready` | `not_ready`. */
+            status: string;
+        };
+        /**
+         * @description Request body for revoking an admitted provider package
+         *     (`POST /api/v2/admin/connector-packages/{digest}/revocations`). The body
+         *     is optional.
+         */
+        RevokePackageRequest: {
+            /** @description Why, for the audit record. */
+            reason?: string | null;
+        };
+        /** @description A recorded revocation (`POST /api/v2/admin/connector-packages/{digest}/revocations`, `201`). */
+        RevokePackageResponse: {
+            package_digest: string;
+            /** @description The reason the request gave, if it gave one. */
+            reason?: string | null;
+        };
+        /**
+         * @description Commit an earlier revision's manifest again, as a new revision. It is
+         *     re-checked as of now: a provider revoked since is refused.
+         */
+        RollbackDeploymentRequest: {
+            /**
+             * Format: int64
+             * @description The current head; anything else is `DEPLOYMENT_HEAD_CONFLICT`.
+             */
+            base_revision: number;
+            idempotency_key: string;
+            /** @description The audit reason the revision records; `rollback` when absent. */
+            reason?: string;
+            /**
+             * Format: int64
+             * @description The committed revision whose manifest to deploy again.
+             */
+            rollback_to: number;
+        };
+        /**
+         * @description One half-open bucket interval `[start_bucket, end_bucket)` of a
+         *     channel's rollout, served by `workflow_revision`.
+         */
+        RolloutInterval: {
+            /** Format: int32 */
+            end_bucket: number;
+            /** Format: int32 */
+            start_bucket: number;
+            /** Format: int64 */
+            workflow_revision: number;
+        };
+        /** @description What this node is and serves (`GET /api/v2/admin/runtime-capabilities`). */
+        RuntimeCapabilitiesResponse: {
+            /** @description The package admission policy this node admits under. */
+            admission_policy_id: string;
+            /**
+             * Format: int32
+             * @description The contract revision this server speaks: [`API_VERSION`] of the
+             *     `orion-api` it was built with. A client that speaks another must
+             *     not read the rest of this answer, or any other v2 answer.
+             */
+            api_version: number;
+            /**
+             * @description What each of those protocols' drivers declares: what an offline tool
+             *     (`orion-cli lint`/`compile --capabilities`) validates a channel of an
+             *     edition's protocol against.
+             */
+            channel_driver_info: components["schemas"]["ChannelDriverInfo"][];
+            /** @description The channel protocols this node serves (`rest`, `http`, `cron`, …). */
+            channel_drivers: string[];
+            deployment_head: components["schemas"]["DeploymentHead"];
+            edition: components["schemas"]["EditionTier"];
+            native_scheduler: components["schemas"]["NativeSchedulerStatus"];
+            /** @description This node's reconciler: what it serves and how it got there. */
+            node_status: components["schemas"]["NodeStatus"];
+            /** @description Every connector provider backend this node registers. */
+            provider_backends: components["schemas"]["ProviderBackendInfo"][];
+            schema_profiles: string[];
+            /** @description The WebAssembly plugin worlds this node runs. */
+            wasm_worlds: string[];
+        };
+        /** @description Request body to scaffold a new provider package (`POST /api/v2/admin/authoring/scaffold`). */
+        ScaffoldRequest: {
+            kind: components["schemas"]["ImplementationKind"];
+            provider_id: string;
+            publisher: string;
+            tier?: components["schemas"]["EditionTier"] | null;
+            /** @description The package's semantic version; `1.0.0` when absent. */
+            version?: string;
+        };
+        /** @description A generated provider package (`POST /api/v2/admin/authoring/scaffold`). */
+        ScaffoldResponse: {
+            /** @description Relative path → the file, as UTF-8 text or `base64:<…>`. */
+            files: {
+                [key: string]: string;
+            };
+            implementation: components["schemas"]["ImplementationKind"];
+            /** @description The digest the files pack to. */
+            package_digest: string;
+            provider_id: string;
+            publisher: string;
             version: string;
         };
         /**
-         * @description When an active-set mutation rebuilds the engine.
-         *     `now` rebuilds as part of this request (default). `defer` commits the row
-         *     but leaves the running engine — and every peer, in cluster mode — on the
-         *     previous configuration until `POST /api/v1/admin/engine/reload`.
-         * @default now
-         * @enum {string}
+         * @description `POST /api/v2/admin/definitions/test`: run a workflow definition once on
+         *     the node's engine, against live connectors, without deploying it.
          */
-        ReloadMode: "now" | "defer";
-        RolloutUpdateRequest: {
-            /** Format: int64 */
-            rollout_percentage: number;
-        };
-        StatusChangeRequest: {
-            /** Format: int64 */
-            rollout_percentage?: number | null;
-            status: components["schemas"]["EntityStatus"];
-        };
-        TestWorkflowRequest: {
+        TestDefinitionRequest: {
+            /** @description The message's `data`. */
             data: unknown;
+            /** @description The workflow to run, as `POST /definitions` would take it. */
+            definition: components["schemas"]["WorkflowDefinition"];
+            /**
+             * @description The message's metadata, normalised the way an ingress builds it;
+             *     empty when absent.
+             */
             metadata?: unknown;
         };
-        /** @description `GET /api/v1/admin/traces/{id}` — the list row plus the payloads. */
-        TraceDetail: {
+        /** @description One run of a workflow definition (`POST /api/v2/admin/definitions/test`). */
+        TestDefinitionResponse: {
+            /** @description Why the run stopped short, when it did. */
+            error?: string | null;
+            /** @description The errors the engine recorded on the message, as it records them. */
+            errors: unknown[];
+            /** @description Whether the workflow's condition matched the supplied input. */
+            matched: boolean;
+            /** @description The message data after the pipeline ran. */
+            output: unknown;
+            /**
+             * @description The engine's trace of the run: the context it started from
+             *     (`initial`), then each step with its `task_id`, `result`
+             *     (`executed` | `skipped` | `failed`) and the changes it made. Its
+             *     shape is dataflow-rs's, so it is carried as the engine writes it.
+             */
+            trace: unknown;
+        };
+        /** @description `GET /api/v2/admin/traces/{id}` — the list row plus the payloads. */
+        TraceDetailResponse: {
             channel: string;
             channel_id?: string | null;
             completed_at?: string | null;
             created_at: string;
-            /** Format: int64 */
+            /** Format: double */
             duration_ms?: number | null;
             /** @description Present only when `status = "failed"`. */
             error?: string | null;
             id: string;
             /**
              * @description The full engine message. Present only when `status = "completed"`.
-             *     `context.metadata` is stripped from the projection (S14).
+             *     `context.metadata` is stripped from the projection.
              */
             message?: unknown;
             mode: string;
@@ -3949,9 +2882,11 @@ export interface components {
             id: string;
             /** Format: int64 */
             max_retries: number;
-            metadata_json: string;
+            /** @description The submission's metadata, as a JSON document. */
+            metadata: Record<string, never>;
             next_retry_at: string;
-            payload_json: string;
+            /** @description The failed message, as the JSON document it was. */
+            payload: Record<string, never>;
             /** Format: int64 */
             retry_count: number;
             trace_id: string;
@@ -3977,7 +2912,7 @@ export interface components {
             updated_at: string;
         };
         /**
-         * @description One row of `GET /api/v1/admin/traces` — payload-free by design (S14).
+         * @description One row of `GET /api/v2/admin/traces` — payload-free by design.
          *
          *     The narrower sibling of the single-trace read, for the same reason
          *     [`TraceDlqSummaryResponse`] is narrower than [`TraceDlqEntryResponse`]: a
@@ -4009,182 +2944,54 @@ export interface components {
             updated_at: string;
         };
         /**
-         * @description `GET /api/v1/admin/traces` — a page of trace rows.
-         *
-         *     Not [`PaginatedEnvelope`] (D8): `total` is present only when the request
-         *     asked for it with `include_total=true`, because the count scans the whole
-         *     filtered set; and `next_cursor` carries the keyset position of the last row
-         *     so the next page can be fetched without an `offset` skip.
+         * @description A provider package's files, and optionally its admission, for
+         *     `POST /api/v2/admin/connector-packages`.
          */
-        TracePageEnvelope: {
-            data: components["schemas"]["TraceListItem"][];
-            /** Format: int64 */
-            limit: number;
+        UploadPackageRequest: {
+            /** @description Admit the package in the same request. Absent means `false`. */
+            admit?: boolean;
+            /** @description Relative path → the file, as UTF-8 text or `base64:<…>`. */
+            files: {
+                [key: string]: string;
+            };
             /**
-             * @description Pass back as `?cursor=` to fetch the next page. Present when the page
-             *     is ordered by `created_at` (the default) and may have a successor.
-             *     Opaque — do not parse it.
+             * @description With `admit`: the provider lock the admission must verify against.
+             *     Without `admit` it has no effect and is refused.
              */
-            next_cursor?: string | null;
-            /** Format: int64 */
-            offset: number;
-            /**
-             * Format: int64
-             * @description Rows matching the filter, ignoring `limit`/`offset`. Present only with
-             *     `include_total=true`.
-             */
-            total?: number | null;
+            lock?: unknown;
         };
-        UpdateChannelRequest: {
-            config?: unknown;
-            consumer_group?: string | null;
-            description?: string | null;
-            methods?: string[] | null;
-            name?: string | null;
-            /** Format: int64 */
-            priority?: number | null;
-            route_pattern?: string | null;
-            tags?: string[] | null;
-            topic?: string | null;
-            transport_config?: unknown;
-            workflow_id?: string | null;
-        };
-        UpdateConnectorRequest: {
-            config?: unknown;
-            connector_type?: components["schemas"]["ConnectorType"] | null;
-            enabled?: boolean | null;
-            name?: string | null;
-            tags?: string[] | null;
-        };
-        /** @description `PUT /models/{id}`: every field optional, absent means keep. */
-        UpdateModelRequest: {
-            artifact?: components["schemas"]["ModelArtifactRef"] | null;
-            manifest?: unknown;
-            signature?: string | null;
-            tags?: string[] | null;
-        };
-        /** @description `PUT /plugins/{id}`: every field optional, absent means keep. */
-        UpdatePluginRequest: {
-            component?: string | null;
-            digest?: string | null;
-            manifest?: unknown;
-            signature?: string | null;
-            tags?: string[] | null;
-        };
-        UpdateWorkflowRequest: {
-            condition?: unknown;
-            continue_on_error?: boolean | null;
-            description?: string | null;
-            /**
-             * @description `Some(Value::Null)` clears the loop; `None` leaves it as stored. The
-             *     distinction is why this is not `Option<Value>` collapsed to one level:
-             *     "remove the loop" and "do not touch the loop" are different edits.
-             */
-            loop?: unknown;
-            name?: string | null;
-            /** Format: int64 */
-            priority?: number | null;
-            tags?: string[] | null;
-            tasks?: unknown;
-        };
-        ValidationEnvelope: {
-            data: components["schemas"]["ValidationResponse"];
-        };
-        ValidationIssue: {
-            field: string;
-            message: string;
-        };
-        ValidationResponse: {
-            errors: components["schemas"]["ValidationIssue"][];
-            valid: boolean;
-            warnings: components["schemas"]["ValidationIssue"][];
-        };
-        /** @description `GET /api/v1/admin/workflows/{id}/dependencies` (K9). */
-        WorkflowDependencies: {
-            /** @description Channel names targeted by `channel_call` tasks, statically. */
-            channels: string[];
-            /**
-             * @description Connector names the tasks reference, with the referencing function —
-             *     duplicates collapsed, task order kept.
-             */
-            connectors: components["schemas"]["ConnectorDependency"][];
-            /**
-             * @description True when a `channel_call` resolves its target with `channel_logic`
-             *     at runtime — the static `channels` list is then incomplete by
-             *     construction, and closure tooling must treat this workflow as having
-             *     unknowable channel dependencies.
-             */
-            has_dynamic_channel_calls: boolean;
-            /**
-             * @description The plugins whose functions the tasks name, resolved against this
-             *     node's generation: the active version and digest each function
-             *     currently comes from. A function this generation does not dispatch
-             *     appears under `unresolved_functions` instead — a plugin archived since
-             *     the workflow was written, or one this node could not load.
-             */
-            plugins?: components["schemas"]["PluginDependency"][];
-            /**
-             * @description Function names the tasks call that this generation's registry does
-             *     not know. Empty for a workflow that would activate here.
-             */
-            unresolved_functions?: string[];
-            /**
-             * Format: int64
-             * @description The version whose tasks were walked (the latest).
-             */
-            version: number;
-            workflow_id: string;
+        /** @description An uploaded package (`POST /api/v2/admin/connector-packages`, `201`). */
+        UploadPackageResponse: {
+            admission?: components["schemas"]["ProviderAdmissionDto"] | null;
+            package: components["schemas"]["ConnectorPackageSummary"];
         };
         /**
-         * @description API-friendly representation of a Workflow with parsed JSON fields.
-         *
-         *     This — not the server's `Workflow` row struct — is what every workflow
-         *     endpoint returns.
+         * @description A workflow: the dataflow-rs workflow document without what the deployment
+         *     supplies (`id`, `version`, `channel`, `status` and `rollout`).
          */
-        WorkflowResponse: {
-            condition: unknown;
-            /**
-             * @description `sha256:…` over the canonical importable content (K10) — the same
-             *     projection the upsert import compares and the package CLI hashes, so
-             *     equal hashes mean "importing one over the other is a no-op".
-             */
-            content_hash: string;
-            continue_on_error: boolean;
-            created_at: string;
+        WorkflowDefinition: {
+            /** @description JSONLogic deciding whether the workflow matches a message. */
+            condition?: unknown;
             description?: string | null;
-            /**
-             * @description The engine-managed loop over `tasks`, or absent for a workflow that
-             *     runs its task list exactly once. Skipped on serialize rather than sent
-             *     as `null`, so a response from a server that has the feature and one
-             *     from a server that does not are byte-identical for the common case.
-             */
+            /** @description The workflow loop, when the steps repeat. */
             loop?: unknown;
             name: string;
-            /** Format: int64 */
-            priority: number;
-            /** Format: int64 */
-            rollout_percentage: number;
-            status: string;
-            tags: unknown;
-            tasks: unknown;
-            updated_at: string;
-            /** Format: int64 */
-            version: number;
-            workflow_id: string;
-        };
-        /** @description `POST /api/v1/admin/workflows/{id}/test` — a dry run against sample input. */
-        WorkflowTestResult: {
-            errors: unknown[];
-            /** @description Whether the workflow's condition matched the supplied input. */
-            matched: boolean;
-            /** @description The message data after the pipeline ran. */
-            output: unknown;
+            /** @description What a failing task does to the run. */
+            on_failure?: components["schemas"]["WorkflowOnFailure"];
             /**
-             * @description Per-step execution trace: `task_id` and `result`
-             *     (`executed` | `skipped` | `failed`) for each step.
+             * Format: int64
+             * @description Higher is evaluated first among the workflows of one channel.
              */
-            trace: unknown;
+            priority?: number;
+            tags?: string[];
+            /** @description The steps: tasks and task groups. */
+            tasks: unknown;
         };
+        /**
+         * @description A workflow's failure policy, the engine's own vocabulary.
+         * @enum {string}
+         */
+        WorkflowOnFailure: "fail" | "continue";
     };
     responses: never;
     parameters: never;
@@ -4220,8 +3027,10 @@ export interface operations {
                 end_time?: string;
                 /** @description Page size, clamped to [1, 1000] (default 50). */
                 limit?: number;
-                /** @description Pagination offset (default 0). */
-                offset?: number;
+                /** @description Resume after this position: the previous page's `next_cursor`, unmodified. */
+                cursor?: string;
+                /** @description Count the filtered set (default false; the count is a full scan). */
+                include_total?: boolean;
             };
             header?: never;
             path?: never;
@@ -4235,10 +3044,163 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedEnvelope_AuditLogEntryResponse"];
+                    "application/json": components["schemas"]["Page_AuditLogEntryResponse"];
                 };
             };
             /** @description Unknown query parameter or malformed timestamp */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    authoring_lint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackageFilesRequest"];
+            };
+        };
+        responses: {
+            /** @description Lint report (`valid` indicates whether all checks passed) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LintResponse"];
+                };
+            };
+            /** @description A file is not valid `base64:` (`INVALID_PACKAGE_ENCODING`), or the request body did not parse (`VALIDATION_ERROR`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    authoring_pack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackageFilesRequest"];
+            };
+        };
+        responses: {
+            /** @description Deterministically packed provider package */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackResponse"];
+                };
+            };
+            /** @description A file is not valid `base64:` (`INVALID_PACKAGE_ENCODING`), or the files do not pack (`PACK_VALIDATION_FAILED`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    authoring_scaffold: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScaffoldRequest"];
+            };
+        };
+        responses: {
+            /** @description Generated provider package scaffold */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScaffoldResponse"];
+                };
+            };
+            /** @description A body that does not parse, such as an implementation kind that is not `rust`, `workflow` or `wasm` (`VALIDATION_ERROR`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -4282,7 +3244,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_Vec_BackupListItem"];
+                    "application/json": components["schemas"]["Data_Vec_BackupListItemResponse"];
                 };
             };
             /** @description Unavailable in cluster mode — backups are node-local files */
@@ -4324,12 +3286,12 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Backup created (SQLite only — VACUUM INTO a timestamped file) */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_BackupFile"];
+                    "application/json": components["schemas"]["Data_BackupFileResponse"];
                 };
             };
             /** @description Backup unavailable (non-SQLite backend, or cluster mode — use managed-DB snapshots/PITR) */
@@ -4388,7 +3350,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_CacheInvalidatedResponse"];
+                    "application/json": components["schemas"]["Data_CacheInvalidatedResponse"];
                 };
             };
             /** @description Not a valid namespace name */
@@ -4429,563 +3391,6 @@ export interface operations {
             };
         };
     };
-    list_channels: {
-        parameters: {
-            query?: {
-                status?: string;
-                channel_type?: string;
-                protocol?: string;
-                /** @description Only channels carrying this tag (K6). */
-                tag?: string;
-                limit?: number;
-                offset?: number;
-                /** @description Column to sort by: priority (default), name, status, channel_type, protocol, created_at, updated_at. */
-                sort_by?: string;
-                /** @description Sort direction: asc or desc (default). */
-                sort_order?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of channels */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedEnvelope_ChannelResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_channel: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateChannelRequest"];
-            };
-        };
-        responses: {
-            /** @description Channel created as draft */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ChannelResponse"];
-                };
-            };
-            /** @description Invalid input */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Channel id already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    export_channels: {
-        parameters: {
-            query?: {
-                status?: string;
-                channel_type?: string;
-                protocol?: string;
-                /** @description Only channels carrying this tag (K6). */
-                tag?: string;
-                limit?: number;
-                offset?: number;
-                /** @description Column to sort by: priority (default), name, status, channel_type, protocol, created_at, updated_at. */
-                sort_by?: string;
-                /** @description Sort direction: asc or desc (default). */
-                sort_order?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Exported channels */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_Vec_ChannelResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    import_channels: {
-        parameters: {
-            query?: {
-                /**
-                 * @description When true, validate each item and report what would happen without
-                 *     writing. Probes for conflicts against stored rows and for duplicates
-                 *     within the batch (R15), and under `on_conflict=new_version` reports
-                 *     the per-item action the real import would take (K2).
-                 */
-                dry_run?: boolean;
-                /**
-                 * @description What an already-stored conflict key means: `fail` (default — the item
-                 *     is refused), `skip`, or `new_version` (upsert: update the draft in
-                 *     place, or cut a new draft version over an active entity; identical
-                 *     content is a no-op). K2.
-                 */
-                on_conflict?: components["schemas"]["OnConflict"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateChannelRequest"][];
-            };
-        };
-        responses: {
-            /** @description Import results with counts (or would-be results when ?dry_run=true). Each item is handled independently: a malformed or conflicting item becomes one entry in `errors` and the rest of the batch still applies. Dry-run additionally probes for id conflicts against stored rows and duplicates within the batch, without writing. `?on_conflict=new_version` upserts instead of refusing an existing id (K2): an existing draft is replaced, an active channel whose content differs gets a new draft version, and identical content is reported `unchanged` — re-importing the same artifact is a no-op. Per-item outcomes are in `results`. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ImportResult"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    validate_channel: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateChannelRequest"];
-            };
-        };
-        responses: {
-            /** @description Validation result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ValidationEnvelope"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    get_channel: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Channel ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Channel details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ChannelResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Channel not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    update_channel: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Channel ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateChannelRequest"];
-            };
-        };
-        responses: {
-            /** @description Draft channel updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ChannelResponse"];
-                };
-            };
-            /** @description Invalid input */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Channel not found, or it has no draft version to update */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    delete_channel: {
-        parameters: {
-            query?: {
-                /**
-                 * @description `now` (default) reloads the engine as part of this request; `defer`
-                 *     commits the row and leaves the reload to a later
-                 *     `POST /engine/reload` (K4).
-                 */
-                reload?: components["schemas"]["ReloadMode"];
-            };
-            header?: never;
-            path: {
-                /** @description Channel ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Channel deleted. With `?reload=defer` the engine keeps serving it until `POST /engine/reload` */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Channel not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    change_channel_status: {
-        parameters: {
-            query?: {
-                /**
-                 * @description When true, run the transition's gates and report findings without
-                 *     writing. The response body is the `/validate` envelope, not the
-                 *     entity.
-                 */
-                dry_run?: boolean;
-                /**
-                 * @description `now` (default) reloads the engine as part of this request; `defer`
-                 *     commits the row and leaves the reload to a later
-                 *     `POST /engine/reload` (K4).
-                 */
-                reload?: components["schemas"]["ReloadMode"];
-            };
-            header?: never;
-            path: {
-                /** @description Channel ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ChannelStatusChangeRequest"];
-            };
-        };
-        responses: {
-            /** @description Status updated. With `?dry_run=true` nothing is written and the body is instead the `/validate` envelope (`{"data": {"valid", "errors", "warnings"}}`) reporting every gate the real transition would run: draft existence, route collisions against active channels, and the workflow-active gate (K3). With `?reload=defer` the row commits but the engine (and every cluster peer) keeps serving the previous active set until `POST /engine/reload` (K4). */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ChannelResponse"];
-                };
-            };
-            /** @description Invalid status transition, route collision, or the channel's workflow is missing or not active (K8) */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Channel not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     trigger_channel: {
         parameters: {
             query?: never;
@@ -5004,7 +3409,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_CronOccurrenceResponse"];
+                    "application/json": components["schemas"]["Data_CronOccurrenceResponse"];
                 };
             };
             /** @description Not an active cron channel */
@@ -5054,30 +3459,38 @@ export interface operations {
             };
         };
     };
-    list_channel_versions: {
+    list_connections: {
         parameters: {
             query?: {
-                /** @description Page size, clamped to [1, 1000] (default 50). */
+                /** @description Rows per page: 50 by default, at most 1000. */
                 limit?: number;
-                /** @description Pagination offset (default 0). */
-                offset?: number;
+                /** @description The previous page's `next_cursor`, unmodified. */
+                cursor?: string;
+                /** @description Also count the whole filtered set (default false). */
+                include_total?: boolean;
             };
             header?: never;
-            path: {
-                /** @description Channel ID */
-                id: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Paginated version history */
+            /** @description A page of connection revisions */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedEnvelope_ChannelResponse"];
+                    "application/json": components["schemas"]["Page_ConnectionRevisionResponse"];
+                };
+            };
+            /** @description A `limit` of 0, or a cursor this endpoint did not issue */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -5089,7 +3502,188 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Channel not found */
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_connection_revisions: {
+        parameters: {
+            query?: {
+                /** @description Rows per page: 50 by default, at most 1000. */
+                limit?: number;
+                /** @description The previous page's `next_cursor`, unmodified. */
+                cursor?: string;
+                /** @description Also count the whole filtered set (default false). */
+                include_total?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description Connection identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of the connection's revisions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ConnectionRevisionResponse"];
+                };
+            };
+            /** @description A `limit` of 0, or a cursor this endpoint did not issue */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_connection_revision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Connection identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateConnectionRevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Connection revision created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateConnectionRevisionResponse"];
+                };
+            };
+            /** @description Raw secret in public_config, a malformed locator, or a configuration that would not load; `details` names each problem by field */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The revision is stored with other content (`IMMUTABLE_CONNECTION_CONFLICT`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_connection_revision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Connection identifier */
+                id: string;
+                /** @description Connection revision */
+                revision: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The connection revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionRevisionResponse"];
+                };
+            };
+            /** @description A malformed path parameter (`VALIDATION_ERROR`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such revision is stored (`CONNECTION_REVISION_NOT_FOUND`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -5109,25 +3703,36 @@ export interface operations {
             };
         };
     };
-    create_new_channel_version: {
+    probe_connection: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description Channel ID */
+                /** @description Connection identifier */
                 id: string;
+                /** @description Connection revision */
+                revision: number;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description New draft version created */
-            201: {
+            /** @description The probe ran; `healthy` says what it found */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_ChannelResponse"];
+                    "application/json": components["schemas"]["ConnectionProbeResponse"];
+                };
+            };
+            /** @description A malformed path parameter (`VALIDATION_ERROR`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -5139,7 +3744,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            /** @description The revision's provider package is revoked (`PROVIDER_REVOKED`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5148,8 +3753,8 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Draft already exists */
-            409: {
+            /** @description No such revision (`CONNECTION_REVISION_NOT_FOUND`), its package is not stored (`PACKAGE_NOT_FOUND`), or this node has no backend for it (`PROVIDER_NOT_FOUND`) */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5168,22 +3773,15 @@ export interface operations {
             };
         };
     };
-    list_connectors: {
+    list_connector_packages: {
         parameters: {
             query?: {
-                /** @description Only connectors carrying this tag (K6). */
-                tag?: string;
+                /** @description Rows per page: 50 by default, at most 1000. */
                 limit?: number;
-                offset?: number;
-                /** @description Column to sort by: name (default), connector_type, created_at, updated_at. */
-                sort_by?: string;
-                /**
-                 * @description Sort direction: asc (default) or desc. The default differs from the
-                 *     versioned lists (which default desc on priority) because connectors
-                 *     have always listed alphabetically — D22 added the sort fields without
-                 *     moving the unsorted callers' rows.
-                 */
-                sort_order?: string;
+                /** @description The previous page's `next_cursor`, unmodified. */
+                cursor?: string;
+                /** @description Also count the whole filtered set (default false). */
+                include_total?: boolean;
             };
             header?: never;
             path?: never;
@@ -5191,13 +3789,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Paginated list of connectors. Each row carries `load_status`: `loaded` when the connector is live in the registry, `failed` (with `load_error`) when it is enabled but could not be loaded, and `disabled` when it is not enabled. A `failed` connector is absent at request time, so every workflow using it returns a 500. */
+            /** @description A page of connector provider packages */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedEnvelope_ConnectorListItem"];
+                    "application/json": components["schemas"]["Page_ConnectorPackageSummary"];
+                };
+            };
+            /** @description A `limit` of 0, or a cursor this endpoint did not issue */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -5220,7 +3827,7 @@ export interface operations {
             };
         };
     };
-    create_connector: {
+    upload_connector_package: {
         parameters: {
             query?: never;
             header?: never;
@@ -5229,17 +3836,26 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateConnectorRequest"];
+                "application/json": components["schemas"]["UploadPackageRequest"];
             };
         };
         responses: {
-            /** @description Connector created */
+            /** @description Package uploaded */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_ConnectorResponse"];
+                    "application/json": components["schemas"]["UploadPackageResponse"];
+                };
+            };
+            /** @description Invalid package encoding or manifest */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -5260,8 +3876,195 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Connector name conflict */
+            /** @description Publisher/version or immutable content conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_connector_package: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Package SHA-256 digest (`sha256:<64-hex>`) */
+                digest: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The package and its admission */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorPackageResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No package is stored under the digest (`PACKAGE_NOT_FOUND`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    admit_connector_package: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Package SHA-256 digest (`sha256:<64-hex>`) */
+                digest: string;
+            };
+            cookie?: never;
+        };
+        /** @description Optional lockfile verification payload */
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AdmitPackageRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Package admitted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdmitPackageResponse"];
+                };
+            };
+            /** @description A workflow package that is not hermetic (`VALIDATION_ERROR`, by file), or a lock that does not verify */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rejected by the admission policy */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No package is stored under the digest (`PACKAGE_NOT_FOUND`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revoke_connector_package: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Package SHA-256 digest (`sha256:<64-hex>`) */
+                digest: string;
+            };
+            cookie?: never;
+        };
+        /** @description Optional revocation reason */
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RevokePackageRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Package revoked */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevokePackageResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The package was never admitted (`ADMISSION_NOT_FOUND`) */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5295,7 +4098,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_CircuitBreakerStates"];
+                    "application/json": components["schemas"]["Data_CircuitBreakerStatesResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -5336,7 +4139,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_CircuitBreakerReset"];
+                    "application/json": components["schemas"]["Data_CircuitBreakerResetResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -5377,413 +4180,6 @@ export interface operations {
             };
         };
     };
-    export_connectors: {
-        parameters: {
-            query?: {
-                /** @description Only connectors carrying this tag (K6). */
-                tag?: string;
-                limit?: number;
-                offset?: number;
-                /** @description Column to sort by: name (default), connector_type, created_at, updated_at. */
-                sort_by?: string;
-                /**
-                 * @description Sort direction: asc (default) or desc. The default differs from the
-                 *     versioned lists (which default desc on priority) because connectors
-                 *     have always listed alphabetically — D22 added the sort fields without
-                 *     moving the unsorted callers' rows.
-                 */
-                sort_order?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Exported connectors in the shape `/import` accepts, secrets masked */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_Vec_ConnectorExportItem"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    import_connectors: {
-        parameters: {
-            query?: {
-                /**
-                 * @description When true, validate each item and report what would happen without
-                 *     writing. Probes for conflicts against stored rows and for duplicates
-                 *     within the batch (R15), and under `on_conflict=new_version` reports
-                 *     the per-item action the real import would take (K2).
-                 */
-                dry_run?: boolean;
-                /**
-                 * @description What an already-stored conflict key means: `fail` (default — the item
-                 *     is refused), `skip`, or `new_version` (upsert: update the draft in
-                 *     place, or cut a new draft version over an active entity; identical
-                 *     content is a no-op). K2.
-                 */
-                on_conflict?: components["schemas"]["OnConflict"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateConnectorRequest"][];
-            };
-        };
-        responses: {
-            /** @description Import results with counts (or would-be results when ?dry_run=true). Each item is handled independently: a malformed or conflicting item becomes one entry in `errors` and the rest of the batch still applies. Dry-run additionally probes for name conflicts against stored rows and duplicates within the batch, without writing. `?on_conflict=new_version` upserts instead of refusing an existing name (K2): connectors are unversioned, so an existing connector is updated in place (`updated`), and identical content is reported `unchanged` — re-importing the same artifact is a no-op. Per-item outcomes are in `results`. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ImportResult"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    validate_connector: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateConnectorRequest"];
-            };
-        };
-        responses: {
-            /** @description Validation result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ValidationEnvelope"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    get_connector: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Connector ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Connector details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ConnectorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Connector not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    update_connector: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Connector ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateConnectorRequest"];
-            };
-        };
-        responses: {
-            /** @description Connector updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ConnectorResponse"];
-                };
-            };
-            /** @description Rename refused: an active workflow references the old name */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Connector not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    delete_connector: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Connector ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Connector deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Connector not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    test_connector: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Connector ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Probe result. A backend that cannot be reached is still a 200 — the probe ran and this is its answer; `reachable: false` is the finding, not a server error. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProbeEnvelope"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Connector not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     list_occurrences: {
         parameters: {
             query?: {
@@ -5799,7 +4195,10 @@ export interface operations {
                 /** @description Inclusive upper bound on `scheduled_for`. */
                 until?: string;
                 limit?: number;
-                offset?: number;
+                /** @description Resume after this position: the previous page's `next_cursor`, unmodified. */
+                cursor?: string;
+                /** @description Count the filtered set (default false; the count is a full scan). */
+                include_total?: boolean;
             };
             header?: never;
             path?: never;
@@ -5813,7 +4212,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedEnvelope_CronOccurrenceSummaryResponse"];
+                    "application/json": components["schemas"]["Page_CronOccurrenceSummaryResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -5854,7 +4253,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_CronOccurrenceResponse"];
+                    "application/json": components["schemas"]["Data_CronOccurrenceResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -5904,7 +4303,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_CronOccurrenceResponse"];
+                    "application/json": components["schemas"]["Data_CronOccurrenceResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -5972,7 +4371,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_CronOccurrenceResponse"];
+                    "application/json": components["schemas"]["Data_CronOccurrenceResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -6037,7 +4436,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_Vec_CronScheduleStatusResponse"];
+                    "application/json": components["schemas"]["Data_Vec_CronScheduleStatusResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -6060,22 +4459,35 @@ export interface operations {
             };
         };
     };
-    engine_reload: {
+    upload_definition: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Definition"];
+            };
+        };
         responses: {
-            /** @description Engine reloaded. `generation` is the id of the generation this reload published and `load_issues` is what *that* generation could not load — an entity quarantined by it is not serving, though the reload succeeded. */
-            200: {
+            /** @description Definition stored. For a workflow, `advisories` lists what the engine reports and does not refuse (`validation::engine_advisories`: an accidentally escaped `$` key, a `validation` whose failure stops nothing); they never refuse the upload. */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_EngineReloadedResponse"];
+                    "application/json": components["schemas"]["DefinitionResponse"];
+                };
+            };
+            /** @description The definition would not serve; `details` names each problem by field */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -6089,6 +4501,436 @@ export interface operations {
             };
             /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    test_definition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestDefinitionRequest"];
+            };
+        };
+        responses: {
+            /** @description The run, with its trace */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestDefinitionResponse"];
+                };
+            };
+            /** @description The definition would not serve, or `metadata` is not an object; `details` names each problem by field */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_definition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description `sha256:…` the upload answered */
+                digest: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The definition as stored, except that a channel's credentials (`auth.keys`, `auth.secret`, `auth.secrets`, `auth.jwt_keys[*].key`, `oauth2_login`'s client and state secrets) read as `******`; a secret reference such as `env://NAME` is shown as written. The digest is of the stored, unmasked definition. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Definition"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No definition is stored under that digest */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_deployment_plan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDeploymentPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Candidate deployment plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentPlanResponse"];
+                };
+            };
+            /** @description Manifest validation failed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Referenced provider package not admitted or revoked */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Base revision not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_deployments: {
+        parameters: {
+            query?: {
+                /** @description Revisions per page, newest first: 50 by default, at most 1000. */
+                limit?: number;
+                /** @description The `next_cursor` of the previous page. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The head and a page of revisions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentsPage"];
+                };
+            };
+            /** @description A `limit` of 0, or a cursor this endpoint did not issue */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_deployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDeploymentRequest"];
+            };
+        };
+        responses: {
+            /** @description Committed and accepted for convergence */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateDeploymentResponse"];
+                };
+            };
+            /** @description Manifest validation failed, the body is neither an apply nor a rollback, or the rollback target is compacted */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Provider not admitted or admission invalidated */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The rollback target does not exist */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Base revision conflict, idempotency conflict, or reviewed digest mismatch */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_deployment_revision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Committed deployment revision number */
+                revision: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed deployment revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentRevisionResponse"];
+                };
+            };
+            /** @description A malformed path parameter (`VALIDATION_ERROR`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No revision has that number (`REVISION_NOT_FOUND`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_deployment_convergence: {
+        parameters: {
+            query?: {
+                /** @description Convergence evaluation scope (`this-node` or `observed`). */
+                target?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Target deployment revision */
+                revision: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Convergence evaluation report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConvergenceStatusResponse"];
+                };
+            };
+            /** @description A malformed path parameter or an unknown `target` (`VALIDATION_ERROR`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No revision has that number (`REVISION_NOT_FOUND`) */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6122,7 +4964,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_EngineStatusResponse"];
+                    "application/json": components["schemas"]["Data_EngineStatusResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -6160,7 +5002,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_Vec_FunctionSchemaItem"];
+                    "application/json": components["schemas"]["Data_Vec_CatalogueEntry"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -6183,1716 +5025,26 @@ export interface operations {
             };
         };
     };
-    list_models: {
-        parameters: {
-            query?: {
-                status?: string;
-                tag?: string;
-                /** @description Admission state to select: `pending`, `passed` or `failed`. */
-                admission?: string;
-                limit?: number;
-                offset?: number;
-                /** @description Column to sort by: model_id (default), status, created_at, updated_at. */
-                sort_by?: string;
-                /** @description Sort direction: asc (default) or desc. */
-                sort_order?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of models */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedEnvelope_ModelResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_model: {
+    get_runtime_capabilities: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateModelRequest"];
-            };
-        };
-        responses: {
-            /** @description Model registered as draft and queued for admission on this node. The manifest was validated, the artifact reference checked against a storage connector that allows reads, and the object confirmed to exist within `models.max_artifact_bytes`; `admission.state` is `pending` until the worker has fetched and verified the bytes — poll `GET /models/{id}`. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ModelResponse"];
-                };
-            };
-            /** @description Invalid manifest, artifact reference, signature or connector; or models are disabled on this node */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Model id already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    export_models: {
-        parameters: {
-            query?: {
-                status?: string;
-                tag?: string;
-                /** @description Admission state to select: `pending`, `passed` or `failed`. */
-                admission?: string;
-                limit?: number;
-                offset?: number;
-                /** @description Column to sort by: model_id (default), status, created_at, updated_at. */
-                sort_by?: string;
-                /** @description Sort direction: asc (default) or desc. */
-                sort_order?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
         requestBody?: never;
         responses: {
-            /** @description Exported models, importable as they are: each item carries the manifest and the artifact reference — connector, key, digest — and never the bytes. The target fetches the object from its own connector of that name at admission. */
+            /** @description Runtime capabilities report */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_Vec_ModelResponse"];
+                    "application/json": components["schemas"]["RuntimeCapabilitiesResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
             401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    import_models: {
-        parameters: {
-            query?: {
-                /**
-                 * @description When true, validate each item and report what would happen without
-                 *     writing. Probes for conflicts against stored rows and for duplicates
-                 *     within the batch (R15), and under `on_conflict=new_version` reports
-                 *     the per-item action the real import would take (K2).
-                 */
-                dry_run?: boolean;
-                /**
-                 * @description What an already-stored conflict key means: `fail` (default — the item
-                 *     is refused), `skip`, or `new_version` (upsert: update the draft in
-                 *     place, or cut a new draft version over an active entity; identical
-                 *     content is a no-op). K2.
-                 */
-                on_conflict?: components["schemas"]["OnConflict"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateModelRequest"][];
-            };
-        };
-        responses: {
-            /** @description Import results with counts (or would-be results when ?dry_run=true). Each item is handled independently and carries a manifest and an artifact reference, never bytes — what an export produces. Every item written is queued for admission on this node. `?on_conflict=new_version` upserts: an existing draft is replaced, an active model whose content differs gets a new draft version, identical content is reported `unchanged`. A `signature` is not content, but an item whose signature differs from the stored one is not `unchanged`: it is written, so a signature attached at deploy time reaches the row. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ImportResult"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    validate_model: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateModelRequest"];
-            };
-        };
-        responses: {
-            /** @description Validation result: `valid: true` means `POST /models` would accept this payload on this node — the manifest parses, the reference names a storage connector that allows reads, and the object exists within `models.max_artifact_bytes`. `head` carries the object's size and ETag when the check got that far. Nothing is written and nothing is fetched. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelValidationEnvelope"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    get_model: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Model ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The latest version, with this node's view of it under `health` */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ModelResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Model not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    update_model: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Model ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateModelRequest"];
-            };
-        };
-        responses: {
-            /** @description Draft model updated; an absent field keeps its stored value. A changed artifact reference resets admission to `pending` and queues the draft again; a change to the manifest or tags alone keeps the verdict, which was about the bytes. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ModelResponse"];
-                };
-            };
-            /** @description Invalid input, or models are disabled on this node */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Model not found, or it has no draft version to update */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    delete_model: {
-        parameters: {
-            query?: {
-                /**
-                 * @description `now` (default) reloads the engine as part of this request; `defer`
-                 *     commits the row and leaves the reload to a later
-                 *     `POST /engine/reload` (K4).
-                 */
-                reload?: components["schemas"]["ReloadMode"];
-            };
-            header?: never;
-            path: {
-                /** @description Model ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Model deleted (all versions). The cached artifact, if any, stays in this node's cache until swept. With `?reload=defer` the engine keeps serving it until `POST /engine/reload` */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Model not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description An active workflow still names it */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    admit_model: {
-        parameters: {
-            query?: {
-                /**
-                 * @description When true, run the admission inline and answer with the verdict
-                 *     recorded; otherwise queue it for the worker and answer `202`.
-                 */
-                wait?: boolean;
-            };
-            header?: never;
-            path: {
-                /** @description Model ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description With `?wait=true`: the admission ran inline and the row carries its verdict */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ModelResponse"];
-                };
-            };
-            /** @description The latest version queued for admission on this node again — after a fixed bucket, a re-uploaded object, or a node that never ran it. Idempotent: a version already admitted is admitted again and the verdict replaced. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ModelResponse"];
-                };
-            };
-            /** @description Models are disabled on this node */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Model not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    model_dependencies: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Model ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The active workflows calling `model_infer` on this model by its literal id, with the task ids that do */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ModelDependencies"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Model not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    change_model_status: {
-        parameters: {
-            query?: {
-                /**
-                 * @description When true, run the transition's gates and report findings without
-                 *     writing. The response body is the `/validate` envelope, not the
-                 *     entity.
-                 */
-                dry_run?: boolean;
-                /**
-                 * @description `now` (default) reloads the engine as part of this request; `defer`
-                 *     commits the row and leaves the reload to a later
-                 *     `POST /engine/reload` (K4).
-                 */
-                reload?: components["schemas"]["ReloadMode"];
-            };
-            header?: never;
-            path: {
-                /** @description Model ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["StatusChangeRequest"];
-            };
-        };
-        responses: {
-            /** @description Status updated. Activating supersedes the previously active version in the same transaction, so a model id resolves to one digest per generation; it is refused until the draft's admission has passed. Archiving is refused while an active workflow names the model. `?dry_run=true` reports every gate without writing; `?reload=defer` commits without rebuilding the engine. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ModelResponse"];
-                };
-            };
-            /** @description Invalid status transition, or models are disabled on this node */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Model not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Admission is pending or failed, or an active workflow still names the model */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    list_model_versions: {
-        parameters: {
-            query?: {
-                /** @description Page size, clamped to [1, 1000] (default 50). */
-                limit?: number;
-                /** @description Pagination offset (default 0). */
-                offset?: number;
-            };
-            header?: never;
-            path: {
-                /** @description Model ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated version history */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedEnvelope_ModelResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Model not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_new_model_version: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Model ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description New draft version copied from the latest, admission verdict and stats included — the reference they describe is unchanged */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ModelResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Draft already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    list_packages: {
-        parameters: {
-            query?: {
-                /** @description Page size, clamped to [1, 1000] (default 50). */
-                limit?: number;
-                /** @description Pagination offset (default 0). */
-                offset?: number;
-                /**
-                 * @description When true, one row per package — its `current` receipt, the newest
-                 *     applied one — with the `inventory` it recorded. A package whose
-                 *     receipts are all staged is left out.
-                 */
-                current?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated receipt rows, ordered by package name, newest first within a package, without their `inventory`. With `?current=true`, each package's current receipt with its `inventory`. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedEnvelope_PackageReceiptResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    get_package: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Package name */
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The package's receipts, with `current` naming the newest applied version. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_PackageDetail"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description No receipts recorded for this package */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    put_package: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Package name */
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PutPackageReceiptRequest"];
-            };
-        };
-        responses: {
-            /** @description The receipt as stored */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_PackageReceiptResponse"];
-                };
-            };
-            /** @description Invalid name, version, content hash, state, or inventory (more than 1000 ids in one list, or an empty or over-long id) */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The version is already applied with different content (an applied package version is immutable — bump the package version), already applied and asked to go back to staged, or was written by a concurrent request. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    list_plugins: {
-        parameters: {
-            query?: {
-                status?: string;
-                tag?: string;
-                limit?: number;
-                offset?: number;
-                /** @description Column to sort by: plugin_id (default), status, created_at, updated_at. */
-                sort_by?: string;
-                /** @description Sort direction: asc (default) or desc. */
-                sort_order?: string;
-                /** @description Export only: carry each component as base64 under `component`. */
-                include_artifacts?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of plugins */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedEnvelope_PluginResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_plugin: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreatePluginRequest"];
-            };
-        };
-        responses: {
-            /** @description Plugin created as draft. The manifest was validated, the component hashed, compiled in the sandbox and every declared function probed before the row was written, so the draft is already known to load. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_PluginResponse"];
-                };
-            };
-            /** @description Invalid manifest, component, or digest; or plugins are disabled on this node */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Plugin id already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    export_plugins: {
-        parameters: {
-            query?: {
-                status?: string;
-                tag?: string;
-                limit?: number;
-                offset?: number;
-                /** @description Column to sort by: plugin_id (default), status, created_at, updated_at. */
-                sort_by?: string;
-                /** @description Sort direction: asc (default) or desc. */
-                sort_order?: string;
-                /** @description Export only: carry each component as base64 under `component`. */
-                include_artifacts?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Exported plugins, importable as they are. With `?include_artifacts=true` each item also carries its component as base64 under `component`; without it the item names only the digest, which an import accepts when the target already holds the artifact. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_Vec_PluginResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    import_plugins: {
-        parameters: {
-            query?: {
-                /**
-                 * @description When true, validate each item and report what would happen without
-                 *     writing. Probes for conflicts against stored rows and for duplicates
-                 *     within the batch (R15), and under `on_conflict=new_version` reports
-                 *     the per-item action the real import would take (K2).
-                 */
-                dry_run?: boolean;
-                /**
-                 * @description What an already-stored conflict key means: `fail` (default — the item
-                 *     is refused), `skip`, or `new_version` (upsert: update the draft in
-                 *     place, or cut a new draft version over an active entity; identical
-                 *     content is a no-op). K2.
-                 */
-                on_conflict?: components["schemas"]["OnConflict"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreatePluginRequest"][];
-            };
-        };
-        responses: {
-            /** @description Import results with counts (or would-be results when ?dry_run=true). Each item is handled independently. An item may carry its component inline (base64) or name a digest this instance already holds — what an export produces with and without `?include_artifacts=true`. `?on_conflict=new_version` upserts: an existing draft is replaced, an active plugin whose content differs gets a new draft version, identical content is reported `unchanged`. A `signature` is not content, but an item whose signature differs from the stored one is not `unchanged`: it is written, so a signature attached at deploy time reaches the row. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ImportResult"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    validate_plugin: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreatePluginRequest"];
-            };
-        };
-        responses: {
-            /** @description Validation result: `valid: true` means `POST /plugins` would accept this payload on this node — the manifest parses, the component compiles and every declared function answers a probe. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ValidationResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    get_plugin: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Plugin ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The latest version, with this node's load state under `health` */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_PluginResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Plugin not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    update_plugin: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Plugin ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdatePluginRequest"];
-            };
-        };
-        responses: {
-            /** @description Draft plugin updated; an absent field keeps its stored value */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_PluginResponse"];
-                };
-            };
-            /** @description Invalid input */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Plugin not found, or it has no draft version to update */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    delete_plugin: {
-        parameters: {
-            query?: {
-                /**
-                 * @description `now` (default) reloads the engine as part of this request; `defer`
-                 *     commits the row and leaves the reload to a later
-                 *     `POST /engine/reload` (K4).
-                 */
-                reload?: components["schemas"]["ReloadMode"];
-            };
-            header?: never;
-            path: {
-                /** @description Plugin ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Plugin deleted (all versions), and any component nothing names any more. With `?reload=defer` the engine keeps serving it until `POST /engine/reload` */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Plugin not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description An active workflow still calls one of its functions */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    plugin_dependencies: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Plugin ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The functions the latest version declares and the active workflows calling them */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_PluginDependencies"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Plugin not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    change_plugin_status: {
-        parameters: {
-            query?: {
-                /**
-                 * @description When true, run the transition's gates and report findings without
-                 *     writing. The response body is the `/validate` envelope, not the
-                 *     entity.
-                 */
-                dry_run?: boolean;
-                /**
-                 * @description `now` (default) reloads the engine as part of this request; `defer`
-                 *     commits the row and leaves the reload to a later
-                 *     `POST /engine/reload` (K4).
-                 */
-                reload?: components["schemas"]["ReloadMode"];
-            };
-            header?: never;
-            path: {
-                /** @description Plugin ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["StatusChangeRequest"];
-            };
-        };
-        responses: {
-            /** @description Status updated. Activating supersedes the previously active version in the same transaction, so a function name resolves to one digest per generation; it is refused while an active workflow calls one of the version's functions with an input its schema does not accept. Archiving is refused while an active workflow calls one of the plugin's functions. `?dry_run=true` reports every gate without writing; `?reload=defer` commits without rebuilding the engine. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_PluginResponse"];
-                };
-            };
-            /** @description Invalid status transition, or plugins are disabled on this node */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Plugin not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description An active workflow still calls one of its functions, or calls one with an input the version being activated does not accept */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    list_plugin_versions: {
-        parameters: {
-            query?: {
-                /** @description Page size, clamped to [1, 1000] (default 50). */
-                limit?: number;
-                /** @description Pagination offset (default 0). */
-                offset?: number;
-            };
-            header?: never;
-            path: {
-                /** @description Plugin ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated version history */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedEnvelope_PluginResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Plugin not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_new_plugin_version: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Plugin ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description New draft version copied from the latest */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_PluginResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Draft already exists */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7923,8 +5075,10 @@ export interface operations {
                 exhausted?: boolean;
                 /** @description Page size, clamped to [1, 1000] (default 50). */
                 limit?: number;
-                /** @description Pagination offset (default 0). */
-                offset?: number;
+                /** @description Resume after this position: the previous page's `next_cursor`, unmodified. */
+                cursor?: string;
+                /** @description Count the filtered set (default false; the count is a full scan). */
+                include_total?: boolean;
             };
             header?: never;
             path?: never;
@@ -7938,7 +5092,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedEnvelope_TraceDlqSummaryResponse"];
+                    "application/json": components["schemas"]["Page_TraceDlqSummaryResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -7980,7 +5134,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_DlqPurgeResult"];
+                    "application/json": components["schemas"]["Data_DlqPurgeResponse"];
                 };
             };
             /** @description Missing or malformed `older_than_hours` */
@@ -8039,7 +5193,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_TraceDlqEntryResponse"];
+                    "application/json": components["schemas"]["Data_TraceDlqEntryResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -8089,7 +5243,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_TraceDlqEntryResponse"];
+                    "application/json": components["schemas"]["Data_TraceDlqEntryResponse"];
                 };
             };
             /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
@@ -8138,27 +5292,16 @@ export interface operations {
                 /** @description Filter by channel. */
                 channel?: string;
                 /**
-                 * @description Filter by mode: `sync`, `async` or `kafka` — the transport the
+                 * @description Filter by mode: `sync`, `async` or `cron` — the transport the
                  *     message arrived on.
                  */
                 mode?: string;
                 /** @description Page size, clamped to [1, 1000] (default 50). */
                 limit?: number;
-                /** @description Page offset. Mutually exclusive with `cursor`. */
-                offset?: number;
-                /** @description Column to sort by: created_at (default), updated_at, status, channel, mode. */
-                sort_by?: string;
-                /** @description Sort direction: asc or desc (default). */
-                sort_order?: string;
-                /**
-                 * @description Keyset cursor from a previous page's `next_cursor` (D8): pass it back
-                 *     unmodified. Valid only with the default `created_at` ordering, and
-                 *     mutually exclusive with `offset`; cheaper than `offset` on a large
-                 *     table because it never skips rows.
-                 */
+                /** @description Resume after this position: the previous page's `next_cursor`, unmodified. */
                 cursor?: string;
                 /**
-                 * @description Compute `total` for this page (default false). Off by default (D8):
+                 * @description Compute `total` for this page (default false). Off by default:
                  *     the count is a full scan of the filtered set on Postgres and InnoDB,
                  *     paid on every page even though the number rarely changes what the
                  *     caller does next.
@@ -8171,13 +5314,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Page of traces */
+            /** @description Page of traces. Not the common paginated envelope: `total` is present only with `include_total=true`, because the count scans the whole filtered set, and `next_cursor` carries the keyset position of the last row, to pass back as `?cursor=`, when the page is ordered by `created_at` (the default) and may have a successor. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TracePageEnvelope"];
+                    "application/json": components["schemas"]["Page_TraceListItem"];
                 };
             };
             /** @description Malformed cursor, or cursor combined with offset or a non-default sort */
@@ -8240,7 +5383,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_TraceDetail"];
+                    "application/json": components["schemas"]["Data_TraceDetailResponse"];
                 };
             };
             /** @description Missing or wrong trace token / admin credential */
@@ -8254,854 +5397,6 @@ export interface operations {
             };
             /** @description Trace not found */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    list_workflows: {
-        parameters: {
-            query?: {
-                status?: string;
-                tag?: string;
-                limit?: number;
-                offset?: number;
-                /** @description Column to sort by: priority (default), name, status, created_at, updated_at. */
-                sort_by?: string;
-                /** @description Sort direction: asc or desc (default). */
-                sort_order?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of workflows */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedEnvelope_WorkflowResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_workflow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateWorkflowRequest"];
-            };
-        };
-        responses: {
-            /** @description Workflow created as draft */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_WorkflowResponse"];
-                };
-            };
-            /** @description Invalid input */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Workflow id already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    export_workflows: {
-        parameters: {
-            query?: {
-                status?: string;
-                tag?: string;
-                limit?: number;
-                offset?: number;
-                /** @description Column to sort by: priority (default), name, status, created_at, updated_at. */
-                sort_by?: string;
-                /** @description Sort direction: asc or desc (default). */
-                sort_order?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Exported workflows */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_Vec_WorkflowResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    import_workflows: {
-        parameters: {
-            query?: {
-                /**
-                 * @description When true, validate each item and report what would happen without
-                 *     writing. Probes for conflicts against stored rows and for duplicates
-                 *     within the batch (R15), and under `on_conflict=new_version` reports
-                 *     the per-item action the real import would take (K2).
-                 */
-                dry_run?: boolean;
-                /**
-                 * @description What an already-stored conflict key means: `fail` (default — the item
-                 *     is refused), `skip`, or `new_version` (upsert: update the draft in
-                 *     place, or cut a new draft version over an active entity; identical
-                 *     content is a no-op). K2.
-                 */
-                on_conflict?: components["schemas"]["OnConflict"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateWorkflowRequest"][];
-            };
-        };
-        responses: {
-            /** @description Import results with counts (or would-be results when ?dry_run=true). Each item is handled independently: a malformed or conflicting item becomes one entry in `errors` and the rest of the batch still applies. Dry-run additionally probes for name conflicts against stored rows and duplicates within the batch, without writing. `?on_conflict=new_version` upserts instead of refusing an existing id (K2): an existing draft is replaced, an active workflow whose content differs gets a new draft version, and identical content is reported `unchanged` — re-importing the same artifact is a no-op. Per-item outcomes are in `results`. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_ImportResult"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    validate_workflow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateWorkflowRequest"];
-            };
-        };
-        responses: {
-            /** @description Validation result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ValidationEnvelope"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    get_workflow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Workflow ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Workflow details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_WorkflowResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Workflow not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    update_workflow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Workflow ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateWorkflowRequest"];
-            };
-        };
-        responses: {
-            /** @description Draft workflow updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_WorkflowResponse"];
-                };
-            };
-            /** @description Invalid input */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Workflow not found, or it has no draft version to update */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    delete_workflow: {
-        parameters: {
-            query?: {
-                /**
-                 * @description `now` (default) reloads the engine as part of this request; `defer`
-                 *     commits the row and leaves the reload to a later
-                 *     `POST /engine/reload` (K4).
-                 */
-                reload?: components["schemas"]["ReloadMode"];
-            };
-            header?: never;
-            path: {
-                /** @description Workflow ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Workflow deleted. With `?reload=defer` the engine keeps serving it until `POST /engine/reload` */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Workflow not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    workflow_dependencies: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Workflow ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description What the workflow's tasks reference (K9): connector names (with the referencing function) and statically-known `channel_call` targets. The API twin of the reference walk activation runs, for tooling that computes a package's dependency closure without re-implementing the task-walk. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_WorkflowDependencies"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Workflow not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    update_rollout: {
-        parameters: {
-            query?: {
-                /**
-                 * @description `now` (default) reloads the engine as part of this request; `defer`
-                 *     commits the row and leaves the reload to a later
-                 *     `POST /engine/reload` (K4).
-                 */
-                reload?: components["schemas"]["ReloadMode"];
-            };
-            header?: never;
-            path: {
-                /** @description Workflow ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RolloutUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Rollout percentage updated. With `?reload=defer` the row commits but the engine keeps serving the previous rollout until `POST /engine/reload` (K4). */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_WorkflowResponse"];
-                };
-            };
-            /** @description Invalid rollout configuration */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    change_workflow_status: {
-        parameters: {
-            query?: {
-                /**
-                 * @description When true, run the transition's gates and report findings without
-                 *     writing. The response body is the `/validate` envelope, not the
-                 *     entity.
-                 */
-                dry_run?: boolean;
-                /**
-                 * @description `now` (default) reloads the engine as part of this request; `defer`
-                 *     commits the row and leaves the reload to a later
-                 *     `POST /engine/reload` (K4).
-                 */
-                reload?: components["schemas"]["ReloadMode"];
-            };
-            header?: never;
-            path: {
-                /** @description Workflow ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["StatusChangeRequest"];
-            };
-        };
-        responses: {
-            /** @description Status updated. With `?dry_run=true` nothing is written and the body is instead the `/validate` envelope (`{"data": {"valid", "errors", "warnings"}}`) reporting every gate the real transition would run: draft existence, connector existence and type match, MongoDB `database` presence, and rollout arithmetic (K3). With `?reload=defer` the row commits but the engine (and every cluster peer) keeps serving the previous active set until `POST /engine/reload` (K4). */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_WorkflowResponse"];
-                };
-            };
-            /** @description Invalid status transition */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Workflow not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    test_workflow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Workflow ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TestWorkflowRequest"];
-            };
-        };
-        responses: {
-            /** @description Test result with trace */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_WorkflowTestResult"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Workflow not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    list_workflow_versions: {
-        parameters: {
-            query?: {
-                /** @description Page size, clamped to [1, 1000] (default 50). */
-                limit?: number;
-                /** @description Pagination offset (default 0). */
-                offset?: number;
-            };
-            header?: never;
-            path: {
-                /** @description Workflow ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated version history */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedEnvelope_WorkflowResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Workflow not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Unexpected internal error (`INTERNAL_ERROR`) */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_new_workflow_version: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Workflow ID */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description New draft version created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_WorkflowResponse"];
-                };
-            };
-            /** @description Missing or invalid admin API key. Only returned when `admin_auth.enabled` is true. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The presented admin key is read-only, and this method mutates. Only returned when `admin_auth.enabled` is true. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Draft already exists */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9182,6 +5477,15 @@ export interface operations {
             };
             /** @description No channel serves this request: either no REST route matches the requested method and path, or the single-segment name is not an active channel in the registry. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The channel is not served over HTTP (`METHOD_NOT_ALLOWED`): a cron channel (run it now through `POST /api/v2/admin/channels/{id}/trigger`), or a channel whose driver runs its own listener and receives its messages over that transport. On `/async`, also a channel whose driver answers its requests itself. */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9316,6 +5620,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description The channel is not served over HTTP (`METHOD_NOT_ALLOWED`): a cron channel (run it now through `POST /api/v2/admin/channels/{id}/trigger`), a channel whose driver runs its own listener and receives its messages over that transport, or an OAuth2 callback route, whose redirect is the response. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Deduplication key already seen inside the channel's dedup window */
             409: {
                 headers: {
@@ -9381,13 +5694,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Service healthy */
+            /** @description Service healthy, or degraded with the database reachable */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HealthStatus"];
+                    "application/json": components["schemas"]["HealthResponse"];
                 };
             };
             /** @description Unexpected internal error (`INTERNAL_ERROR`) */
@@ -9399,13 +5712,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Service degraded */
+            /** @description The database is unreachable; same body shape */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["HealthResponse"];
                 };
             };
         };
@@ -9425,7 +5738,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HealthStatus"];
+                    "application/json": components["schemas"]["LivenessResponse"];
                 };
             };
             /** @description Unexpected internal error (`INTERNAL_ERROR`) */
@@ -9492,7 +5805,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HealthStatus"];
+                    "application/json": components["schemas"]["ReadinessResponse"];
                 };
             };
             /** @description Unexpected internal error (`INTERNAL_ERROR`) */
@@ -9510,7 +5823,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ReadinessResponse"];
                 };
             };
         };

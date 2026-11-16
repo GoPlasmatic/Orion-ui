@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
 import { PopoverMenu } from "@/components/ui/popover-menu"
-import { Globe, Menu, Moon, Search, Sun } from "lucide-react"
+import { useAdminAuth } from "@/hooks/use-admin-auth"
+import { Globe, KeyRound, Lock, Menu, Moon, Search, Sun } from "lucide-react"
 
 type EngineState = "healthy" | "degraded" | "unreachable" | "checking"
 
@@ -27,13 +28,51 @@ const PILL: Record<EngineState, { label: string; className: string }> = {
   checking: { label: "Checking…", className: "border-border bg-muted text-muted-foreground" },
 }
 
+/**
+ * The admin credential this tab holds. Nothing while the server asks for none
+ * (admin auth off, or a proxy supplies the key); otherwise what the key may do,
+ * or that one is needed. Opens the key dialog.
+ */
+function AdminAccessChip({ onOpen }: { onOpen: () => void }) {
+  const auth = useAdminAuth()
+  if (auth.status === "open" || auth.status === "unprobed") return null
+  const needed = auth.status === "needed"
+  const readOnly = auth.access === "read-only"
+  const label = needed ? "Key needed" : readOnly ? "Read-only" : "Admin key"
+  const hint = needed
+    ? "This server requires an admin API key. Enter one to see and change its configuration."
+    : readOnly
+      ? "This tab holds a read-only admin key: viewing and planning work, changes are refused. Click to replace it."
+      : "This tab holds an admin API key the server accepted. Click to replace or forget it."
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-card",
+        needed
+          ? "border-warning/40 bg-warning/10 text-warning"
+          : "border-border bg-muted text-muted-foreground"
+      )}
+      title={hint}
+      aria-label={`${label}. ${hint}`}
+    >
+      {needed || readOnly ? <Lock className="h-3.5 w-3.5" /> : <KeyRound className="h-3.5 w-3.5" />}
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  )
+}
+
 export function Header({
   onOpenSearch,
   onOpenMenu,
+  onOpenKey,
 }: {
   onOpenSearch: () => void
   /** Opens the navigation drawer; rendered below the `md` breakpoint only. */
   onOpenMenu?: () => void
+  /** Opens the admin key dialog. */
+  onOpenKey: () => void
 }) {
   const { data: health, isError } = useHealth()
   const { zone, setZone, label: zoneLabel, localName } = useTimeZone()
@@ -135,6 +174,8 @@ export function Header({
             <p className="mt-1 text-xs text-muted-foreground">Server logs are UTC.</p>
           </div>
         </PopoverMenu>
+
+        <AdminAccessChip onOpen={onOpenKey} />
 
         {nodeId && (
           <span
