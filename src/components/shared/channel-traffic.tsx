@@ -120,11 +120,11 @@ const SHOWN = 6
  */
 export function ChannelRecentTraces({ channelName }: { channelName: string }) {
   const { data, isLoading } = useTraces(
-    { channel: channelName, limit: SHOWN, sort_by: "created_at", sort_order: "desc" },
+    { channel: channelName, limit: SHOWN },
     { refetchInterval: 15_000 },
   )
   const { data: failed } = useTraces(
-    { channel: channelName, status: "failed", limit: FAILED_FIRST, sort_by: "created_at", sort_order: "desc" },
+    { channel: channelName, status: "failed", limit: FAILED_FIRST },
     { refetchInterval: 15_000 },
   )
   const rows = useMemo(() => {

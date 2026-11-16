@@ -11,14 +11,9 @@ import type { DataResponse, ListTracesParams, TraceDetail, TracePage } from "./t
  * admin guard — it also accepts the `trace_token` handed out with an async 202.
  */
 export const tracesApi = {
-  list: (params: ListTracesParams = {}) => {
-    // `buildQuery` serializes `offset: 0`, and the server refuses `cursor`
-    // together with `offset`. Drop offset entirely when paging by cursor.
-    const query = params.cursor ? { ...params, offset: undefined } : params
-    return api.get<TracePage>(
-      `admin/traces${buildQuery(query as Record<string, string | number | boolean | undefined>)}`
-    )
-  },
+  /** Newest first, cursor-paged (2.0). A `Page`, used whole. */
+  list: (params: ListTracesParams = {}) =>
+    api.get<TracePage>(`admin/traces${buildQuery(params as Record<string, string | number | boolean | undefined>)}`),
 
   /**
    * `token` is the capability token from an async submission's 202. Callers

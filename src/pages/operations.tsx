@@ -90,11 +90,11 @@ export function OperationsPage() {
 
   const { graph: systemGraph, channels: channelList, workflows: workflowList } = useEntityIndex()
   const { data: anyTrace } = useTraces(
-    { limit: 1, sort_by: "created_at", sort_order: "desc" },
+    { limit: 1 },
     { refetchInterval: 30_000 },
   )
   const { data: lastChanges } = useAuditLogs({ limit: 1 }, { refetchInterval: 30_000 })
-  const { data: dlq } = useTraceDlq({ limit: 1 }, { refetchInterval: 30_000 })
+  const { data: dlq } = useTraceDlq({ limit: 1, include_total: true }, { refetchInterval: 30_000 })
 
   // Nothing live yet: the checklist leads, everything else waits below it.
   const firstRun =

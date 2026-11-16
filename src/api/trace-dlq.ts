@@ -3,7 +3,7 @@ import type {
   DataResponse,
   DlqPurgeResult,
   ListTraceDlqParams,
-  PaginatedResponse,
+  Page,
   PurgeTraceDlqRequest,
   TraceDlqEntry,
   TraceDlqSummary,
@@ -21,9 +21,9 @@ import type {
  */
 export const traceDlqApi = {
   // Summaries only: the failed payload is omitted so one request cannot dump
-  // every failed request's body.
+  // every failed request's body. Cursor-paged, newest first (2.0).
   list: (params: ListTraceDlqParams = {}) =>
-    api.get<PaginatedResponse<TraceDlqSummary>>(
+    api.get<Page<TraceDlqSummary>>(
       `admin/trace-dlq${buildQuery(params as Record<string, string | number | boolean | undefined>)}`
     ),
 

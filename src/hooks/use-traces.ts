@@ -4,6 +4,7 @@ import type { Channel, Trace, TraceDetail } from "@/api/types"
 import { keepPreviousData, useQuery, queryOptions, useQueries, useQueryClient } from "@tanstack/react-query"
 import { tracesApi } from "@/api/traces"
 import type { ListTracesParams } from "@/api/types"
+import { useCursorList } from "@/hooks/use-cursor-list"
 
 /** A trace list page — the key every reader of `["traces", params]` must share. */
 export const traceListQuery = (params: ListTracesParams) =>
@@ -23,6 +24,22 @@ export function useTraces(
     refetchInterval: options?.refetchInterval,
     enabled: options?.enabled ?? true,
   })
+}
+
+/**
+ * The trace list page: newest first, a page at a time ("Load more"). Under
+ * `["traces", "list", …]`, so invalidating `["traces"]` refreshes it with
+ * every other trace read.
+ */
+export function useTraceList(
+  params: Omit<ListTracesParams, "cursor">,
+  options?: { refetchInterval?: number },
+) {
+  return useCursorList(
+    ["traces", "list", params],
+    (cursor) => tracesApi.list({ ...params, cursor }),
+    { refetchInterval: options?.refetchInterval },
+  )
 }
 
 /**

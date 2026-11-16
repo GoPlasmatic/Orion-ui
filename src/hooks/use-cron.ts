@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tansta
 import { toast } from "sonner"
 import { toastError } from "@/lib/toast-error"
 import { cronApi } from "@/api/cron"
+import { useCursorList } from "@/hooks/use-cursor-list"
 import type { ListCronOccurrencesParams } from "@/api/types"
 
 /** Runtime state of every active schedule. Changes every minute, so it polls. */
@@ -15,6 +16,18 @@ export function useCronStatus(options?: { refetchInterval?: number | false; enab
     // for a 404 every fifteen seconds.
     enabled: options?.enabled ?? true,
   })
+}
+
+/** The Schedules ledger: newest first, a page at a time. Polls while open. */
+export function useCronOccurrenceList(
+  params: Omit<ListCronOccurrencesParams, "cursor">,
+  options?: { refetchInterval?: number },
+) {
+  return useCursorList(
+    ["cron", "occurrences", "list", params],
+    (cursor) => cronApi.listOccurrences({ ...params, cursor }),
+    { refetchInterval: options?.refetchInterval },
+  )
 }
 
 export function useCronOccurrences(

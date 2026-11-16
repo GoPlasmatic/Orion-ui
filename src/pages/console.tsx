@@ -1,6 +1,8 @@
 import { useState } from "react"
 import { Link, useLocation } from "react-router"
 import { dataApi, type ExtraHeaders } from "@/api/data"
+import { ApiError } from "@/api/client"
+import { connectorLine } from "@/lib/toast-error"
 import { useChannels } from "@/hooks/use-channels"
 import { useTrace } from "@/hooks/use-traces"
 import { useLastTraceInput } from "@/hooks/use-last-trace-input"
@@ -14,6 +16,7 @@ import type {
   ProcessResponse,
   ProcessTaskError,
   ProfileResult,
+  ConnectorErrorDetail,
 } from "@/api/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select } from "@/components/ui/select"
@@ -351,6 +354,10 @@ function ConsoleForm({
   const [receipt, setReceipt] = useState<AsyncSubmitResponse | null>(null)
   const [elapsedMs, setElapsedMs] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // The connector failure behind an error answer (2.0), and the workflow
+  // revision a canary split routed the request to.
+  const [connectorError, setConnectorError] = useState<ConnectorErrorDetail | null>(null)
+  const [workflowRevision, setWorkflowRevision] = useState<string | null>(null)
   const [history, setHistory] = useState<HistoryEntry[]>(() => readStorageJson<HistoryEntry[]>(HISTORY_KEY, []))
 
   const selected = channelList.find((c) => c.name === channel)
@@ -422,6 +429,8 @@ function ConsoleForm({
 
   const handleSend = async () => {
     setError(null)
+    setConnectorError(null)
+    setWorkflowRevision(null)
     setResult(null)
     setReceipt(null)
     setElapsedMs(null)
@@ -453,6 +462,7 @@ function ConsoleForm({
 
     setLoading(true)
     const isAsync = !restMode && !sync
+    const onHeaders = (h: Headers) => setWorkflowRevision(h.get("x-orion-workflow-revision"))
     const started = performance.now()
     try {
       let entryStatus: string | undefined
@@ -460,7 +470,7 @@ function ConsoleForm({
       let entryTraceToken: string | undefined
 
       if (isAsync) {
-        const ack = await dataApi.processAsync(channel, { data: data ?? {} }, extra)
+        const ack = await dataApi.processAsync(channel, { data: data ?? {} }, extra, onHeaders)
         setReceipt(ack)
         entryStatus = "accepted"
         entryTraceId = ack.trace_id
@@ -472,9 +482,10 @@ function ConsoleForm({
               path,
               data !== undefined ? { data } : undefined,
               profile,
-              extra
+              extra,
+              onHeaders
             )
-          : await dataApi.processSync(channel, { data: data ?? {} }, profile, extra)
+          : await dataApi.processSync(channel, { data: data ?? {} }, profile, extra, onHeaders)
         setResult(res)
         entryStatus = res.status
         entryTraceId = res.id
@@ -504,6 +515,7 @@ function ConsoleForm({
     } catch (e) {
       setElapsedMs(performance.now() - started)
       setError(e instanceof Error ? e.message : "Request failed")
+      if (e instanceof ApiError && e.connector) setConnectorError(e.connector)
     } finally {
       setLoading(false)
     }
@@ -734,6 +746,9 @@ function ConsoleForm({
             {error && (
               <Callout variant="destructive">
                 {error}
+                {connectorError && (
+                  <span className="mt-1 block font-mono text-xs">{connectorLine(connectorError)}</span>
+                )}
               </Callout>
             )}
           </CardContent>
@@ -753,6 +768,15 @@ function ConsoleForm({
                   {receipt && (
                     <Badge variant="outline" className="font-mono text-xs">
                       202 accepted
+                    </Badge>
+                  )}
+                  {workflowRevision && (
+                    <Badge
+                      variant="outline"
+                      className="font-mono text-xs"
+                      title="X-Orion-Workflow-Revision: the workflow revision this channel's rollout routed the request to"
+                    >
+                      workflow r{workflowRevision}
                     </Badge>
                   )}
                   {elapsedMs != null && (

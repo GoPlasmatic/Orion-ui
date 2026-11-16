@@ -3,7 +3,6 @@ import { useNavigate } from "react-router"
 import {
   useCircuitBreakers,
   useConnectors,
-  useReloadConnectors,
   useImportConnectors,
 } from "@/hooks/use-connectors"
 import { useExport } from "@/hooks/use-export"
@@ -31,7 +30,7 @@ import { enabledBadgeClass, disabledBadgeClass, breakerStateBadgeClass } from "@
 import { cn, formatDate, formatWhen, downloadJson, plural } from "@/lib/utils"
 import { compactNumber, errorLevel, formatMs, formatPct, healthText } from "@/lib/traffic-encoding"
 import { METRICS_STATE_TEXT, metricsShort } from "@/lib/metrics-state"
-import { Download, Plug, Plus, RefreshCw, Upload } from "lucide-react"
+import { Download, Plug, Plus, Upload } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, ConnectorListItem>()
 
@@ -232,7 +231,6 @@ export function ConnectorsPage() {
     downloadJson(connectors, "orion-connectors")
     return `Exported ${plural(connectors.length, "connector")} — secrets masked`
   })
-  const reloadConnectors = useReloadConnectors()
   const importConnectors = useImportConnectors()
   const { data: breakers } = useCircuitBreakers()
 
@@ -276,14 +274,6 @@ export function ConnectorsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Connectors" description="Manage external system connections">
-        <Button
-          variant="outline"
-          onClick={() => reloadConnectors.mutate()}
-          disabled={reloadConnectors.isPending}
-        >
-          <RefreshCw className={`h-4 w-4 ${reloadConnectors.isPending ? "animate-spin" : ""}`} />
-          Reload All
-        </Button>
         <Button variant="outline" onClick={exportAll.run} disabled={exportAll.pending}>
           <Download className="h-4 w-4" />
           {exportAll.pending ? "Exporting..." : "Export"}

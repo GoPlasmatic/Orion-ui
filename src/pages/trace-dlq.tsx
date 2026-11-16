@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { Link } from "react-router"
 import {
-  useTraceDlq,
+  useTraceDlqList,
   useTraceDlqEntry,
   useRequeueTraceDlq,
   useRequeueManyTraceDlq,
@@ -33,14 +33,14 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { PageHeader } from "@/components/shared/page-header"
-import { PaginationFooter } from "@/components/shared/pagination"
+import { LoadMoreFooter } from "@/components/shared/load-more"
 import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { FilterBar, FilterTextInput } from "@/components/shared/filter-bar"
 import { RetrySafetyWarning } from "@/components/shared/retry-safety-warning"
 import { PAGE_SIZE, REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { useListState } from "@/lib/use-list-state"
-import { formatDate, parseJson } from "@/lib/utils"
+import { formatDate } from "@/lib/utils"
 import { Inbox, RotateCcw, Trash2 } from "lucide-react"
 
 /** An entry that has used up its retries: nothing will move it but a requeue. */
@@ -55,7 +55,7 @@ const FILTER_VALUES = { exhausted: ["true", "false"] }
 const GUARDS_SHOWN = 3
 
 export function TraceDlqPage() {
-  const { filters, update, clear, hasFilters, offset, prev, next } = useListState(
+  const { filters, update, clear, hasFilters } = useListState(
     FILTER_KEYS,
     {},
     { values: FILTER_VALUES },
@@ -64,9 +64,9 @@ export function TraceDlqPage() {
   const [showPurge, setShowPurge] = useState(false)
   const [showBulk, setShowBulk] = useState(false)
 
-  const { data, isLoading } = useTraceDlq({
+  const list = useTraceDlqList({
     limit: PAGE_SIZE,
-    offset,
+    include_total: true,
     channel: filters.channel || undefined,
     exhausted: filters.exhausted === "" ? undefined : filters.exhausted === "true",
   })
@@ -79,7 +79,8 @@ export function TraceDlqPage() {
   )
 
   const requeue = useRequeueTraceDlq()
-  const rows = data?.data ?? []
+  const rows = list.rows
+  const isLoading = list.isLoading
 
   return (
     <div className="space-y-6">
@@ -208,12 +209,14 @@ export function TraceDlqPage() {
         </Table>
       </div>
 
-      <PaginationFooter
-        offset={offset}
+      <LoadMoreFooter
         count={rows.length}
-        total={data?.total}
-        onPrev={prev}
-        onNext={next}
+        total={list.total}
+        hasMore={list.hasMore}
+        pending={list.isFetchingMore}
+        onLoadMore={list.loadMore}
+        noun="entry"
+        nounPlural="entries"
       />
 
       {selectedId && (
@@ -297,8 +300,8 @@ function DlqEntryDialog({
                 the witness; the decision stays with the operator. */}
             <RetrySafetyWarning workflowId={channel?.workflow_id} action="A requeue" />
 
-            <JsonViewer data={parseJson(data.payload_json)} label="Failed payload" maxHeight="16rem" />
-            <JsonViewer data={parseJson(data.metadata_json)} label="Metadata" maxHeight="12rem" />
+            <JsonViewer data={data.payload} label="Failed payload" maxHeight="16rem" />
+            <JsonViewer data={data.metadata} label="Metadata" maxHeight="12rem" />
           </div>
         )}
       </DialogBody>
@@ -342,7 +345,7 @@ function BulkRequeueDialog({
       </DialogHeader>
       <DialogBody className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          Every entry on this page is scheduled for an immediate retry with its retry count reset
+          Every entry loaded above is scheduled for an immediate retry with its retry count reset
           {exhausted > 0 ? `, including ${exhausted} that had exhausted ${exhausted === 1 ? "its" : "their"} retries` : ""}
           . Across {channels.length} channel{channels.length === 1 ? "" : "s"}:{" "}
           <span className="font-mono">{channels.slice(0, 6).join(", ")}</span>

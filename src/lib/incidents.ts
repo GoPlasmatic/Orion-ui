@@ -392,6 +392,8 @@ export type IncidentKind =
   | "breaker"
   | "dlq"
   | "backlog"
+  /** 2.0: this node's reconciler cannot build the deployment it is converging on, or quarantined a member. */
+  | "deployment"
 
 export interface IncidentLink {
   label: string
@@ -445,6 +447,21 @@ export interface LiveSignals {
   breakers?: BreakerRow[]
   dlqExhausted?: number
   cronBacklog?: { pending: number; oldestSec: number | null } | null
+  /** 2.0: this node's reconciler, from `runtime-capabilities.node_status`. */
+  node?: NodeSignal | null
+}
+
+/** What `node_status` says that needs a person. */
+export interface NodeSignal {
+  desiredRevision: number
+  /** Why building the desired revision fails, while it does. */
+  lastError: string | null
+  /**
+   * Quarantined members of kinds `engine/status.load_issues` does not itemise
+   * (workflows, connections) — channels, plugins and connectors are already
+   * incidents of their own.
+   */
+  quarantined: { kind: string; id: string; revision: number; reason: string }[]
 }
 
 export interface IncidentInput {
@@ -720,6 +737,38 @@ function dlqIncidents(exhausted: number): Incident[] {
   ]
 }
 
+function nodeIncidents(node: NodeSignal | null | undefined): Incident[] {
+  if (!node) return []
+  const out: Incident[] = []
+  if (node.lastError) {
+    out.push(
+      signal({
+        key: `deployment:build:${node.desiredRevision}`,
+        kind: "deployment",
+        severity: 1,
+        tone: "destructive",
+        title: `Revision ${node.desiredRevision} does not build on this node`,
+        detail: `${node.lastError} — it keeps serving the revision it has`,
+        to: "/engine?tab=cluster",
+      }),
+    )
+  }
+  for (const q of node.quarantined) {
+    out.push(
+      signal({
+        key: `deployment:quarantine:${q.kind}:${q.id}`,
+        kind: "deployment",
+        severity: 1,
+        tone: "destructive",
+        title: `Quarantined: ${q.kind} ${q.id} r${q.revision}`,
+        detail: q.reason,
+        to: "/engine?tab=cluster",
+      }),
+    )
+  }
+  return out
+}
+
 function backlogIncidents(backlog: LiveSignals["cronBacklog"]): Incident[] {
   if (!backlog || cronBacklog(backlog.pending, backlog.oldestSec) !== "backlog") return []
   return [
@@ -761,6 +810,7 @@ export function buildIncidents({
     ...breakerIncidents(live.breakers ?? [], l),
     ...dlqIncidents(live.dlqExhausted ?? 0),
     ...backlogIncidents(live.cronBacklog),
+    ...nodeIncidents(live.node),
   ])
 }
 

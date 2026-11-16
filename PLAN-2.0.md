@@ -1,6 +1,6 @@
 # Orion-ui 2.0: implementation plan
 
-Status: Phase 0 done on branch `v2` (2026-11-16); phases 1–7 open. Target: Orion `v2.0.0` (Orion `main` @ `1e58099f`, not yet tagged).
+Status: Phases 0 and 1 done on branch `v2` (2026-11-16); Phase 5 deferred to 2.1 (D1 = A). Target: Orion `v2.0.0` (Orion `main` @ `1e58099f`, not yet tagged).
 
 ## Goal and definition of done
 
@@ -57,6 +57,10 @@ Surfaces that survive with small changes:
 For the field-level detail, diff `components.schemas` between the old and new `contracts/openapi.json` while transcribing `types.ts`; `schema.d.ts` regenerated from each is the quickest side-by-side.
 
 ## Decisions to make before Phase 2
+
+**Decided 2026-11-16:** D1 = **A** (operate: inspect, compare, roll back, test, probe, manage
+provider packages; Phase 5 moves to 2.1). D2 = **c** (implemented in Phase 0). D3: tag Orion
+first, then the UI once its e2e passes against `orion:2.0.0`.
 
 | # | Decision | Options | Recommendation |
 |---|---|---|---|
@@ -158,6 +162,17 @@ Each item: transcribe the types, port the API module, update the hooks and page,
   - golden signals are unchanged (`/metrics`)
   - the attention feed adds quarantined entities, `engine_reload: degraded` and unconverged nodes
   - remove counts that came from status lists
+
+**Phase 1 outcome (2026-11-16).** Done. The pending list fell from 71 to 66 calls (the rest are the CRUD modules phases 2–4 replace). Departures and findings:
+- Traces, Audit, Trace DLQ and the Schedules ledger page by cursor with "Load more" (`useTraceList`, `useAuditLogList`, `useTraceDlqList`, `useCronOccurrenceList`). The traces table lost its sortable columns, because 2.0 has no server sort. Dashboard counts ask for `include_total`.
+- Engine: the reload card is gone, and `RuntimeReport` covers edition, head/applied/desired revision, cluster store, quarantined members, `last_error`, drivers and provider backends. The connectors page's "Reload All" button went with the reload hooks.
+- Audit vocabulary rewritten from the server's own audit calls. Change pins now pin nothing: a 2.0 change is one deployment row per revision, and pinning it needs Phase 2's revision diff (wired in Phase 6).
+- Dashboard: a `deployment` incident fires for a revision the node cannot build and for quarantined workflow or connection members.
+- Console: shows `X-Orion-Workflow-Revision` and a connector failure's class. Toasts and `ErrorState` show the connector line too.
+- **Bug found and fixed:** the admin key was sent on data-plane requests by the client, by nginx injection and by the dev proxy. It now goes only to `/api/v2/admin/*`, `/metrics` and `/health`.
+- Cron `since` / `until` are still zoneless in 2.0, so the trim stays. Audit `details` is still a JSON string.
+- E2E: `e2e/seed.ts` deploys an echo workflow and channel through definitions → plan → apply (the CLI's flow), and `e2e/operate.spec.ts` checks the trace list's Load more, the Engine runtime card, the audit's 2.0 action and that the DLQ and Schedules pages load.
+- Pages still on 1.x lists (DLQ's channel links, Schedules' channel picker, Operations' counts, the map) keep calling `/admin/channels` and similar, which 404 until Phase 3 replaces them with `useDeployedState`.
 
 ### Phase 2: Deployments, the new core (L)
 

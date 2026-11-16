@@ -5,7 +5,7 @@ import type {
   CronScheduleStatus,
   DataResponse,
   ListCronOccurrencesParams,
-  PaginatedResponse,
+  Page,
 } from "./types"
 
 /**
@@ -24,7 +24,8 @@ import type {
  */
 
 /**
- * `since` / `until` on this endpoint are `chrono::NaiveDateTime` — and unlike
+ * `since` / `until` on this endpoint are `chrono::NaiveDateTime` (still so in
+ * 2.0, where every other timestamp gained its `Z`) — and unlike
  * the audit plane's `start_time`/`end_time`, which accept either spelling, the
  * deserializer here refuses a trailing zone or fraction outright:
  * `2026-09-13T03:00:00.000Z` answers 400 `since: trailing input`, and only
@@ -42,15 +43,15 @@ function toNaiveUtc(value: string | undefined): string | undefined {
 }
 
 export const cronApi = {
-  // Newest first. Summaries only — an occurrence carries no payload, so this
-  // is for readability rather than cost.
+  // Newest first, cursor-paged (2.0). Summaries only — an occurrence carries
+  // no payload, so this is for readability rather than cost.
   listOccurrences: ({ since, until, ...rest }: ListCronOccurrencesParams = {}) =>
-    api.get<PaginatedResponse<CronOccurrenceSummary>>(
+    api.get<Page<CronOccurrenceSummary>>(
       `admin/cron/occurrences${buildQuery({
         ...rest,
         since: toNaiveUtc(since),
         until: toNaiveUtc(until),
-      } as Record<string, string | number | undefined>)}`
+      } as Record<string, string | number | boolean | undefined>)}`
     ),
 
   getOccurrence: (id: string) =>

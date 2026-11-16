@@ -4,6 +4,7 @@ import { toastError } from "@/lib/toast-error"
 import { reportBatch, settleAll } from "@/lib/batch"
 import { traceDlqApi } from "@/api/trace-dlq"
 import type { ListTraceDlqParams, PurgeTraceDlqRequest } from "@/api/types"
+import { useCursorList } from "@/hooks/use-cursor-list"
 
 export function useTraceDlq(params: ListTraceDlqParams = {}, options?: { refetchInterval?: number }) {
   return useQuery({
@@ -12,6 +13,11 @@ export function useTraceDlq(params: ListTraceDlqParams = {}, options?: { refetch
     placeholderData: keepPreviousData,
     refetchInterval: options?.refetchInterval,
   })
+}
+
+/** The DLQ page's list: newest first, a page at a time. */
+export function useTraceDlqList(params: Omit<ListTraceDlqParams, "cursor">) {
+  return useCursorList(["trace-dlq", "list", params], (cursor) => traceDlqApi.list({ ...params, cursor }))
 }
 
 export function useTraceDlqEntry(id: string) {

@@ -127,7 +127,7 @@ export function MapInspector({
   // The three most recent failures, so "what is wrong with it" is one click
   // from "it is red" rather than a filtered list away.
   const { data: failures } = useTraces(
-    { channel: node.name, status: "failed", limit: 3, sort_by: "created_at", sort_order: "desc" },
+    { channel: node.name, status: "failed", limit: 3 },
     { enabled: !node.unresolved, refetchInterval: 15_000 },
   )
   const breakerHere = mapFaults.breakers.get(node.id) ?? []

@@ -48,9 +48,9 @@ function strip(props: { engine?: EngineStatus; action?: string }) {
 
 describe("instance strip", () => {
   it.each([
-    ["create_version", "soma-gate-start new version"],
-    ["update_rollout", "soma-gate-start rollout changed"],
-    ["status_active", "soma-gate-start activated"],
+    ["v2_deployment_apply", "soma-gate-start deployed"],
+    ["v2_deployment_rollback", "soma-gate-start rolled back"],
+    ["v2_package_admit", "soma-gate-start admitted"],
     ["some_new_action", "soma-gate-start some new action"],
   ])("reads the audit action %s as a verb", (action, text) => {
     expect(strip({ action })).toContain(text)

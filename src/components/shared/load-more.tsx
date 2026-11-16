@@ -11,6 +11,8 @@ interface LoadMoreFooterProps {
   onLoadMore: () => void
   /** The row noun, singular ("trace"). */
   noun?: string
+  /** Its plural, when not `noun` + "s" ("entries"). */
+  nounPlural?: string
 }
 
 /**
@@ -18,13 +20,21 @@ interface LoadMoreFooterProps {
  * that fetches the next page. Replaces the offset `PaginationFooter` as each
  * list moves to 2.0's cursors.
  */
-export function LoadMoreFooter({ count, total, hasMore, pending, onLoadMore, noun = "row" }: LoadMoreFooterProps) {
+export function LoadMoreFooter({
+  count,
+  total,
+  hasMore,
+  pending,
+  onLoadMore,
+  noun = "row",
+  nounPlural,
+}: LoadMoreFooterProps) {
   const label =
     count === 0
       ? "No results"
       : total !== undefined
-        ? `${count.toLocaleString("en")} of ${plural(total, noun)}`
-        : `${plural(count, noun)}${hasMore ? " loaded" : ""}`
+        ? `${count.toLocaleString("en")} of ${plural(total, noun, nounPlural)}`
+        : `${plural(count, noun, nounPlural)}${hasMore ? " loaded" : ""}`
   return (
     <div className="flex items-center justify-between">
       <p className="text-sm text-muted-foreground" aria-live="polite">

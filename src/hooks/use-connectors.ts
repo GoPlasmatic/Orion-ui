@@ -3,7 +3,6 @@ import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tansta
 import { toast } from "sonner"
 import { toastError } from "@/lib/toast-error"
 import { connectorsApi } from "@/api/connectors"
-import { engineApi } from "@/api/engine"
 import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { reportBatch, settleAll } from "@/lib/batch"
 import type {
@@ -125,21 +124,6 @@ export function useImportConnectors() {
     onSuccess: (_data, vars) => {
       if (!vars.dryRun) queryClient.invalidateQueries({ queryKey: ["connectors"] })
     },
-  })
-}
-
-// There is no dedicated connectors-reload endpoint; connector mutations reload
-// the registry server-side. This triggers a full engine reload for the manual
-// "reload" affordance still surfaced in the UI.
-export function useReloadConnectors() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () => engineApi.reload(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["connectors"] })
-      toast.success("Connectors reloaded")
-    },
-    onError: (e) => toastError("Failed to reload connectors", e),
   })
 }
 

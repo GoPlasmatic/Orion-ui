@@ -1,9 +1,22 @@
 import { toast } from "sonner"
 import { ApiError } from "@/api/client"
+import type { ConnectorErrorDetail } from "@/api/types"
 import { copyText } from "@/lib/clipboard"
 
 /** Field findings shown before the list is cut; the rest is a count. */
 const DETAIL_LINES = 4
+
+/**
+ * The connector failure behind an error (2.0), in one line: its class, the
+ * provider's own code, and whether the provider says a retry can succeed.
+ */
+export function connectorLine(c: ConnectorErrorDetail | undefined): string | null {
+  if (!c) return null
+  const parts = [`connector ${c.class ?? "failure"}`]
+  if (c.provider_code) parts.push(`provider code ${c.provider_code}`)
+  if (c.retryable != null) parts.push(c.retryable ? "retryable" : "not retryable")
+  return parts.join(" · ")
+}
 
 /**
  * What a failed request says, beyond its headline: the server's field-pathed
@@ -14,10 +27,12 @@ export function describeError(e: unknown): React.ReactNode {
   if (!(e instanceof Error)) return undefined
   if (!(e instanceof ApiError)) return e.message
   const details = e.details ?? []
-  if (details.length === 0 && !e.requestId) return e.message
+  const connector = connectorLine(e.connector)
+  if (details.length === 0 && !e.requestId && !connector) return e.message
   return (
     <span className="block space-y-0.5">
       <span className="block">{e.message}</span>
+      {connector && <span className="block font-mono text-xs">{connector}</span>}
       {details.slice(0, DETAIL_LINES).map((d, i) => (
         <span key={i} className="block font-mono text-xs">
           {d.path ? `${d.path}: ` : ""}

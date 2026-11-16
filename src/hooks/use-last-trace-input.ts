@@ -14,7 +14,7 @@ import { toastError } from "@/lib/toast-error"
  */
 export function useLastTraceInput(channel: string | undefined) {
   const { data } = useTraces(
-    { channel: channel || undefined, limit: 1, sort_by: "created_at", sort_order: "desc" },
+    { channel: channel || undefined, limit: 1 },
     { enabled: !!channel },
   )
   const lastTraceId = data?.data[0]?.id

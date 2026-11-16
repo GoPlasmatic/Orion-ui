@@ -1,7 +1,7 @@
 import { AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } from "@/lib/audit-vocabulary"
 import { Fragment, useState } from "react"
 import { Link } from "react-router"
-import { useAuditLogs } from "@/hooks/use-audit"
+import { useAuditLogList } from "@/hooks/use-audit"
 import { useExport } from "@/hooks/use-export"
 import { auditApi } from "@/api/audit"
 import { useTable, flexRender, createColumnHelper } from "@tanstack/react-table"
@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/shared/page-header"
-import { PaginationFooter } from "@/components/shared/pagination"
+import { LoadMoreFooter } from "@/components/shared/load-more"
 import { FilterBar, FilterTextInput, UnknownOption, FILTER_W } from "@/components/shared/filter-bar"
 import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { JsonViewer } from "@/components/shared/json-viewer"
@@ -124,7 +124,7 @@ function csvCell(value: unknown): string {
 }
 
 export function AuditPage() {
-  const { filters, update, clear, hasFilters, offset, prev, next } = useListState(FILTER_KEYS)
+  const { filters, update, clear, hasFilters } = useListState(FILTER_KEYS)
   // Rows whose `details` are open. The column is what the server recorded
   // about the change — the request that made it, the change context — and it
   // was never rendered.
@@ -140,13 +140,14 @@ export function AuditPage() {
     end_time: toRfc3339(filters.end),
   }
 
-  // Filtering is server-side since 1.0. It used to fetch the most recent 1000
-  // entries and filter locally, which quietly hid anything older.
-  const { data, isLoading } = useAuditLogs({ limit: PAGE_SIZE, offset, ...query })
+  // Filtering is server-side; paging is by cursor, newest first (2.0). The
+  // count is asked for because this page shows it.
+  const list = useAuditLogList({ limit: PAGE_SIZE, include_total: true, ...query })
+  const isLoading = list.isLoading
 
   const table = useTable({
     features: listTableFeatures,
-    data: data?.data ?? [],
+    data: list.rows,
     columns,
   })
 
@@ -160,7 +161,7 @@ export function AuditPage() {
 
   /** The current filter, newest first, as a file — the thousand most recent rows. */
   const exportRows = async (format: "json" | "csv") => {
-    const rows = (await auditApi.list({ ...query, limit: EXPORT_LIMIT, offset: 0 })).data
+    const rows = (await auditApi.list({ ...query, limit: EXPORT_LIMIT })).data
     if (format === "json") {
       downloadJson(rows, "orion-audit")
     } else {
@@ -288,7 +289,7 @@ export function AuditPage() {
                     <EmptyState
                       icon={ScrollText}
                       title="No audit rows yet"
-                      description="Every administrative write — a create, a status change, a reload — is recorded here as it happens."
+                      description="Every administrative write — a deployment, a rollback, a definition upload, a probe — is recorded here as it happens."
                     />
                   )}
                 </TableCell>
@@ -337,12 +338,13 @@ export function AuditPage() {
         </Table>
       </div>
 
-      <PaginationFooter
-        offset={offset}
-        count={data?.data.length ?? 0}
-        total={data?.total}
-        onPrev={prev}
-        onNext={next}
+      <LoadMoreFooter
+        count={list.rows.length}
+        total={list.total}
+        hasMore={list.hasMore}
+        pending={list.isFetchingMore}
+        onLoadMore={list.loadMore}
+        noun="audit row"
       />
     </div>
   )

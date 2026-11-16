@@ -1,5 +1,4 @@
-import { useState } from "react"
-import { useDocsServed, useEngineStatus, useEngineReload } from "@/hooks/use-engine"
+import { useDocsServed, useEngineStatus } from "@/hooks/use-engine"
 import { useCircuitBreakers } from "@/hooks/use-connectors"
 import { useBackups, useCreateBackup } from "@/hooks/use-backup"
 import { useHealth } from "@/hooks/use-health"
@@ -12,14 +11,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PageHeader } from "@/components/shared/page-header"
 import { HealthComponents } from "@/components/shared/health-components"
 import { LoadIssuesReport } from "@/components/shared/load-issues"
-import { ConfirmDialog } from "@/components/shared/confirm-dialog"
+import { RuntimeReport } from "@/components/admin/runtime-report"
 import { Fact } from "@/components/shared/fact"
 import { componentStateBadgeClass, traceStatusBadgeClass } from "@/lib/status"
 import { useUrlFilters } from "@/lib/use-url-filters"
 import { formatBytes, formatDate, formatUptime, formatWhen, plural } from "@/lib/utils"
 import { countLoadIssues } from "@/api/types"
 import type { EngineCapabilities } from "@/api/types"
-import { RefreshCw, Archive, BookOpen, HeartPulse, Server } from "lucide-react"
+import { Archive, BookOpen, HeartPulse, Server } from "lucide-react"
 
 const TAB_KEYS = ["tab"] as const
 const TABS = ["health", "cluster", "maintenance"] as const
@@ -27,10 +26,12 @@ type EngineTab = (typeof TABS)[number]
 
 /**
  * The instance, in three sections: **Health** (the `/health` report, row by
- * row), **Cluster & runtime** (the running generation from `engine/status` —
- * what it is, what this node can run, what it refused) and **Maintenance**
- * (one reload, backups, the API reference — each shown only where this
- * instance offers it). Named "Settings" until 2026-09-05; the display
+ * row), **Cluster & runtime** (2.0's runtime capabilities — edition, the
+ * deployment head and this node's reconciler, drivers, provider backends —
+ * then the running generation from `engine/status` and what it refused) and
+ * **Maintenance** (backups and the API reference, each shown only where this
+ * instance offers it). 2.0 has no reload: applying a deployment rebuilds the
+ * engine. Named "Settings" until 2026-09-05; the display
  * preferences that lived here moved to the header's Display menu.
  *
  * The tab is in the URL (`?tab=`), and `#component-<name>` — where the
@@ -138,7 +139,7 @@ export function EnginePage() {
         </TabsContent>
 
         <TabsContent value="maintenance" className="space-y-4">
-          <Maintenance quarantined={quarantined} />
+          <Maintenance />
         </TabsContent>
       </Tabs>
     </div>
@@ -160,14 +161,15 @@ function ClusterRuntime() {
 
   return (
     <>
+      <RuntimeReport />
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Server className="h-4 w-4" /> Running generation
           </CardTitle>
           <CardDescription>
-            What the node that answered is serving. In a cluster each node reloads on the config
-            epoch on its own, so a peer can be a generation behind or refuse differently.
+            What the node that answered is serving. Each node builds the deployment head on its
+            own, so a peer can be a generation behind or refuse differently.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -176,7 +178,7 @@ function ClusterRuntime() {
             <Fact label="Build">{health?.git_hash ?? "—"}</Fact>
             <Fact
               label="Generation"
-              title="Bumped by every reload this node completes. 0 or absent: a server before 1.9."
+              title="Bumped by every rebuild this node completes."
             >
               {engine?.generation ? engine.generation : "—"}
             </Fact>
@@ -198,7 +200,7 @@ function ClusterRuntime() {
         <CardHeader>
           <CardTitle>What this generation refused</CardTitle>
           <CardDescription>
-            A reload never fails over one entity: it is quarantined and everything else serves.
+            A rebuild never fails over one entity: it is quarantined and everything else serves.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -210,7 +212,7 @@ function ClusterRuntime() {
             </p>
           ) : countLoadIssues(engine.load_issues) === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Nothing quarantined — every active channel, connector, plugin and model loaded.
+              Nothing quarantined — every channel, connector and plugin of the applied revision loaded.
             </p>
           ) : (
             <LoadIssuesReport issues={engine.load_issues} />
@@ -222,56 +224,18 @@ function ClusterRuntime() {
 }
 
 /**
- * One reload, backups and the API reference. Backups and the docs are shown
- * only where this instance offers them, with one line saying why when not:
- * backups are SQLite-only (a 400 elsewhere, cluster mode included), and a
- * server running with `environment = "production"` withholds the spec.
+ * Backups and the API reference, each shown only where this instance offers
+ * it, with one line saying why when not: backups are SQLite-only (a 400
+ * elsewhere, cluster mode included), and a server running with
+ * `environment = "production"` withholds the spec.
  */
-function Maintenance({ quarantined }: { quarantined: number }) {
-  const reload = useEngineReload()
-  const [confirmReload, setConfirmReload] = useState(false)
+function Maintenance() {
   const docsServed = useDocsServed().data
   const { data: backups, isLoading: backupsLoading, error: backupsError } = useBackups()
   const createBackup = useCreateBackup()
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <Card className="md:col-span-2">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <RefreshCw className="h-4 w-4" /> Reload
-          </CardTitle>
-          <CardDescription>
-            Rebuild the running generation from the database and bump the cluster config epoch
-            once — what picks up channel, workflow and connector changes, and what finishes a
-            batch of deferred status changes.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-center gap-3">
-          <Button onClick={() => setConfirmReload(true)} disabled={reload.isPending}>
-            <RefreshCw className={`h-4 w-4 ${reload.isPending ? "animate-spin" : ""}`} />
-            {reload.isPending ? "Reloading..." : "Reload engine"}
-          </Button>
-          {quarantined > 0 && (
-            <span className="text-sm text-warning">
-              The current generation quarantined {plural(quarantined, "entity", "entities")}; a reload retries {quarantined === 1 ? "it" : "them"}.
-            </span>
-          )}
-          {confirmReload && (
-            <ConfirmDialog
-              title="Reload the engine?"
-              description="The engine is rebuilt from the database and the cluster config epoch is bumped, so every node reloads its generation. Any status change made with reload=defer takes effect now. Requests in flight finish on the generation they started on; a channel whose definition no longer loads is quarantined rather than served."
-              confirmLabel="Reload"
-              onConfirm={() => {
-                setConfirmReload(false)
-                reload.mutate()
-              }}
-              onCancel={() => setConfirmReload(false)}
-            />
-          )}
-        </CardContent>
-      </Card>
-
       {backupsError ? (
         <p className="text-sm text-muted-foreground md:col-span-2">
           <Archive className="mr-1.5 inline h-3.5 w-3.5" />
@@ -312,10 +276,10 @@ function Maintenance({ quarantined }: { quarantined: number }) {
                     <span className="truncate font-mono text-xs">{b.filename}</span>
                     <span
                       className="ml-3 shrink-0 text-xs text-muted-foreground"
-                      title={b.modified_at ? formatDate(b.modified_at) : undefined}
+                      title={b.created_at ? formatDate(b.created_at) : undefined}
                     >
                       {formatBytes(b.size_bytes)}
-                      {b.modified_at ? ` · ${formatWhen(b.modified_at)}` : ""}
+                      {b.created_at ? ` · ${formatWhen(b.created_at)}` : ""}
                     </span>
                   </div>
                 ))}
@@ -344,7 +308,7 @@ function Maintenance({ quarantined }: { quarantined: number }) {
             <Button variant="outline" onClick={() => window.open("/docs", "_blank")}>
               Swagger UI
             </Button>
-            <Button variant="outline" onClick={() => window.open("/api/v1/openapi.json", "_blank")}>
+            <Button variant="outline" onClick={() => window.open("/api/v2/openapi.json", "_blank")}>
               OpenAPI spec
             </Button>
           </CardContent>
@@ -355,20 +319,21 @@ function Maintenance({ quarantined }: { quarantined: number }) {
 }
 
 /**
- * What this node is configured to run (Orion 1.9).
- *
- * The three runtimes that are off by default. A cron channel on a node with
+ * What this node is configured to run: the runtimes that are off by default
+ * (cron and plugins in 2.0; a 1.x server also reported models). A cron channel on a node with
  * `cron.enabled = false` is not a broken channel — it is a schedule that would
  * never fire, and the node quarantines it saying so. Reading the capability
  * here is how that answer is available before a reload discovers it, and why
  * `off` reads as neutral rather than as a fault.
  */
 function Capabilities({ capabilities }: { capabilities: EngineCapabilities }) {
-  const rows: { key: keyof EngineCapabilities; label: string; setting: string }[] = [
-    { key: "cron", label: "Cron", setting: "cron.enabled" },
-    { key: "plugins", label: "Plugins", setting: "plugins.enabled" },
-    { key: "models", label: "Models", setting: "models.enabled" },
-  ]
+  const rows = (
+    [
+      { key: "cron", label: "Cron", setting: "cron.enabled" },
+      { key: "plugins", label: "Plugins", setting: "plugins.enabled" },
+      { key: "models", label: "Models", setting: "models.enabled" },
+    ] as const satisfies readonly { key: keyof EngineCapabilities; label: string; setting: string }[]
+  ).filter(({ key }) => capabilities[key] !== undefined)
   // The wire is a boolean; tolerate "on" / "off" spellings as well.
   const on = (v: unknown) => v === true || v === "on"
   return (
@@ -379,7 +344,7 @@ function Capabilities({ capabilities }: { capabilities: EngineCapabilities }) {
           key={key}
           variant="outline"
           className={componentStateBadgeClass(on(capabilities[key]) ? "ok" : "disabled")}
-          title={`${setting} = ${on(capabilities[key])} — a node without it quarantines what needs it rather than refusing to start`}
+          title={`${setting} = ${on(capabilities[key])} — a node without it quarantines what needs it rather than refusing the deployment`}
         >
           {label} {on(capabilities[key]) ? "on" : "off"}
         </Badge>

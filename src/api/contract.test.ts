@@ -222,16 +222,16 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
   },
   engineApi: {
     status: () => engineApi.status(),
-    reload: () => engineApi.reload(),
     health: () => engineApi.health(),
   },
   auditApi: {
     list: () =>
       auditApi.list({
         limit: 50,
-        offset: 0,
-        action: "create",
-        resource_type: "workflow",
+        cursor: "c",
+        include_total: true,
+        action: "v2_deployment_apply",
+        resource_type: "deployment",
         resource_id: "wf-1",
         principal: "admin",
         start_time: "2026-07-01T00:00:00Z",
@@ -249,18 +249,16 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
     list: () =>
       tracesApi.list({
         limit: 10,
-        offset: 0,
+        cursor: "c",
         include_total: true,
         status: "completed",
         channel: "ch",
         mode: "sync",
-        sort_by: "created_at",
-        sort_order: "desc",
       }),
     get: () => tracesApi.get("trace-1", "tok"),
   },
   traceDlqApi: {
-    list: () => traceDlqApi.list({ limit: 10, offset: 0, channel: "ch", exhausted: true }),
+    list: () => traceDlqApi.list({ limit: 10, cursor: "c", include_total: true, channel: "ch", exhausted: true }),
     get: () => traceDlqApi.get("dlq-1"),
     requeue: () => traceDlqApi.requeue("dlq-1"),
     purge: () => traceDlqApi.purge({ older_than_hours: 24 }),
@@ -313,7 +311,8 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
     listOccurrences: () =>
       cronApi.listOccurrences({
         limit: 10,
-        offset: 0,
+        cursor: "c",
+        include_total: true,
         channel_id: "ch-1",
         status: "failed",
         since: "2026-09-01T00:00:00Z",
@@ -412,10 +411,6 @@ const PENDING_V2 = new Set<string>([
   "connectorsApi.test",
   "connectorsApi.import",
   "connectorsApi.export",
-  "engineApi.reload",
-  "auditApi.list",
-  "tracesApi.list",
-  "traceDlqApi.list",
   "packagesApi.list",
   "packagesApi.list?current",
   "packagesApi.get",
@@ -432,7 +427,6 @@ const PENDING_V2 = new Set<string>([
   "pluginsApi.dependencies",
   "pluginsApi.import",
   "pluginsApi.export",
-  "cronApi.listOccurrences",
   "modelsApi.list",
   "modelsApi.get",
   "modelsApi.create",

@@ -356,16 +356,31 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
   `tracesApi.get` has always sent; the console now hands the token to the trace page in router
   *state* rather than the UI's own URL, for the same reason (browser history, `Referer`, pasted
   links). `/traces/:id?token=` is still read for old links.
-- **Trace `mode` is open:** `sync` | `async` | `kafka` (1.4 — no `channel_id`, no `input_json`)
-  | `cron` (1.6). `TRACE_MODES` drives the filter.
-- **Audit vocabulary** gained `resource_type: plugin` and `cron_occurrence` (1.6), `model`
-  (1.8), and actions `trigger` (channel), `retry` (cron_occurrence) and `admit` (model). Status
-  changes are named for the status requested (`status_active`, `status_archived`); there is no
-  `activate` action. `AUDIT_ACTIONS` and `AUDIT_RESOURCE_TYPES` in `pages/audit.tsx` are that
-  vocabulary written out by hand — a new resource type or action has to be added there *and* to
-  `lib/audit-routes.ts`, or the rows arrive unfilterable. Both are open strings on the wire, so
-  the dropdowns keep an unlisted value from the URL visible (`UnknownOption`) rather than
-  filtering by something they do not show.
+- **Trace `mode` is open:** `sync` | `async` | `cron` in 2.0 (`TRACE_MODES` drives the filter);
+  an edition's driver may add its own, and the filter keeps an unlisted value visible.
+- **Audit vocabulary (2.0)** — `lib/audit-vocabulary.ts`, read from the server's own
+  `audit_record` calls: `v2_deployment_apply` / `v2_deployment_rollback` (`resource_type:
+  deployment`, the id is the committed revision — the only *change* actions, so the map's
+  change pins wait for phase 6 to read a revision's diff), `v2_definition_upload` / `_test`
+  (`definition`), `v2_connection_create` / `_probe` (`connection`), `v2_package_upload` /
+  `_admit` / `_revoke` (`connector_package`), plus `trigger` (channel), `retry` / `cancel`
+  (`cron_occurrence`), `invalidate` (`cache_namespace`), `reset` (`circuit_breaker`), `requeue` /
+  `purge` (`trace_dlq`) and `create` (`backup`). 1.x's lifecycle actions (`status_active`,
+  `update_rollout`, `create_version`, `reload`, …) are gone; a 2.0 server starts on a fresh
+  database. A new action or resource type goes in the vocabulary *and* `lib/audit-routes.ts`, or
+  rows arrive unfilterable; both are open strings on the wire, so the dropdowns keep an unlisted
+  value from the URL visible (`UnknownOption`).
+- **No reload in 2.0.** `admin/engine/reload` is gone: applying a deployment rebuilds the engine,
+  and each node converges on the head by itself. The Engine page reads where this node stands
+  from `runtime-capabilities.node_status` (`components/admin/runtime-report.tsx`), and a revision
+  the node cannot build, or a quarantined workflow or connection member, is a `deployment`
+  incident on the dashboard (`lib/incidents.ts::nodeIncidents`).
+- **The admin key never goes to the data plane** (`api/auth.ts::mayCarryAdminKey`; also the
+  nginx template's `/api/v2/data/` block and the dev proxy). A channel is called the way its own
+  callers call it — the admin key would leak to it and stand in for, or clash with, the channel's
+  own `Authorization` check. The console shows `X-Orion-Workflow-Revision` (the revision a
+  canary split routed to) through `RequestOptions.onHeaders`, and a connector failure's class and
+  provider code through `lib/toast-error.tsx::connectorLine`, as `ErrorState` and toasts do.
 - **`response.cookies` (1.5)** is its own switch — a shaped channel's workflow may then set
   cookies declaratively through `data._orion.response.cookies`. A response that sets a cookie is
   never stored in the response cache. `cache.key_logic` is the general form of
@@ -448,10 +463,10 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
 - **Traces live on the admin plane:** `GET admin/traces` and `admin/traces/{id}`. The old
   `data/traces` paths now resolve as a *channel name* and 404. The single-trace GET also accepts
   the `trace_token` from an async 202 (`x-trace-token` header or `?token=`).
-- **Trace list is the one pagination deviation:** `total` only with `?include_total=true`, plus an
-  opaque `cursor`/`next_cursor` keyset mode. `cursor` + `offset` together is a 400, as is `cursor`
-  with any `sort_by` other than `created_at`. Note `buildQuery` serializes `offset: 0`, so cursor
-  mode must pass `offset: undefined` explicitly.
+- **Every 2.0 list is cursor-paged, newest first** (traces, audit, DLQ, cron occurrences): no
+  `offset`, no `sort_by`; `total` only with `?include_total=true`, so a dashboard that counts
+  (the DLQ depth) asks for it. Their pages use `useCursorList` + `LoadMoreFooter`; a one-page
+  read (`limit: 1`, the newest N) stays a plain query.
 - **Trace list rows are payload-free:** no `task_trace_json`, `input_json` or `result_json` — fetch
   a single trace for those. This is why `use-trace-analytics.ts` aggregates at row level only.
 - **Channel `config` sub-fields:** `auth`, `rate_limit` (`requests_per_second`, `burst`,
@@ -475,14 +490,18 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
   used by the activation pre-flight in `LifecycleActions`) and `?reload=now|defer`.
 - **Channel activation requires an active workflow.**
 - **Audit logs filter server-side:** `action`, `resource_type`, `resource_id`, `principal`,
-  `start_time`, `end_time`. No `sort_by`; `limit` clamped 1–1000.
+  `start_time`, `end_time` (RFC 3339; a trailing `Z` is fine). `limit` clamped 1–1000. The cron
+  ledger's `since` / `until` are still zoneless in 2.0 — `api/cron.ts::toNaiveUtc` trims them.
 - **Circuit breakers:** `GET admin/connectors/circuit-breakers` returns
   `{ enabled, scope, instance_id, breakers }`. State is **per-replica**, never cluster-wide.
-  There is no connectors-reload endpoint; the "reload" affordance calls `admin/engine/reload`.
+  There is no reload of any kind in 2.0.
 - **Connector probe:** `POST admin/connectors/{id}/test` — an unreachable backend is still a 200.
   Key "broken" on `supported && !reachable`: `es`, `kafka` and MongoDB-backed `db` return
   `supported: false`. The `http` probe issues one *genuine* request with real credentials.
-- **Backups:** `POST`/`GET admin/backups`. SQLite only (400 otherwise). **No restore endpoint.**
+- **Backups:** `POST` (201 in 2.0) / `GET admin/backups`; a listed file carries `created_at` (1.x:
+  `modified_at`). SQLite only (400 otherwise). **No restore endpoint.**
+- **Trace DLQ entry (2.0):** `payload` and `metadata` are objects (1.x sent `payload_json` /
+  `metadata_json` strings). A trace's `duration_ms` is a number with a fraction.
 - **Profiling:** sync data requests with `X-Orion-Profile: 1` return `_orion.profile`.
 - **`errors[]` in a 200:** `code` names the real failure (`IO_ERROR`, `TIMEOUT_ERROR`,
   `FUNCTION_ERROR`, the connector's lower-case `circuit_open`), with `TASK_ERROR` only as a
@@ -622,8 +641,8 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
   unsorted → asc → desc → unsorted; the sort fields are the server's own `sort_by` values
   (channels: `priority`, `name`, `status`, `channel_type`, `protocol`, `created_at`,
   `updated_at`; workflows drop the type columns; plugins take `plugin_id`; connectors `name`,
-  `connector_type`, `created_at`, `updated_at`; traces `status`, `channel`, `mode`,
-  `created_at`).
+  `connector_type`, `created_at`, `updated_at`). The 2.0 lists (traces, audit, DLQ, the
+  Schedules ledger) have no server sort: their state is filters only.
 - **`src/components/shared/entity-table.tsx`** — `EntityTable`: the list table every entity page
   draws — a `SortableHead` header row, `PAGE_SIZE` skeleton rows while loading, the empty state
   across the full width, and one activatable row per entity — from a TanStack `table`, the

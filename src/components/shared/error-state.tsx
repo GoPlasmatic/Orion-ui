@@ -1,6 +1,7 @@
 import { Link } from "react-router"
 import { ArrowLeft, RefreshCw } from "lucide-react"
 import { ApiError } from "@/api/client"
+import { connectorLine } from "@/lib/toast-error"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
 
@@ -65,6 +66,7 @@ export function ErrorState({
                 ))}
               </ul>
             )}
+            {api?.connector && <p className="font-mono text-xs">{connectorLine(api.connector)}</p>}
             {api?.requestId && (
               <p className="font-mono text-xs text-muted-foreground">request id {api.requestId}</p>
             )}

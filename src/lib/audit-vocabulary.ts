@@ -20,42 +20,44 @@ export interface AuditActionWords {
   change?: boolean
 }
 
+/**
+ * Orion 2.0's actions. A change to what serves is a deployment (`v2_deployment_apply`,
+ * `v2_deployment_rollback`), so those are the change pins; the per-entity
+ * lifecycle actions of 1.x (`status_active`, `update_rollout`, `create_version`,
+ * `reload`, …) are gone, and a 2.0 server starts on a fresh database, so no old
+ * row carries them.
+ */
 export const AUDIT_ACTIONS: readonly AuditActionWords[] = [
-  { value: "create", label: "Create", verb: "created", change: true },
-  { value: "update", label: "Update", verb: "edited", change: true },
-  { value: "delete", label: "Delete", verb: "deleted" },
-  { value: "create_version", label: "Create version", verb: "new version", change: true },
-  { value: "status_active", label: "Activate", verb: "activated", change: true },
-  { value: "status_archived", label: "Archive", verb: "archived", change: true },
-  { value: "update_rollout", label: "Update rollout", verb: "rollout changed", change: true },
-  { value: "admit", label: "Admit (model)", verb: "re-admitted" },
-  { value: "import", label: "Import", verb: "imported", change: true },
-  { value: "test", label: "Test", verb: "tested" },
-  { value: "trigger", label: "Trigger (cron)", verb: "triggered", change: true },
+  { value: "v2_deployment_apply", label: "Apply deployment", verb: "deployed", change: true },
+  { value: "v2_deployment_rollback", label: "Roll back deployment", verb: "rolled back", change: true },
+  { value: "v2_definition_upload", label: "Upload definition", verb: "uploaded" },
+  { value: "v2_definition_test", label: "Test definition", verb: "tested" },
+  { value: "v2_connection_create", label: "Create connection revision", verb: "revised" },
+  { value: "v2_connection_probe", label: "Probe connection", verb: "probed" },
+  { value: "v2_package_upload", label: "Upload provider package", verb: "uploaded" },
+  { value: "v2_package_admit", label: "Admit provider package", verb: "admitted" },
+  { value: "v2_package_revoke", label: "Revoke provider package", verb: "revoked" },
+  { value: "trigger", label: "Trigger (cron)", verb: "triggered" },
   { value: "retry", label: "Retry (occurrence)", verb: "retried" },
   { value: "cancel", label: "Cancel (occurrence)", verb: "cancelled" },
   { value: "invalidate", label: "Invalidate (cache)", verb: "invalidated" },
-  { value: "reload", label: "Reload", verb: "reloaded" },
   { value: "reset", label: "Reset breaker", verb: "reset" },
   { value: "requeue", label: "Requeue (DLQ)", verb: "requeued" },
   { value: "purge", label: "Purge (DLQ)", verb: "purged" },
-  { value: "package_staged", label: "Package staged", verb: "staged" },
-  { value: "package_applied", label: "Package applied", verb: "applied" },
+  { value: "create", label: "Create (backup)", verb: "created" },
 ]
 
-/** The resource types the server records. Routes live in `lib/audit-routes.ts`. */
+/** The resource types a 2.0 server records. Routes live in `lib/audit-routes.ts`. */
 export const AUDIT_RESOURCE_TYPES = [
+  { value: "deployment", label: "Deployment" },
+  { value: "definition", label: "Definition" },
+  { value: "connection", label: "Connection" },
+  { value: "connector_package", label: "Provider package" },
   { value: "channel", label: "Channel" },
-  { value: "workflow", label: "Workflow" },
-  { value: "connector", label: "Connector" },
-  { value: "plugin", label: "Plugin" },
-  { value: "model", label: "Model" },
   { value: "cron_occurrence", label: "Cron occurrence" },
   { value: "cache_namespace", label: "Cache namespace" },
-  { value: "engine", label: "Engine" },
   { value: "circuit_breaker", label: "Circuit breaker" },
   { value: "trace_dlq", label: "Trace DLQ" },
-  { value: "package", label: "Package" },
   { value: "backup", label: "Backup" },
 ] as const
 

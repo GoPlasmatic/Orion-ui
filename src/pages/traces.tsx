@@ -1,16 +1,16 @@
 import { useState } from "react"
 import { useNavigate } from "react-router"
-import { useTraces } from "@/hooks/use-traces"
+import { useTraceList } from "@/hooks/use-traces"
 import { useTable, createColumnHelper } from "@tanstack/react-table"
 import { listTableFeatures } from "@/lib/table"
 import { useListState } from "@/lib/use-list-state"
-import type { Trace, TraceMode, TraceSortBy, SortOrder } from "@/api/types"
+import type { Trace, TraceMode } from "@/api/types"
 import { TRACE_MODES, TRACE_STATUSES } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
 import { PageHeader } from "@/components/shared/page-header"
-import { PaginationFooter } from "@/components/shared/pagination"
+import { LoadMoreFooter } from "@/components/shared/load-more"
 import { PAGE_SIZE } from "@/lib/use-pagination"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { TraceAnalytics } from "@/components/traces/trace-analytics"
@@ -82,27 +82,14 @@ const columns = columnHelper.columns([
 /** `?channel=` and `?status=` are what the map and the dashboard hand over. */
 const FILTER_KEYS = ["status", "channel", "mode"] as const
 
-/** Column id → the server's `sort_by` field. */
-const SORT_FIELDS: Record<string, TraceSortBy> = {
-  status: "status",
-  channel: "channel",
-  mode: "mode",
-  created_at: "created_at",
-}
-
-/** The server's own order when none is asked for: newest first. */
-const DEFAULT_SORT: TraceSortBy = "created_at"
-const DEFAULT_ORDER: SortOrder = "desc"
-
 export function TracesPage() {
   const navigate = useNavigate()
-  const { filters, update, clear, hasFilters, sortBy, sortOrder, sort, offset, prev, next } =
-    useListState(FILTER_KEYS, SORT_FIELDS, {
-      newestFirst: [DEFAULT_SORT],
-      // `mode` is an open string on the wire, so it is shown rather than
-      // validated — see the dropdown below.
-      values: { status: TRACE_STATUSES },
-    })
+  // 2.0 lists are newest first, cursor-paged, with no server-side sort — so
+  // no column sorts. `mode` is an open string on the wire, so it is shown
+  // rather than validated — see the dropdown below.
+  const { filters, update, clear, hasFilters } = useListState(FILTER_KEYS, {}, {
+    values: { status: TRACE_STATUSES },
+  })
   // Off by default: a list that reorders itself under the pointer is the wrong
   // default for reading, and the right one for watching an incident unfold.
   const [live, setLive] = useState(false)
@@ -110,13 +97,10 @@ export function TracesPage() {
   // This page shows a count, so it opts into the total explicitly — every other
   // trace read (analytics, the operations dashboard) leaves it off and does not
   // pay for the scan.
-  const { data, isLoading } = useTraces(
+  const list = useTraceList(
     {
       limit: PAGE_SIZE,
-      offset,
       include_total: true,
-      sort_by: (sortBy || DEFAULT_SORT) as TraceSortBy,
-      sort_order: sortBy ? sortOrder || DEFAULT_ORDER : DEFAULT_ORDER,
       status: filters.status || undefined,
       channel: filters.channel || undefined,
       mode: (filters.mode || undefined) as TraceMode | undefined,
@@ -126,7 +110,7 @@ export function TracesPage() {
 
   const table = useTable({
     features: listTableFeatures,
-    data: data?.data ?? [],
+    data: list.rows,
     columns,
   })
 
@@ -180,8 +164,8 @@ export function TracesPage() {
               className="w-48"
               title="Matches the channel name exactly"
             />
-            {/* `kafka` (1.4) and `cron` (1.6) are open-string additions: a consumed
-                record and a scheduled occurrence each write a trace row too. */}
+            {/* An open string: an edition's driver may add a mode, and an
+                unlisted value from the URL stays visible. */}
             <Select
               value={filters.mode}
               onChange={(e) => update({ mode: e.target.value })}
@@ -200,15 +184,12 @@ export function TracesPage() {
 
           <EntityTable
             table={table}
-            isLoading={isLoading}
-            // The header shows the server's default order as the sort in force
-            // when none is asked for, so the newest-first list reads as sorted.
-            sort={{ ...sort, sortBy: sortBy || DEFAULT_SORT, sortOrder: sortBy ? sortOrder : DEFAULT_ORDER }}
-            // The visible page travels along, so the detail can step to the
+            isLoading={list.isLoading}
+            // The loaded rows travel along, so the detail can step to the
             // previous and next trace without a time-range API.
             onOpen={(trace) =>
               navigate(`/traces/${trace.id}`, {
-                state: { siblings: (data?.data ?? []).map((t) => t.id) },
+                state: { siblings: list.rows.map((t) => t.id) },
               })
             }
             empty={
@@ -229,12 +210,13 @@ export function TracesPage() {
             }
           />
 
-          <PaginationFooter
-            offset={offset}
-            count={data?.data.length ?? 0}
-            total={data?.total}
-            onPrev={prev}
-            onNext={next}
+          <LoadMoreFooter
+            count={list.rows.length}
+            total={list.total}
+            hasMore={list.hasMore}
+            pending={list.isFetchingMore}
+            onLoadMore={list.loadMore}
+            noun="trace"
           />
         </TabsContent>
 

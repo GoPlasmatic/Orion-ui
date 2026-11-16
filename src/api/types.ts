@@ -1222,7 +1222,8 @@ export function countLoadIssues(issues: EngineLoadIssues | null | undefined): nu
 export interface EngineCapabilities {
   cron: boolean
   plugins: boolean
-  models: boolean
+  /** 1.x only: Orion 2.0 has no models runtime (ONNX models are `orion-ext`'s `com.orion.models` provider). */
+  models?: boolean
 }
 
 export interface EngineStatus {
@@ -1236,19 +1237,6 @@ export interface EngineStatus {
   // Absent from a pre-1.9 server — "cannot tell you", not "nothing wrong".
   load_issues?: EngineLoadIssues | null
   capabilities?: EngineCapabilities | null
-}
-
-/**
- * What a reload answered. A reload does not fail because one entity did not
- * load — the entity is quarantined and everything else serves — so a 200 here
- * is not proof that what was activated is serving. Since 1.9 the answer says
- * which generation it published and what that generation refused.
- */
-export interface EngineReloaded {
-  reloaded: boolean
-  workflows_count: number
-  generation?: number
-  load_issues?: EngineLoadIssues | null
 }
 
 /** One plugin version this node loaded, from the admin-only `/health` detail. */
@@ -1500,14 +1488,15 @@ export const TRACE_STATUSES = [
  * the payload and the per-task trace.
  */
 /**
- * How a trace was submitted. An open string on the wire by design: `kafka`
- * (1.4 — a consumed record; `channel_id` and `input_json` are null because it
- * arrived on no route) and `cron` (1.6 — a scheduled occurrence, linked from
- * the occurrence ledger by `trace_id`) both arrived as additions.
+ * How a trace was submitted: `sync`, `async` or `cron` (a scheduled
+ * occurrence, linked from the occurrence ledger by `trace_id`) in 2.0. An open
+ * string on the wire by design — an edition's channel driver (`orion-ext`'s
+ * Kafka) may add its own, and 1.x stored `kafka` rows — so the filter keeps an
+ * unlisted value visible rather than dropping it.
  */
-export type TraceMode = "sync" | "async" | "kafka" | "cron" | (string & {})
+export type TraceMode = "sync" | "async" | "cron" | (string & {})
 
-export const TRACE_MODES: TraceMode[] = ["sync", "async", "kafka", "cron"]
+export const TRACE_MODES: TraceMode[] = ["sync", "async", "cron"]
 
 export interface Trace {
   id: string
@@ -1552,44 +1541,20 @@ export interface TraceDetail {
   completed_at?: string | null
 }
 
-export type TraceSortBy = "created_at" | "updated_at" | "status" | "channel" | "mode"
-
 /**
- * The trace list is the one endpoint that deviates from the shared pagination
- * contract: `total` is opt-in and there is a second, keyset paging mode.
- *
- * Three combinations are 400s:
- *  - `cursor` together with `offset` (two paging modes)
- *  - `cursor` with any `sort_by` other than the default `created_at`
- *  - a `cursor` value that did not come from a `next_cursor`
- *
- * Note `buildQuery` serializes `offset: 0`, so cursor mode must pass
- * `offset: undefined` explicitly rather than relying on a falsy value.
+ * `GET admin/traces` (2.0): cursor-paged, newest first. 1.x's `offset`,
+ * `sort_by` and `sort_order` are gone. Pass a `next_cursor` back unmodified;
+ * `include_total` is off by default because the count is a full scan of the
+ * filtered set.
  */
-export interface ListTracesParams {
-  limit?: number
-  offset?: number
-  // Opaque; pass a next_cursor back unmodified.
-  cursor?: string
-  // Off by default: the count is a full scan of the filtered set.
-  include_total?: boolean
+export interface ListTracesParams extends PageParams {
   status?: string
   channel?: string
   mode?: TraceMode
-  sort_by?: TraceSortBy
-  sort_order?: SortOrder
 }
 
-export interface TracePage {
-  data: Trace[]
-  limit: number
-  offset: number
-  // Present only with include_total=true.
-  total?: number | null
-  // Present only while a further page may exist; its absence is how you know
-  // you have reached the end. Treat the value as opaque.
-  next_cursor?: string | null
-}
+/** One page of the trace list. Rows are payload-free: fetch a trace for its steps. */
+export type TracePage = Page<Trace>
 
 // Audit log types
 export interface AuditLog {
@@ -1606,9 +1571,7 @@ export interface AuditLog {
  * Server-side filters, all exact-match except the time bounds. There is no
  * `sort_by` on this endpoint, and `limit` is clamped to 1–1000.
  */
-export interface ListAuditLogsParams {
-  limit?: number
-  offset?: number
+export interface ListAuditLogsParams extends PageParams {
   action?: string
   resource_type?: string
   resource_id?: string
@@ -1630,7 +1593,8 @@ export interface BackupCreated {
 export interface BackupFile {
   filename: string
   size_bytes: number
-  modified_at: string
+  /** When the snapshot was taken (2.0; 1.x named it `modified_at`). */
+  created_at: string
 }
 
 // Workflow function catalogue (GET admin/functions).
@@ -1809,14 +1773,13 @@ export interface TraceDlqSummary {
   updated_at: string
 }
 
+/** A DLQ entry with its failed message. 2.0 serves `payload` and `metadata` as objects (1.x sent them as JSON strings). */
 export interface TraceDlqEntry extends TraceDlqSummary {
-  payload_json: string
-  metadata_json: string
+  payload: unknown
+  metadata: unknown
 }
 
-export interface ListTraceDlqParams {
-  limit?: number
-  offset?: number
+export interface ListTraceDlqParams extends PageParams {
   channel?: string
   exhausted?: boolean
 }
@@ -2031,9 +1994,7 @@ export interface CronScheduleStatus {
   slots_held?: number | null
 }
 
-export interface ListCronOccurrencesParams {
-  limit?: number
-  offset?: number
+export interface ListCronOccurrencesParams extends PageParams {
   // The stable channel id, not the name — an occurrence outlives the name it
   // was materialised under.
   channel_id?: string

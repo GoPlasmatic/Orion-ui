@@ -78,8 +78,6 @@ function percentile(sorted: number[], p: number): number | null {
 export function useTraceAnalytics(window: number) {
   const { data, isLoading } = useTraces({
     limit: window,
-    sort_by: "created_at",
-    sort_order: "desc",
   })
 
   return useMemo(() => {

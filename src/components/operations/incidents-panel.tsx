@@ -8,6 +8,7 @@ import {
   CalendarClock,
   Check,
   CheckCircle2,
+  GitCommitVertical,
   Inbox,
   Plug,
   ShieldAlert,
@@ -33,6 +34,7 @@ const KIND_ICON: Record<IncidentKind, LucideIcon> = {
   breaker: ZapOff,
   dlq: Inbox,
   backlog: CalendarClock,
+  deployment: GitCommitVertical,
 }
 
 /** Channels named inline before "+N more". */

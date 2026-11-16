@@ -9,6 +9,7 @@ import { useChannels } from "@/hooks/use-channels"
 import { useTraces } from "@/hooks/use-traces"
 import { useTraceDlq } from "@/hooks/use-trace-dlq"
 import { useCronOccurrences, useCronStatus } from "@/hooks/use-cron"
+import { useRuntimeCapabilities } from "@/hooks/use-runtime-capabilities"
 import { DEFAULT_TRAFFIC_WINDOW, useChannelTraffic } from "@/hooks/use-metrics"
 import { useNow } from "@/lib/use-now"
 import { isComponentFault } from "@/lib/status"
@@ -109,15 +110,16 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
   const now = useNow(background ? 60_000 : 10_000)
   const { data: health } = useHealth()
   const { data: engine } = useEngineStatus()
+  const { data: runtime } = useRuntimeCapabilities()
   const { data: breakers } = useCircuitBreakers({ refetchInterval: poll })
   const traffic = useChannelTraffic(INCIDENT_WINDOW)
   const { data: channelList } = useChannels({ limit: REGISTRY_LIMIT })
   const { data: connectorList } = useConnectors({ limit: REGISTRY_LIMIT })
   const { data: failedTraces } = useTraces(
-    { limit: FAILED_TRACE_PAGE, status: "failed", sort_by: "created_at", sort_order: "desc" },
+    { limit: FAILED_TRACE_PAGE, status: "failed" },
     { refetchInterval: poll },
   )
-  const { data: dlqExhausted } = useTraceDlq({ limit: 1, exhausted: true }, { refetchInterval: slowPoll })
+  const { data: dlqExhausted } = useTraceDlq({ limit: 1, exhausted: true, include_total: true }, { refetchInterval: slowPoll })
   // A pre-1.6 server has no scheduler; the component key is how it says so.
   const hasCron = health?.components?.cron !== undefined
   const { data: schedules } = useCronStatus({ enabled: hasCron, refetchInterval: slowPoll })
@@ -171,8 +173,6 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
         channel,
         status: "completed",
         limit: 1,
-        sort_by: "created_at",
-        sort_order: "desc",
       }
       return {
         queryKey: ["traces", params],
@@ -261,6 +261,15 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
         tasks,
         breakers: openBreakers(breakers),
         dlqExhausted: dlqExhausted?.total ?? 0,
+        node: runtime
+          ? {
+              desiredRevision: runtime.node_status.desired_revision,
+              lastError: runtime.node_status.last_error ?? null,
+              quarantined: runtime.node_status.quarantined_entities
+                .filter((q) => q.entity.kind === "workflow" || q.entity.kind === "connection")
+                .map((q) => ({ ...q.entity, reason: q.reason })),
+            }
+          : null,
         cronBacklog: hasCron
           ? { pending, oldestSec: health?.cron?.oldest_pending_age_secs ?? null }
           : null,
@@ -276,6 +285,7 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
     health,
     breakers,
     dlqExhausted?.total,
+    runtime,
     hasCron,
     channelIdByName,
     connectorIdByName,
@@ -303,7 +313,7 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
 /** The live counts the sidebar draws beside its items. */
 export function useNavCounts() {
   const { open, breakers, schedules } = useAttentionItems({ background: true })
-  const { data: exhausted } = useTraceDlq({ limit: 1, exhausted: true }, { refetchInterval: 60_000 })
+  const { data: exhausted } = useTraceDlq({ limit: 1, exhausted: true, include_total: true }, { refetchInterval: 60_000 })
   const pending = (schedules ?? []).reduce((sum, s) => sum + (s.pending ?? 0), 0)
   return {
     alerts: open.length,

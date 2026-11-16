@@ -332,3 +332,33 @@ describe("acknowledgement", () => {
     expect(pruneAcks({ old: now - 8 * 24 * 60 * MIN, fresh: now }, now)).toEqual({ fresh: now })
   })
 })
+
+describe("deployment incidents (2.0)", () => {
+  const base = {
+    now: Date.parse("2026-11-16T12:00:00Z"),
+    groups: [],
+    evidence: { window: null, lastCompletedTrace: new Map(), lastCompletedRun: new Map() },
+  }
+
+  it("raises a revision this node cannot build, and each quarantined workflow or connection", () => {
+    const incidents = buildIncidents({
+      ...base,
+      live: {
+        node: {
+          desiredRevision: 7,
+          lastError: "connection pg r2: provider not admitted",
+          quarantined: [{ kind: "workflow", id: "orders", revision: 3, reason: "unknown function foo" }],
+        },
+      },
+    })
+    expect(incidents.map((i) => i.title)).toEqual([
+      "Quarantined: workflow orders r3",
+      "Revision 7 does not build on this node",
+    ])
+    expect(incidents.every((i) => i.kind === "deployment" && i.to === "/engine?tab=cluster")).toBe(true)
+  })
+
+  it("says nothing for a node that converged cleanly", () => {
+    expect(buildIncidents({ ...base, live: { node: { desiredRevision: 7, lastError: null, quarantined: [] } } })).toEqual([])
+  })
+})
