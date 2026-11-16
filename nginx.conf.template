@@ -55,6 +55,17 @@ server {
         access_log off;
     }
 
+    # The data plane: channels are called the way their own callers call them,
+    # so the injected admin credential never goes here — it would leak to the
+    # channel and stand in for (or clash with) the channel's own auth.
+    location /api/v2/data/ {
+        proxy_pass ${ORION_URL};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     # Reverse proxy: API calls to Orion backend
     location /api/ {
         proxy_pass ${ORION_URL};

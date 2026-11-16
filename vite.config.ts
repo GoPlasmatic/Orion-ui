@@ -19,6 +19,8 @@ const proxyTo = (target: string): ProxyOptions => ({
   configure: (proxy) => {
     if (!injectedAuthorization) return
     proxy.on("proxyReq", (proxyReq, req) => {
+      // Never the data plane: a channel sees only what its caller sent.
+      if (req.url?.startsWith("/api/v2/data/")) return
       if (!req.headers.authorization) proxyReq.setHeader("Authorization", injectedAuthorization)
     })
   },

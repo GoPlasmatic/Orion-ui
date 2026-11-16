@@ -90,6 +90,17 @@ export function isGuardedPath(url: string): boolean {
   return url.startsWith("/api/v2/admin/") || url === "/metrics" || url.startsWith("/metrics?")
 }
 
+/**
+ * Paths the admin key may travel to: the guarded ones, and `/health` for its
+ * admin-only detail. **Never the data plane** — a channel is called the way a
+ * real caller would call it, with only the headers the console was given; the
+ * admin key would both leak to the channel and stand in for (or clash with)
+ * a channel's own `Authorization` check.
+ */
+export function mayCarryAdminKey(url: string): boolean {
+  return isGuardedPath(url) || url === "/health"
+}
+
 /** The header carrying the held key, or nothing when no key is held. */
 export function credentialHeaders(): Record<string, string> {
   if (!state.key) return {}

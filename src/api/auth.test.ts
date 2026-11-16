@@ -109,6 +109,19 @@ describe("admin auth", () => {
     expect(seen.every((s) => s.headers.Authorization === undefined)).toBe(true)
   })
 
+  it("never sends the admin key to the data plane", async () => {
+    serve(() => ({ status: 200, body: { data: {} } }))
+    setAdminKey("full-key", undefined, true)
+    await api.post("data/orders", { data: {} })
+    await api.send("GET", "data/orders/42")
+    await api.get("/health")
+    expect(seen.map((s) => [s.url, s.headers.Authorization])).toEqual([
+      ["/api/v2/data/orders", undefined],
+      ["/api/v2/data/orders/42", undefined],
+      ["/health", "Bearer full-key"],
+    ])
+  })
+
   it("never holds back /health, which answers anyone", async () => {
     serve(guarded("full-key"))
     await api.get("admin/traces").catch(() => undefined)

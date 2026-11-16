@@ -2,6 +2,7 @@ import type { ConnectorErrorDetail, DataResponse, ErrorFieldDetail } from "./typ
 import {
   credentialHeaders,
   isGuardedPath,
+  mayCarryAdminKey,
   isHeldBack,
   noteAuthorized,
   noteForbidden,
@@ -63,6 +64,12 @@ export interface RequestOptions {
    * `details.change_context`. Free-form; the server truncates at 256 bytes.
    */
   changeContext?: string
+  /**
+   * Called with the response headers, success or failure — for the few
+   * callers that read one (the console shows `X-Orion-Workflow-Revision`, the
+   * revision a canary split routed to).
+   */
+  onHeaders?: (headers: Headers) => void
 }
 
 /** Merge `RequestOptions` into the header bag the fetch layer sends. */
@@ -74,7 +81,7 @@ function buildHeaders(opts?: RequestOptions): Record<string, string> | undefined
 
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"])
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(path: string, options?: RequestInit, onHeaders?: (h: Headers) => void): Promise<T> {
   const url = path.startsWith("/") ? path : `${API_BASE}/${path}`
   const guarded = isGuardedPath(url)
   const method = (options?.method ?? "GET").toUpperCase()
@@ -92,10 +99,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...credentialHeaders(),
+      ...(mayCarryAdminKey(url) ? credentialHeaders() : {}),
       ...options?.headers,
     },
   })
+
+  onHeaders?.(res.headers)
 
   if (!res.ok) {
     const err = await parseError(res)
@@ -161,25 +170,34 @@ export function buildQuery(params: Record<string, string | number | boolean | un
 }
 
 export const api = {
-  get: <T>(path: string, opts?: RequestOptions) => request<T>(path, { headers: buildHeaders(opts) }),
+  get: <T>(path: string, opts?: RequestOptions) =>
+    request<T>(path, { headers: buildHeaders(opts) }, opts?.onHeaders),
   post: <T>(path: string, body?: unknown, opts?: RequestOptions) =>
-    request<T>(path, {
-      method: "POST",
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      headers: buildHeaders(opts),
-    }),
+    request<T>(
+      path,
+      {
+        method: "POST",
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        headers: buildHeaders(opts),
+      },
+      opts?.onHeaders,
+    ),
   put: <T>(path: string, body: unknown, opts?: RequestOptions) =>
-    request<T>(path, { method: "PUT", body: JSON.stringify(body), headers: buildHeaders(opts) }),
+    request<T>(path, { method: "PUT", body: JSON.stringify(body), headers: buildHeaders(opts) }, opts?.onHeaders),
   patch: <T>(path: string, body: unknown, opts?: RequestOptions) =>
-    request<T>(path, { method: "PATCH", body: JSON.stringify(body), headers: buildHeaders(opts) }),
+    request<T>(path, { method: "PATCH", body: JSON.stringify(body), headers: buildHeaders(opts) }, opts?.onHeaders),
   delete: <T>(path: string, opts?: RequestOptions) =>
-    request<T>(path, { method: "DELETE", headers: buildHeaders(opts) }),
+    request<T>(path, { method: "DELETE", headers: buildHeaders(opts) }, opts?.onHeaders),
   // Arbitrary-method escape hatch for the data-plane catch-all (REST route
   // patterns accept any verb). Body is omitted when undefined (GET/DELETE).
   send: <T>(method: string, path: string, body?: unknown, opts?: RequestOptions) =>
-    request<T>(path, {
-      method,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      headers: buildHeaders(opts),
-    }),
+    request<T>(
+      path,
+      {
+        method,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        headers: buildHeaders(opts),
+      },
+      opts?.onHeaders,
+    ),
 }
