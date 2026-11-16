@@ -1,7 +1,9 @@
 import { useInfiniteQuery, keepPreviousData, type QueryKey } from "@tanstack/react-query"
 import type { Page } from "@/api/types"
 
-export interface CursorList<T> {
+export interface CursorList<T, P extends Page<T> = Page<T>> {
+  /** The first page as answered — for a list whose envelope carries more than rows (the deployment history's head). */
+  first: P | undefined
   /** Every row loaded so far, newest first, across the pages fetched. */
   rows: T[]
   /** Rows matching the filters when the server counted them (`include_total=true`); `undefined` is unknown, never zero. */
@@ -25,11 +27,11 @@ export interface CursorList<T> {
  * `fetchPage(cursor)` is called with `undefined` for the first page. Keep
  * `include_total` for lists that show a count: it is a full scan.
  */
-export function useCursorList<T>(
+export function useCursorList<P extends Page<unknown>>(
   key: QueryKey,
-  fetchPage: (cursor: string | undefined) => Promise<Page<T>>,
+  fetchPage: (cursor: string | undefined) => Promise<P>,
   options: { enabled?: boolean; refetchInterval?: number | false } = {}
-): CursorList<T> {
+): CursorList<P["data"][number], P> {
   const q = useInfiniteQuery({
     queryKey: key,
     queryFn: ({ pageParam }) => fetchPage(pageParam),
@@ -42,7 +44,8 @@ export function useCursorList<T>(
   const pages = q.data?.pages ?? []
   const counted = pages.find((p) => typeof p.total === "number")?.total
   return {
-    rows: pages.flatMap((p) => p.data),
+    first: pages[0],
+    rows: pages.flatMap((p) => p.data as P["data"][number][]),
     total: typeof counted === "number" ? counted : undefined,
     hasMore: q.hasNextPage,
     loadMore: () => {

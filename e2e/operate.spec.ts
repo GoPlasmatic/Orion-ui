@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test"
-import { seedEchoDeployment, sendUntilServed } from "./seed"
+import { seedEcho, sendUntilServed } from "./seed"
 
 /**
  * The surfaces 2.0 kept (PLAN-2.0.md, phase 1), against a live server seeded
@@ -22,7 +22,7 @@ test.beforeAll(async ({ request }) => {
   }
   if (!serverUp && process.env.CI) throw new Error("Orion server not reachable through the dev proxy")
   if (!serverUp || !fullKey) return
-  const path = await seedEchoDeployment(request, fullKey)
+  const { path } = await seedEcho(request, fullKey)
   await sendUntilServed(request, path)
   for (let i = 0; i < TRAFFIC; i++) await request.post(path, { data: { data: { n: i } } })
 })

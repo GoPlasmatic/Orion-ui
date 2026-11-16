@@ -85,6 +85,8 @@ const { cronApi } = await import("@/api/cron")
 const { cacheApi } = await import("@/api/cache")
 const { modelsApi } = await import("@/api/models")
 const { runtimeApi } = await import("@/api/runtime")
+const { deploymentsApi } = await import("@/api/deployments")
+const { definitionsApi } = await import("@/api/definitions")
 
 /** Resolve a client path ("admin/workflows/x?y=1" or "/health") to spec-path + query. */
 function normalize(rawPath: string): { url: string; query: string | undefined } {
@@ -151,6 +153,17 @@ function responseEnvelope({ method, path }: CapturedCall): "data" | "page" | "ba
 const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
   runtimeApi: {
     capabilities: () => runtimeApi.capabilities(),
+  },
+  deploymentsApi: {
+    list: () => deploymentsApi.list({ limit: 20, cursor: "c" }),
+    get: () => deploymentsApi.get(3),
+    convergence: () => deploymentsApi.convergence(3, "observed"),
+    plan: () => deploymentsApi.plan(3, { schema_version: 2, providers: [], members: [] }),
+    rollback: () =>
+      deploymentsApi.rollback({ idempotency_key: "k", base_revision: 4, rollback_to: 2, reason: "r" }),
+  },
+  definitionsApi: {
+    get: () => definitionsApi.get("sha256:00"),
   },
   workflowsApi: {
     list: () => workflowsApi.list({ limit: 10, offset: 0, status: "active", tag: "t" }),
@@ -459,6 +472,8 @@ const MODULES: Record<string, object> = {
   cacheApi,
   modelsApi,
   runtimeApi,
+  deploymentsApi,
+  definitionsApi,
 }
 
 describe("API layer ↔ OpenAPI contract", () => {

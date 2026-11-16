@@ -1,6 +1,6 @@
 # Orion-ui 2.0: implementation plan
 
-Status: Phases 0 and 1 done on branch `v2` (2026-11-16); Phase 5 deferred to 2.1 (D1 = A). Target: Orion `v2.0.0` (Orion `main` @ `1e58099f`, not yet tagged).
+Status: Phases 0–2 done on branch `v2` (2026-11-16); Phase 5 deferred to 2.1 (D1 = A). Target: Orion `v2.0.0` (Orion `main` @ `1e58099f`, not yet tagged).
 
 ## Goal and definition of done
 
@@ -210,6 +210,26 @@ New: `api/deployments.ts`, `api/definitions.ts`, `hooks/use-deployments.ts`, and
     - `local_error` and `warnings[]` on 202: show them inline.
   - Then open convergence.
 - **Entity history across revisions.** `useEntityHistory(kind, id)` walks the deployment history (cursor pages, newest first, stopping at a configurable depth, default 50 revisions) and records each distinct `(revision, digest)` of the entity with the deployment revisions that carried it. History beyond compaction is shown as "older revisions compacted".
+
+**Phase 2 outcome (2026-11-16).** Done:
+- `/deployments`: the history, with the head, the revision this node serves and the epoch, plus a banner while they differ.
+- `/deployments/:revision`, in four tabs:
+  - **Members**: expand a member for its definition, rollout bar, what it requires and what requires it.
+  - **Changes**: against the parent or any `?compare=` revision; a changed member opens to a line diff of its two definitions.
+  - **Convergence**: this node or every observed node; polls until converged.
+  - **Manifest**: the raw manifest.
+- Rollback: the dialog previews the head → target diff, needs a reason, holds one idempotency key, and handles head conflicts, read-only refusals and `local_error` / `warnings`.
+- Supporting code:
+  - `useDeployedState` exists for Phase 3; `entityHistory` and `dependents` are tested.
+  - `lib/line-diff.ts` + `JsonDiff` are shared with the 1.x `VersionCompare` until that component is deleted.
+- Departures:
+  - The Members tab does not draw the `requires` graph with `components/graph`; the requires/dependents text and the rollout bar carry the same facts. The map draws the graph in Phase 6.
+  - Connection members show their configuration digest only; Phase 4 links them to the connection revision.
+- E2E (`e2e/deployments.spec.ts`):
+  - two revisions of the echo workflow, then the history (head first);
+  - the definition diff (`logic: true` → `2`);
+  - a read-only key refused a rollback, which then disables the button and marks the session read-only;
+  - a full rollback that commits head + 1, converges, and appears in the audit log as `v2_deployment_rollback`.
 
 ### Phase 3: Workflows, channels and plugins as deployed views (L)
 

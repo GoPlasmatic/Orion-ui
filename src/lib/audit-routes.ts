@@ -5,6 +5,8 @@
  * key; a DLQ entry and a package by their list.
  */
 const ROUTES: Record<string, (id: string) => string> = {
+  // 2.0: a deployment row's id is the committed revision.
+  deployment: (id) => `/deployments/${encodeURIComponent(id)}`,
   channel: (id) => `/channels/${id}`,
   workflow: (id) => `/workflows/${id}`,
   connector: (id) => `/connectors/${id}`,

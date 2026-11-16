@@ -2620,3 +2620,141 @@ export interface RuntimeCapabilities {
   native_scheduler: { in_flight: number; max_in_flight: number }
   node_status: NodeStatus
 }
+
+// ── Orion 2.0: deployments and definitions ──────────────────────────────────
+
+/** A rollout interval: the half-open bucket range `[start_bucket, end_bucket)` of a channel's traffic served by `workflow_revision`. */
+export interface RolloutInterval {
+  workflow_revision: number
+  start_bucket: number
+  end_bucket: number
+}
+
+/** One member of a manifest: an entity at a revision, what it is (a definition digest, or a connection revision's configuration digest), and what it needs. */
+export interface ManifestMember {
+  entity: EntityRef
+  /** A workflow, channel or plugin's stored definition; a connection revision's `configuration_digest`. */
+  definition_digest: string
+  /** The members this one needs, each at the revision it uses. Absent means none. */
+  requires?: EntityRef[]
+  /** A channel's workflow rollout: disjoint intervals covering `[0, 100)` (Standard+). Absent means one workflow serves it all. */
+  rollouts?: RolloutInterval[]
+  /** The provider package (by digest, one of the manifest's `providers`) that owns this member. */
+  owning_package?: string | null
+}
+
+/** A provider package a manifest pins. */
+export interface ManifestProvider {
+  publisher: string
+  provider_id: string
+  version: string
+  digest: string
+}
+
+/** What a node serves: every member, all at once. Applying one replaces the head entirely. */
+export interface DeploymentManifest {
+  schema_version: number
+  providers: ManifestProvider[]
+  provider_lock_digest?: string | null
+  members: ManifestMember[]
+}
+
+/** One committed revision, as the history lists it. */
+export interface DeploymentRevisionSummary {
+  revision: number
+  /** The head it was committed on; absent for the first revision. */
+  parent_revision?: number | null
+  manifest_digest: string
+  /** `0` once compacted. */
+  member_count: number
+  reason: string
+  /** The admin key id that committed it. */
+  created_by: string
+  /** The collector dropped this revision's members: it can no longer be inspected or rolled back to. */
+  members_compacted: boolean
+  created_at: string
+}
+
+/** `GET admin/deployments/{revision}` (bare). A compacted revision's manifest has no members. */
+export interface DeploymentRevision extends DeploymentRevisionSummary {
+  manifest: DeploymentManifest
+}
+
+/**
+ * `GET admin/deployments` (bare): one page of revisions, newest first, with
+ * the head it was read against and the revision **this node** serves.
+ */
+export interface DeploymentsPage {
+  head_revision: number
+  epoch: number
+  applied_revision: number
+  data: DeploymentRevisionSummary[]
+  limit: number
+  next_cursor?: string | null
+}
+
+/** `GET admin/deployments/{revision}/convergence?target=` (bare). */
+export interface ConvergenceStatus {
+  converged: boolean
+  target_revision: number
+  converged_nodes: string[]
+  pending_nodes: string[]
+  degraded_nodes: string[]
+}
+
+/** `this-node`: the node that answered. `observed`: every node the cluster store has heard from. */
+export type ConvergenceTarget = "this-node" | "observed"
+
+/** `POST admin/deployments` with `rollback_to`: commit an earlier revision's manifest again as the next revision. */
+export interface RollbackDeploymentRequest {
+  idempotency_key: string
+  /** The current head; anything else is `DEPLOYMENT_HEAD_CONFLICT` (409). */
+  base_revision: number
+  rollback_to: number
+  /** The audit reason the revision records; `rollback` when absent. */
+  reason?: string
+}
+
+/** The durable receipt of a committed apply or rollback. A replay of the same idempotency key answers the first one's. */
+export interface DeploymentReceipt {
+  operation_id: string
+  idempotency_key: string
+  principal: string
+  request_hash: string
+  committed_revision: number
+  manifest_digest: string
+  epoch: number
+  /** The node that took the write: what `?target=this-node` waits on. */
+  receiving_node_id: string
+  created_at: string
+}
+
+/** `POST admin/deployments` (202, bare). */
+export interface CreateDeploymentResponse {
+  committed_revision: number
+  receipt: DeploymentReceipt
+  /** What committing this revision does not do — a rollback does not reverse an external effect, … */
+  warnings: string[]
+  /** This node's convergence on the committed revision, after it tried to build it. */
+  evaluation: ConvergenceStatus
+  /** Why this node could not build the committed revision, when it could not. The revision stays committed. */
+  local_error?: string | null
+}
+
+/** `POST admin/deployment-plans` (bare): what a candidate changes against a base. Commits nothing; a read-only key may call it. */
+export interface DeploymentPlan {
+  base_revision: number
+  reviewed_manifest_digest: string
+  added_entities: EntityRef[]
+  updated_entities: { kind: EntityKind; id: string; from_revision: number; to_revision: number }[]
+  removed_entities: EntityRef[]
+}
+
+/** The definitions a member may name. A connection is not one: its member names a connection revision's configuration digest. */
+export type DefinitionKind = "workflow" | "channel" | "plugin"
+
+/** `GET admin/definitions/{digest}` (bare): a stored definition — no id, no version, no status. A channel's credentials come back masked. */
+export interface StoredDefinition {
+  kind: DefinitionKind
+  definition: Record<string, unknown>
+}

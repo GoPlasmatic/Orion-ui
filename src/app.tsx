@@ -41,6 +41,8 @@ import { SchedulesPage } from "@/pages/schedules"
 import { OccurrenceDetailPage } from "@/pages/occurrence-detail"
 import { EnginePage } from "@/pages/engine"
 import { CachesPage } from "@/pages/caches"
+import { DeploymentsPage } from "@/pages/deployments"
+import { DeploymentDetailPage } from "@/pages/deployment-detail"
 import { NotFoundPage } from "@/pages/not-found"
 
 const queryClient = new QueryClient({
@@ -74,6 +76,8 @@ const router = createBrowserRouter(
     <Route element={<AppLayout />}>
       <Route index element={<OperationsPage />} />
       <Route path="system-map" element={<SystemMapPage />} />
+      <Route path="deployments" element={<DeploymentsPage />} />
+      <Route path="deployments/:revision" element={<DeploymentDetailPage />} />
       <Route path="channels" element={<ChannelsPage />} />
       <Route path="channels/new" element={<ChannelFormPage />} />
       <Route path="channels/:id" element={<ChannelDetailPage />} />

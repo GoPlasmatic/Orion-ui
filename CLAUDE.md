@@ -370,6 +370,21 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
   database. A new action or resource type goes in the vocabulary *and* `lib/audit-routes.ts`, or
   rows arrive unfilterable; both are open strings on the wire, so the dropdowns keep an unlisted
   value from the URL visible (`UnknownOption`).
+- **Deployments (2.0; phase 2).** `api/deployments.ts`, `hooks/use-deployments.ts`,
+  `lib/deployment-diff.ts`, `components/deployments/`, `/deployments` and `/deployments/:revision`
+  (`?tab=members|changes|convergence|manifest`, `?compare=<revision>`). A node serves one
+  manifest at a time; history is append-only, and a rollback commits an older manifest again as
+  the next revision (`base_revision` is a compare-and-swap: 409 `DEPLOYMENT_HEAD_CONFLICT` when
+  the head moved). The rollback dialog mints its idempotency key once, so a retry replays. Every
+  deployment answer is **bare**. `useDeployedState()` (the head's manifest) is the single source
+  for "what serves now" — 2.0 cannot list entities, so the entity pages, the map and the palette
+  read it (phases 3 and 6). A member is keyed by `(kind, id)`; its `revision` is the author's
+  numbering and `definition_digest` what it is — the diff compares both, plus `requires` and
+  `rollouts`. **A connection member's digest is a configuration digest, not a definition**:
+  `GET admin/definitions/{digest}` is for workflow, channel and plugin members only
+  (`hasDefinition`). Definitions are content-addressed, so `useDefinition` caches them forever.
+  A compacted revision keeps its row but loses its members: say "compacted", never "empty".
+  `entityHistory` reads an entity's states across revisions for phase 3.
 - **No reload in 2.0.** `admin/engine/reload` is gone: applying a deployment rebuilds the engine,
   and each node converges on the head by itself. The Engine page reads where this node stands
   from `runtime-capabilities.node_status` (`components/admin/runtime-report.tsx`), and a revision
@@ -796,6 +811,9 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
 
 ```
 /                   -> OperationsPage
+/deployments        -> DeploymentsPage (2.0: the revision history, head and what this node serves)
+/deployments/:revision -> DeploymentDetailPage (?tab=members|changes|convergence|manifest,
+                                     ?compare=<revision> for the Changes tab; default its parent)
 /system-map         -> SystemMapPage (view state in the URL: ?lens=deps|calls|grid (absent:
                                       auto) &group=prefix|tag:<a,b> &select=<channel name |
                                       connector:<name>> &q=&tag=&lifecycle=all&window=&size=
@@ -846,7 +864,7 @@ the `<Outlet />` in an `ErrorBoundary` keyed on the path, so a page that throws 
 registry and runs the `g` + key shortcuts.
 
 A new page needs two registrations: a route in `src/app.tsx` and an entry in `src/lib/nav.ts`,
-which feeds the sidebar (grouped Monitor / Build / Control / Govern, Plugins and Models hidden
+which feeds the sidebar (grouped Monitor / Deploy / Build / Control / Govern, Plugins and Models hidden
 while their runtime is off and none exist, with live counts from
 `useNavCounts`), the palette's "Go to" group, the `g` + key shortcuts and the fallback tab
 title. A list page names the tab through `PageHeader`; a detail page through `Breadcrumbs`

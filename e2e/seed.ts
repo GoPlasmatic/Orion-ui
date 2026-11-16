@@ -10,10 +10,16 @@ import type { APIRequestContext } from "@playwright/test"
 
 const ECHO = "e2e-echo"
 
-const echoWorkflow = {
+/** Variant 1 is the seed; another variant is a changed workflow — a new digest, so a new revision of it. */
+const echoWorkflow = (variant: number) => ({
   name: ECHO,
-  tasks: [{ id: "echo", function: { name: "map", input: { mappings: [{ path: "data.echoed", logic: true }] } } }],
-}
+  tasks: [
+    {
+      id: "echo",
+      function: { name: "map", input: { mappings: [{ path: "data.echoed", logic: variant === 1 ? true : variant }] } },
+    },
+  ],
+})
 
 const echoChannel = {
   name: ECHO,
@@ -34,15 +40,23 @@ async function ok<T>(res: Awaited<ReturnType<APIRequestContext["get"]>>, what: s
   return (await res.json()) as T
 }
 
-/** Deploy the echo workflow and channel (if the head does not already serve them) and answer the channel's data path. */
-export async function seedEchoDeployment(request: APIRequestContext, key: string): Promise<string> {
+/**
+ * Deploy the echo workflow (`variant`) and channel, unless the head already
+ * serves exactly that, and answer the channel's data path and the head
+ * revision that serves it.
+ */
+export async function seedEcho(
+  request: APIRequestContext,
+  key: string,
+  variant = 1,
+): Promise<{ path: string; revision: number }> {
   const headers = { Authorization: `Bearer ${key}` }
   const upload = async (kind: string, definition: unknown) =>
     (await ok<{ digest: string }>(
       await request.post("/api/v2/admin/definitions", { headers, data: { kind, definition } }),
       `upload ${kind}`,
     )).digest
-  const wf = await upload("workflow", echoWorkflow)
+  const wf = await upload("workflow", echoWorkflow(variant))
   const ch = await upload("channel", echoChannel)
 
   const page = await ok<{ head_revision: number }>(
@@ -58,27 +72,31 @@ export async function seedEchoDeployment(request: APIRequestContext, key: string
     )
     members = current.manifest?.members ?? []
   }
-  const served = members.find((m) => m.entity.kind === "channel" && m.entity.id === ECHO)
-  if (served?.definition_digest === ch) return `/api/v2/data/${ECHO}`
+  const path = `/api/v2/data/${ECHO}`
+  const servedWf = members.find((m) => m.entity.kind === "workflow" && m.entity.id === ECHO)
+  const servedCh = members.find((m) => m.entity.kind === "channel" && m.entity.id === ECHO)
+  if (servedWf?.definition_digest === wf && servedCh?.definition_digest === ch) return { path, revision: head }
 
   const others = members.filter((m) => m.entity.id !== ECHO)
-  const next = (kind: string) =>
-    Math.max(0, ...members.filter((m) => m.entity.kind === kind && m.entity.id === ECHO).map((m) => m.entity.revision)) + 1
-  const wfRef = { kind: "workflow", id: ECHO, revision: next("workflow") }
+  // The CLI's numbering: keep a member's revision while its digest is
+  // unchanged, bump it otherwise.
+  const revisionFor = (served: Member | undefined, digest: string) =>
+    !served ? 1 : served.definition_digest === digest ? served.entity.revision : served.entity.revision + 1
+  const wfRef = { kind: "workflow", id: ECHO, revision: revisionFor(servedWf, wf) }
   const manifest = {
     schema_version: 2,
     providers: [],
     members: [
       ...others,
       { entity: wfRef, definition_digest: wf, requires: [] },
-      { entity: { kind: "channel", id: ECHO, revision: next("channel") }, definition_digest: ch, requires: [wfRef] },
+      { entity: { kind: "channel", id: ECHO, revision: revisionFor(servedCh, ch) }, definition_digest: ch, requires: [wfRef] },
     ],
   }
   const plan = await ok<{ reviewed_manifest_digest: string }>(
     await request.post("/api/v2/admin/deployment-plans", { headers, data: { base_revision: head, manifest } }),
     "plan",
   )
-  await ok(
+  const applied = await ok<{ committed_revision: number }>(
     await request.post("/api/v2/admin/deployments", {
       headers,
       data: {
@@ -91,7 +109,7 @@ export async function seedEchoDeployment(request: APIRequestContext, key: string
     }),
     "apply",
   )
-  return `/api/v2/data/${ECHO}`
+  return { path, revision: applied.committed_revision }
 }
 
 /** Wait until the echo channel answers (the node converges on the new head by itself). */

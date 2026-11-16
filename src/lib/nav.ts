@@ -9,6 +9,7 @@ import {
   FileText,
   Gauge,
   GitBranch,
+  GitCommitVertical,
   Inbox,
   Network,
   Package,
@@ -24,7 +25,7 @@ import {
  * registered once rather than in three files that drift.
  *
  * Grouped by what an operator is doing rather than by API resource: Monitor
- * is watch and drill; Build is the developer's define → validate → test loop
+ * is watch and drill; Deploy is what serves, revision by revision (2.0); Build is the developer's define → validate → test loop
  * in the order the smoke flow uses it; Control is acting on the running
  * instance (caches, the dead-letter queue, breakers, the engine); Govern is
  * change control.
@@ -82,6 +83,19 @@ export const NAV_SECTIONS: NavSection[] = [
         keywords: "cron occurrences scheduled jobs ledger cancel",
         shortcut: "s",
         badge: "schedules",
+      },
+    ],
+  },
+  {
+    label: "Deploy",
+    hint: "What this server serves, revision by revision: inspect, compare, roll back",
+    items: [
+      {
+        to: "/deployments",
+        label: "Deployments",
+        icon: GitCommitVertical,
+        keywords: "revisions manifest rollback history head convergence release deploy",
+        shortcut: "y",
       },
     ],
   },

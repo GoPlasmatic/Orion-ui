@@ -2,7 +2,8 @@ import { useMemo, useState } from "react"
 import type { PaginatedResponse } from "@/api/types"
 import { Select } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
-import { cn } from "@/lib/utils"
+import { diffLines } from "@/lib/line-diff"
+import { JsonDiffLines } from "@/components/shared/json-diff"
 
 /** Any versioned entity — a workflow, a channel, a plugin. */
 interface Versioned {
@@ -12,42 +13,6 @@ interface Versioned {
 interface VersionCompareProps<T extends Versioned> {
   versions?: PaginatedResponse<T> | T[]
   isLoading?: boolean
-}
-
-type DiffLine = { type: "same" | "add" | "del"; text: string }
-
-/** Line-based LCS diff between two JSON snapshots. */
-function diffLines(a: string, b: string): DiffLine[] {
-  const left = a.split("\n")
-  const right = b.split("\n")
-  const n = left.length
-  const m = right.length
-  // LCS length table.
-  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0))
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      lcs[i][j] = left[i] === right[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1])
-    }
-  }
-  const out: DiffLine[] = []
-  let i = 0
-  let j = 0
-  while (i < n && j < m) {
-    if (left[i] === right[j]) {
-      out.push({ type: "same", text: left[i] })
-      i++
-      j++
-    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
-      out.push({ type: "del", text: left[i] })
-      i++
-    } else {
-      out.push({ type: "add", text: right[j] })
-      j++
-    }
-  }
-  while (i < n) out.push({ type: "del", text: left[i++] })
-  while (j < m) out.push({ type: "add", text: right[j++] })
-  return out
 }
 
 /** Fields the database owns rather than the author: they differ between any two versions and say nothing. */
@@ -124,23 +89,7 @@ export function VersionCompare<T extends Versioned>({ versions, isLoading }: Ver
         </span>
       </div>
 
-      <pre className="max-h-[40rem] overflow-auto rounded-md border bg-muted/30 p-3 text-xs leading-relaxed">
-        {diff.map((d, i) => (
-          <div
-            key={i}
-            className={cn(
-              "px-1",
-              d.type === "add" && "bg-success/10 text-success",
-              d.type === "del" && "bg-destructive/10 text-destructive",
-            )}
-          >
-            <span className="mr-2 inline-block w-3 select-none text-muted-foreground">
-              {d.type === "add" ? "+" : d.type === "del" ? "-" : " "}
-            </span>
-            {d.text}
-          </div>
-        ))}
-      </pre>
+      <JsonDiffLines lines={diff} />
     </div>
   )
 }
