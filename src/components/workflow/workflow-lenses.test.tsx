@@ -39,37 +39,18 @@ const channel = {
 const connector = (id: string, name: string, connector_type: string) =>
   ({ id, name, connector_type, config: {}, config_json: "{}", enabled: true, tags: [], content_hash: "", created_at: "", updated_at: "" }) as unknown as Connector
 
-// A stand-in for the dataflow-ui visualizer with the same explorer markup and
-// the same starting state: nothing selected until the workflow row is clicked.
-// The decoy shares the workflow's name at another depth (a search hit, a task
-// named like its workflow) — matching by label would click it.
+// A stand-in for the dataflow-ui visualizer with its starting state: nothing
+// selected (an empty pane) unless the host asks for `initialSelection`.
 vi.mock("@goplasmatic/dataflow-ui", () => ({
-  WorkflowVisualizer: ({ workflows }: { workflows: { name: string }[] }) => {
-    const [selected, setSelected] = useState<string | null>(null)
-    const row = (label: string, pick: string) => (
-      <div className="df-tree-node-content" onClick={() => setSelected(pick)}>
-        <span className="df-tree-label">{label}</span>
-      </div>
-    )
-    return (
-      <div>
-        <div className="df-tree-view">
-          {row(workflows[0].name, "decoy")}
-          <div className="df-tree-node">
-            {row("Workflows", "folder")}
-            <div className="df-tree-children">
-              <div className="df-tree-node">
-                {row(workflows[0].name, workflows[0].name)}
-                <div className="df-tree-children">
-                  <div className="df-tree-node">{row(workflows[0].name, "task")}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <p>{selected ? `flow diagram: ${selected}` : "Select an item from the explorer"}</p>
-      </div>
-    )
+  WorkflowVisualizer: ({
+    workflows,
+    initialSelection,
+  }: {
+    workflows: { name: string }[]
+    initialSelection?: string
+  }) => {
+    const [selected] = useState<string | null>(initialSelection === "first-workflow" ? workflows[0].name : null)
+    return <p>{selected ? `flow diagram: ${selected}` : "Select an item from the explorer"}</p>
   },
 }))
 

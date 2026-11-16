@@ -647,7 +647,7 @@ function WorkflowForm({ existing }: { existing?: Workflow }) {
               <div className="min-w-0">
                 <div className="h-[30rem] overflow-hidden rounded-md border">
                   {previewWorkflow ? (
-                    <WorkflowVisualizer workflows={[previewWorkflow]} />
+                    <WorkflowVisualizer workflows={[previewWorkflow]} initialSelection="first-workflow" />
                   ) : (
                     <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
                       The preview draws the steps once they parse as an array with no shape

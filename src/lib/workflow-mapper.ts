@@ -1,5 +1,5 @@
 import type { Step, Task, Workflow } from "@/api/types"
-import { isTaskGroup, groupMembers, haltsOnOutcome } from "@/lib/workflow-steps"
+import { isTaskGroup, groupMembers } from "@/lib/workflow-steps"
 import type {
   Step as DataflowStep,
   Task as DataflowTask,
@@ -15,7 +15,7 @@ import type {
  *  - Since Orion 1.2 an element may be a **task group**, so the array is a tree
  *    and a shallow cast would misdescribe it.
  *  - Since 1.9.1 a workflow may carry a `loop` whose `setup` holds steps too,
- *    and a task a `for_each` fan-out; dataflow-ui 3.15 draws both, so both are
+ *    and a task a `for_each` fan-out; dataflow-ui draws both, so both are
  *    mapped through.
  *  - `FunctionConfig.input` is required in the visualizer's model (dataflow-rs
  *    reads `{name, input}` with no default, so a task omitting it fails to
@@ -45,11 +45,10 @@ function toVisualizerStep(step: Step): DataflowStep {
       name: task.function?.name ?? "",
       input: task.function?.input ?? {},
     },
-    // The visualizer (dataflow-ui 3.x) still reads the 3.x spellings: a task
-    // that continues past a failure, and one whose outcome ends the workflow.
-    continue_on_error: task.on_failure === "continue" ? true : undefined,
+    // dataflow-ui 4 draws the v4 step policies itself.
+    on_failure: task.on_failure,
+    on_rejection: task.on_rejection,
     terminal: task.terminal,
-    halt_on: haltsOnOutcome(task) ? "failure" : undefined,
     for_each: task.for_each,
   } satisfies DataflowTask
 }
