@@ -16,9 +16,9 @@ import { MemoryRouter } from "react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ThemeProvider } from "@/lib/theme-provider"
 import { TimeZoneProvider } from "@/lib/time-zone-provider"
-import type { PaginatedResponse } from "@/api/types"
+import type { Page } from "@/api/types"
 
-const empty = <T,>(): PaginatedResponse<T> => ({ data: [], total: 0, limit: 20, offset: 0 })
+const empty = <T,>(): Page<T> => ({ data: [], total: 0, limit: 20 })
 
 vi.mock("@/api/audit", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/audit")>()
@@ -27,17 +27,13 @@ vi.mock("@/api/audit", async (importOriginal) => {
 // The deployed entities: a head that deploys nothing.
 vi.mock("@/api/deployments", async () => (await import("@/test/deployed-api")).deploymentsModule())
 vi.mock("@/api/definitions", async () => (await import("@/test/deployed-api")).definitionsModule())
-vi.mock("@/api/connectors", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/connectors")>()
-  return { ...mod, connectorsApi: { ...mod.connectorsApi, list: async () => empty() } }
+vi.mock("@/api/connections", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/api/connections")>()
+  return { ...mod, connectionsApi: { ...mod.connectionsApi, list: async () => ({ data: [], limit: 200 }) } }
 })
 vi.mock("@/api/traces", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/traces")>()
   return { ...mod, tracesApi: { ...mod.tracesApi, list: async () => empty() } }
-})
-vi.mock("@/api/models", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/models")>()
-  return { ...mod, modelsApi: { ...mod.modelsApi, list: async () => empty() } }
 })
 vi.mock("@/api/trace-dlq", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/trace-dlq")>()
@@ -46,8 +42,7 @@ vi.mock("@/api/trace-dlq", async (importOriginal) => {
 
 import { AuditPage } from "@/pages/audit"
 import { ChannelsPage } from "@/pages/channels"
-import { ConnectorsPage } from "@/pages/connectors"
-import { ModelsPage } from "@/pages/models"
+import { ConnectionsPage } from "@/pages/connections"
 import { PluginsPage } from "@/pages/plugins"
 import { TraceDlqPage } from "@/pages/trace-dlq"
 import { TracesPage } from "@/pages/traces"
@@ -81,9 +76,8 @@ interface Case {
 const PAGES: Case[] = [
   { name: "channels", ui: <ChannelsPage />, route: "/channels", filter: "tag=nothing-carries-this", noun: "channels", firstRun: "Nothing is deployed yet" },
   { name: "workflows", ui: <WorkflowsPage />, route: "/workflows", filter: "tag=nothing-carries-this", noun: "workflows", firstRun: "Nothing is deployed yet" },
-  { name: "connectors", ui: <ConnectorsPage />, route: "/connectors", filter: "tag=nothing-carries-this", noun: "connectors", firstRun: "No connectors yet" },
+  { name: "connections", ui: <ConnectionsPage />, route: "/connections", filter: "q=nothing-is-called-this", noun: "connections", firstRun: "No connections yet" },
   { name: "plugins", ui: <PluginsPage />, route: "/plugins", filter: "tag=nothing-carries-this", noun: "plugins", firstRun: "Nothing is deployed yet" },
-  { name: "models", ui: <ModelsPage />, route: "/models", filter: "admission=failed", noun: "models", firstRun: "No models yet" },
   { name: "traces", ui: <TracesPage />, route: "/traces", filter: "channel=nothing-is-called-this", noun: "traces", firstRun: "No traces found" },
   { name: "audit", ui: <AuditPage />, route: "/audit", filter: "principal=nobody", noun: "audit rows", firstRun: "No audit rows yet" },
   { name: "trace DLQ", ui: <TraceDlqPage />, route: "/trace-dlq", filter: "exhausted=true", noun: "entries", firstRun: "Nothing in the dead-letter queue" },

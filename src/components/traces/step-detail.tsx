@@ -27,8 +27,6 @@ export interface StepDetailProps {
   index: FunctionIndex
   trace: { id: string; error?: string | null; channel?: string | null }
   workflowId: string | null
-  /** The connector's id when `effect` names one the registry knows. */
-  connectorId: string | null
 }
 
 function normalText(state: MetricsState, cost: TaskCost | undefined): string {
@@ -46,12 +44,12 @@ function priorLine(w: PriorWrite): string {
   return parts.join(" · ")
 }
 
-function resourceLink(effect: StepEffect | null, connectorId: string | null): string | null {
+/** Where a step's resource lives. A task's `connector` names the connection by its id. */
+function resourceLink(effect: StepEffect | null): string | null {
   const r = effect?.resource
   if (!r?.name) return null
-  if (r.kind === "connector") return connectorId ? `/connectors/${encodeURIComponent(connectorId)}` : null
+  if (r.kind === "connector") return `/connections/${encodeURIComponent(r.name)}`
   if (r.kind === "plugin") return `/plugins/${encodeURIComponent(r.name)}`
-  if (r.kind === "model") return `/models/${encodeURIComponent(r.name)}`
   return null
 }
 
@@ -64,7 +62,6 @@ export function StepDetail({
   index,
   trace,
   workflowId,
-  connectorId,
 }: StepDetailProps) {
   const [showValues, setShowValues] = useState(false)
   const failed = step.outcome === "failed"
@@ -74,7 +71,7 @@ export function StepDetail({
   const prior = failed ? writesBefore(timeline, step, index) : []
   const snapshot = step.raw.message
   const snapshotData = snapshot?.context?.data
-  const link = resourceLink(effect, connectorId)
+  const link = resourceLink(effect)
   const sameStep = trace.channel
     ? `/traces?channel=${encodeURIComponent(trace.channel)}${failed ? "&status=failed" : ""}`
     : null

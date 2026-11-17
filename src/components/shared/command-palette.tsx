@@ -3,8 +3,7 @@ import { matchPath, useLocation, useNavigate } from "react-router"
 import { useChannel, useChannels } from "@/hooks/use-channels"
 import { useWorkflow, useWorkflows } from "@/hooks/use-workflows"
 import { readStorageJson, writeStorageJson } from "@/lib/storage"
-import { REGISTRY_LIMIT } from "@/lib/use-pagination"
-import { useConnectors } from "@/hooks/use-connectors"
+import { useConnections } from "@/hooks/use-connections"
 import { usePlugins } from "@/hooks/use-plugins"
 import { useTheme } from "@/lib/use-theme"
 import { NAV_ITEMS } from "@/lib/nav"
@@ -25,6 +24,7 @@ import {
   Activity,
   Play,
   type LucideIcon,
+  GitCommitVertical,
 } from "lucide-react"
 
 /** Rows per group with an empty query; the entity lists run to hundreds. */
@@ -69,7 +69,7 @@ interface CommandPaletteProps {
 /**
  * ⌘K command palette built on the accessible Dialog. Offers quick navigation,
  * common actions, and fuzzy-ish substring search across channels, workflows, and
- * connectors (fetched only while open).
+ * connections (fetched only while open).
  */
 export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   // Mount only while open, so query/selection reset by remounting rather than by
@@ -91,7 +91,7 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
   // same key every other registry read uses, so nothing is fetched twice.
   const { data: channels } = useChannels()
   const { data: workflows } = useWorkflows()
-  const { data: connectors } = useConnectors({ limit: REGISTRY_LIMIT })
+  const { data: connections } = useConnections()
   const { data: plugins } = usePlugins()
   // The page's own entity, from the cache the detail page already filled.
   const { data: channel } = useChannel(entityIdAt(pathname, "/channels/:id/*"))
@@ -115,12 +115,10 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
     }))
 
     const actions: Command[] = [
-      { id: "act-new-channel", label: "Create channel", group: "Actions", icon: Plus, run: () => go("/channels/new") },
-      { id: "act-new-workflow", label: "Create workflow", group: "Actions", icon: Plus, run: () => go("/workflows/new") },
-      { id: "act-new-connector", label: "Create connector", group: "Actions", icon: Plus, run: () => go("/connectors/new") },
-      { id: "act-new-cron", label: "Create cron channel", group: "Actions", icon: CalendarClock, keywords: "schedule", run: () => go("/channels/new?protocol=cron") },
-      { id: "act-new-plugin", label: "Upload plugin", group: "Actions", icon: Upload, keywords: "wasm", run: () => go("/plugins/new") },
-      { id: "act-import-workflow", label: "Import workflow", group: "Actions", icon: Upload, run: () => go("/workflows") },
+      { id: "act-head", label: "What is deployed now", group: "Actions", icon: GitCommitVertical, keywords: "head revision manifest", run: () => go("/deployments") },
+      { id: "act-upload-package", label: "Upload provider package", group: "Actions", icon: Upload, keywords: "connector provider admit", run: () => go("/provider-packages?upload=1") },
+      { id: "act-studio", label: "Package studio", group: "Actions", icon: Plus, keywords: "scaffold lint pack provider", run: () => go("/provider-packages?tab=studio") },
+      { id: "act-schedules", label: "Trigger a schedule", group: "Actions", icon: CalendarClock, keywords: "cron run now", run: () => go("/schedules") },
       {
         id: "act-theme",
         label: `Switch to ${resolvedTheme === "dark" ? "light" : "dark"} theme`,
@@ -196,13 +194,13 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
         keywords: (w.tags ?? []).join(" "),
         run: () => go(`/workflows/${encodeURIComponent(w.workflow_id)}`),
       })),
-      ...(connectors?.data ?? []).map((c) => ({
-        id: `co-${c.id}`,
-        label: c.name,
-        hint: c.connector_type,
-        group: "Connectors",
+      ...connections.map((c) => ({
+        id: `co-${c.connection_id}`,
+        label: c.connection_id,
+        hint: c.deployed ? `connection r${c.deployed.revision}` : "connection",
+        group: "Connections",
         icon: Plug,
-        run: () => go(`/connectors/${c.id}`),
+        run: () => go(`/connections/${encodeURIComponent(c.connection_id)}`),
       })),
       ...plugins.map((p) => ({
         id: `pl-${p.plugin_id}`,
@@ -216,7 +214,7 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
     ]
 
     return [...contextual, ...nav, ...actions, ...entities]
-  }, [channels, workflows, connectors, plugins, resolvedTheme, channel, workflow]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [channels, workflows, connections, plugins, resolvedTheme, channel, workflow]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Run a command and remember it. */
   const runCommand = (c: Command) => {

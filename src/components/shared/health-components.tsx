@@ -194,9 +194,9 @@ export function HealthComponents({
           <p className="mt-2 text-xs text-muted-foreground">
             This node applies these itself at startup, through its own admin routes, before{" "}
             <code className="font-mono">/readyz</code> reports it ready. A restart is a no-op; a
-            failure exits the process. Their receipts are on the{" "}
-            <Link to="/packages" className="underline underline-offset-2">
-              Packages
+            failure exits the process. What it serves is on the{" "}
+            <Link to="/deployments" className="underline underline-offset-2">
+              Deployments
             </Link>{" "}
             page.
           </p>

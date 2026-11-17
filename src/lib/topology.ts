@@ -1,6 +1,18 @@
 import { flattenSteps, workflowSteps } from "@/lib/workflow-steps"
 import { CONNECTOR_FUNCTIONS, CONNECTOR_KEYS } from "@/lib/function-effects"
-import type { Channel, Workflow, Connector } from "@/api/types"
+import type { Channel, Workflow } from "@/api/types"
+
+/**
+ * A connection as the graphs read it: its id (what a task's `connector` and a
+ * channel's cache/dedup `connector` name), the connector family its provider
+ * resolves to (`http`, `db`, `cache`, …), and whether the head deploys it.
+ */
+export interface ConnectorRef {
+  id: string
+  name: string
+  connector_type: string
+  enabled: boolean
+}
 
 // Pure entity indexing and reference extraction. Operates on already-fetched
 // entity lists (no React, no fetching) so it can be memoized. The graph built
@@ -11,7 +23,7 @@ export interface EntityIndex {
   channelsById: Map<string, Channel>
   channelsByName: Map<string, Channel>
   workflowsById: Map<string, Workflow>
-  connectorsByName: Map<string, Connector>
+  connectorsByName: Map<string, ConnectorRef>
 }
 
 // Which functions take a connector, and the keys it is named by, are
@@ -22,7 +34,7 @@ export interface EntityIndex {
 export function buildIndex(
   channels: Channel[],
   workflows: Workflow[],
-  connectors: Connector[],
+  connectors: ConnectorRef[],
 ): EntityIndex {
   const channelsById = new Map<string, Channel>()
   const channelsByName = new Map<string, Channel>()
@@ -32,7 +44,7 @@ export function buildIndex(
   }
   const workflowsById = new Map<string, Workflow>()
   for (const w of workflows) workflowsById.set(w.workflow_id, w)
-  const connectorsByName = new Map<string, Connector>()
+  const connectorsByName = new Map<string, ConnectorRef>()
   for (const c of connectors) connectorsByName.set(c.name, c)
   return { channelsById, channelsByName, workflowsById, connectorsByName }
 }

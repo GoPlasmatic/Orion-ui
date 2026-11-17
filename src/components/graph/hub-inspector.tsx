@@ -193,13 +193,13 @@ export function HubInspector({
         <div className="flex flex-wrap gap-2 border-t p-3">
           <Button variant="outline" size="sm" asChild>
             <Link to={route}>
-              {hub.kind === "connector" ? "Connector" : hub.kind === "plugin" ? "Plugin" : "Model"}
+              {hub.kind === "connector" ? "Connection" : hub.kind === "plugin" ? "Plugin" : "Model"}
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </Button>
           {hub.kind === "connector" && (
             <Button variant="outline" size="sm" asChild>
-              <Link to={`/connectors/${hub.refId}?test=1`} title="Probe whether the backend is reachable">
+              <Link to={`/connections/${encodeURIComponent(hub.refId)}?probe=1`} title="Probe whether the backend is reachable">
                 <Stethoscope className="h-3.5 w-3.5" /> Test
               </Link>
             </Button>

@@ -162,6 +162,15 @@ describe("admin auth", () => {
     expect(getAdminAuth().access).toBe("full")
   })
 
+  it("does not take an accepted plan or authoring call as proof of full access", async () => {
+    // A read-only key may plan and use the authoring tools; the server says yes to both.
+    serve(() => ({ status: 200, body: {} }))
+    setAdminKey("ro-key")
+    await api.post("admin/deployment-plans", {})
+    await api.post("admin/authoring/lint", { files: {} })
+    expect(getAdminAuth().access).toBe("unknown")
+  })
+
   it("forgetting the key holds back again", async () => {
     serve(guarded("full-key"))
     setAdminKey("full-key", undefined, true)

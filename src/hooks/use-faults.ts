@@ -1,6 +1,6 @@
 import { useMemo } from "react"
 import { useHealth } from "@/hooks/use-health"
-import { useCircuitBreakers } from "@/hooks/use-connectors"
+import { useCircuitBreakers } from "@/hooks/use-circuit-breakers"
 import { useCronStatus } from "@/hooks/use-cron"
 import { buildFaults, type MapFaults } from "@/lib/faults"
 import type { SystemGraph } from "@/lib/system-graph"

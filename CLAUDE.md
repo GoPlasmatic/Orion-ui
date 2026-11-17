@@ -83,7 +83,8 @@ Being ported from the Orion **v1.12.0** API to **2.0** (dataflow-rs 4 / datalogi
 plugins are **members** of it — immutable, content-addressed definitions bound to an id and a
 revision — and change only by applying a deployment (`orion-cli deployments apply`; the UI
 operates and does not author, D1 = A). Their pages are read-only views of the head
-(`hooks/use-registry.ts`, below). Connectors and models (phase 4) still render 1.12's lifecycle.
+(`hooks/use-registry.ts`, below). Connections are revisions over providers (below); 1.x's
+connectors, models and package receipts are gone.
 
 - **Channels** — Service endpoints (sync/async, REST/HTTP/**cron**, plus whatever protocol an
   edition's driver adds — `ChannelProtocol` is open). Config covers `auth`
@@ -118,9 +119,21 @@ operates and does not author, D1 = A). Their pages are read-only views of the he
   runs the deployed definition — or an edited copy that is never saved — through `POST
   admin/definitions/test` (live backends, so a read-only key is refused). Uses
   `@goplasmatic/dataflow-ui` `WorkflowVisualizer` and `@goplasmatic/datalogic-ui` `DataLogicEditor`.
-- **Connectors** — External system connections: `http`, `kafka`, `db`, `cache`, `es`, `storage`,
-  **`smtp`**. Full CRUD + Validate + **Test** (reachability probe) + export. Keyed by `id` (a UUID,
-  distinct from `name`).
+- **Connections** (`/connections`, 2.0) — what 1.x called connectors: a backend a workflow or
+  channel calls, as immutable numbered revisions over a **provider** — a built-in Rust driver
+  (`runtime-capabilities.provider_backends[].package_digest`) or an admitted provider package —
+  named only by `provider_digest` (`lib/connections.ts::resolveProvider` names it). A revision
+  carries `public_config`, `secret_locators` (config path → `env://` / `vault://`; the values are
+  never returned) and `bindings`, and a deployment member names it by `configuration_digest`.
+  `GET admin/connections` lists **every revision of every connection** (no "latest only"), so
+  `useConnections` reads it to the end once (`fetchAllPages`, capped) and groups it by id with the
+  revision the head deploys. A task's `connector` input, a channel's cache/dedup `connector`, a
+  breaker key and `/health`'s failed loads all name a connection **by id**, so a link is
+  `/connections/{id}` with no lookup. **Probe** (`POST …/revisions/{rev}/probes`) dials the real
+  backend with the real credentials: 200 whatever it found (`healthy`, `latency_ms`, `driver_id`,
+  `details.{probe, error, error_class, effect_status}`), audited, refused to a read-only key. The
+  server stores no probe, so the console keeps the last one per revision for the session
+  (`probeKey`). The UI does not create revisions (D1 = A): `orion-cli` does.
 - **Functions** — The server's function catalogue (`GET admin/functions`, `api/functions.ts`,
   `use-functions.ts`) is fetched but has **no page**: the `/functions` reference was removed on
   2026-09-05 because a standalone list answered no question anyone had while doing something
@@ -131,27 +144,17 @@ operates and does not author, D1 = A). Their pages are read-only views of the he
   | `plugin`), `input_fields` is **absent** for an engine built-in, every
   entry carries `retry_safety` (1.6) and a `plugin` entry names the plugin version and digest
   serving it.
-- **Models** — ONNX graphs as the fifth versioned entity (`/models`, 1.8), with the workflow's
-  lifecycle and one verb of its own: **`admit`**. What sets a model apart is that Orion never
-  holds its bytes — a row carries the `orion:model@1.0.0` manifest and an *artifact reference*
-  (a `storage` connector, an object key, and the `sha256:` digest the bytes must hash to).
-  Registration answers **202**; the node's admission worker then fetches, verifies the digest,
-  reads the graph and probes it before the verdict lands on the row, so a create is not the end
-  of the story — poll `get` until `admission.state` leaves `pending`. Activation is a 409 until
-  that verdict is `passed`; archive and delete are a 409 while an active workflow names the
-  model, which `dependencies` lists ahead of time. Full CRUD + Validate + re-admit + versions +
-  import/export (references only — a model never travels as bytes). The single read carries
-  `health`: this node's residency. Manifests are authored as JSON with a client-side lint
-  (`lib/model-manifest.ts`) mirroring the server's `model/manifest.rs`. Off by default
-  (`models.enabled = false`): writes answer 400 while reads answer normally.
+- **Provider packages** (`/provider-packages`, 2.0) — a connector provider shipped as files (a
+  `workflow` composite or a `wasm` component; `rust` packages describe a composed driver): stored
+  by digest (`POST admin/connector-packages`, files as UTF-8 text or `base64:`), admitted under the
+  node's policy (`PUT …/admission`, optionally against a provider lock), revoked for good (`POST
+  …/revocations`, warned when a deployed connection uses it). A package's `tier` above the node's
+  `edition` can be stored but not admitted (`TierBadge`). The **Studio** tab runs the authoring
+  tools — scaffold, lint, pack — which store nothing (`lib/package-files.ts` turns a picked folder
+  into the `files` map). Models are no longer an entity: in 2.0 a model is a provider behind a
+  connection (`com.orion.models`, an edition's).
 - **Trace DLQ** — Operator view of the async dead-letter queue (`/trace-dlq`): inspect, requeue,
   purge.
-- **Packages** — Read-only promotion receipts (`/packages`). `PUT admin/packages/{name}` is
-  deliberately **not** exposed; recording receipts is CI's job. Since 1.9 a receipt may carry an
-  **`inventory`** — the ids of every entity that version carried, by kind — which is what
-  `package apply --prune` reads to find what a new version dropped. The plain listing leaves it
-  out; the package detail and `?current=true` carry it, so an absent inventory in a list row says
-  nothing.
 - **Health** — `/engine` (named Settings until 2026-09-05; `/settings` redirects) renders the
   whole `/health` report (`health-components.tsx`): every
   component with what its state means, plus the admin-only detail — background tasks, plugin
@@ -216,12 +219,6 @@ operates and does not author, D1 = A). Their pages are read-only views of the he
   is a schedule that would never fire, and the node quarantines it saying so. Reading the
   capability is how that is knowable *before* a reload discovers it, which is why `off` renders
   neutral rather than as a fault.
-- **`/health` gained `components.packages` (1.9)**, present only when `[packages] apply` names
-  artifacts: `applying` (and `/readyz` answers 503) until every configured package is applied and
-  serving, then `ok` for good — readiness is a startup condition here — or `failed`, with the node
-  on its way out. Admin detail adds `packages[]`: file, name, version, content hash, state
-  (`pending` | `applying` | `applied` | `already_applied` | `superseded` | `failed`) and error.
-  `bootPackageServing` is which states count as serving.
 - **`/health`'s `connectors.failed_to_load` is a list of objects, not names.** `{connector,
   connector_id, stage, reason}` — `stage` is `env_substitution`, `json_parse`, `var_reference`,
   `secret_resolution`, `deserialize` or `endpoint` (the last two are 1.9). Reading it as `string[]`
@@ -245,42 +242,6 @@ operates and does not author, D1 = A). Their pages are read-only views of the he
   space is refused. An empty value means no scheme — the bare credential. A value that is not an
   RFC 9110 token, like `"Key="`, is a **400** at create, update, validate and import, and
   quarantines a channel already stored with one. The same applies to `jwt`'s `source.scheme`.
-- **A connector config reference may stand in any field (1.9)**, not only a string one —
-  `{"url": "env://PEER_API_URL", "allow_private_urls": "env://PEER_API_PRIVATE"}`. An `env://` or
-  `vault://` reference always resolves to text, so in a boolean field it must read `true` or
-  `false`; a `var://` one keeps its `[vars]` type. A reference is only a reference when it is the
-  **whole value** — inside a longer string it is sent literally, which `POST /connectors/validate`
-  warns about as `env.embedded_reference` (already rendered by `ValidationResults`).
-- **`DELETE` on a channel, workflow, plugin or model takes `?reload=defer` (1.9)**, like the status
-  routes — how `package apply --prune=delete` removes entities inside one reload. The console does
-  single deletes and wants the default `now`; a connector delete never rebuilds the engine and
-  takes no parameter.
-- **A model manifest's shape dimension is a count *or* a name (1.8.1).** `"shape": ["N", 3]`
-  describes a graph exported with a dynamic axis. A name **binds on its first occurrence in a
-  call** and every later occurrence — in another input, or in an output — must equal that
-  binding, which is what makes `["N", 3]` on an output mean the N the input brought. Every axis
-  given as a number is exactly as strict as before, and `models.max_input_elements` still bounds
-  one message. One session serves every size. `probe_dims` says what to run each name at for the
-  admission probe (a declared name it leaves out is probed at 1); an entry naming an axis no
-  shape declares is refused. `ModelDim` is the type; `lib/model-manifest.ts` is the one lint.
-  **A shape is not `number[]`** — that typing is what made the lint report the feature as an
-  error at the coordinate the author typed.
-- **`ModelStats` is what admission read, and it is not stable across versions.** Graph numbers
-  (`parameters`, `nodes`, `operators`) come from the ONNX protobuf, so they are identical on
-  every node and runtime; probe numbers (`probe_ms`, `probe_dims`, `runtime`, `device`) are the
-  admitting node's alone. Since 1.8.1 `parameters` counts *every* value the graph carries —
-  initializers, tensors and number lists in node attributes, through subgraph bodies and
-  model-local functions — where it summed initializers alone, so an `ai.onnx.ml` model that read
-  as parameterless now reports its real size and one just under `models.max_parameters` can be
-  refused on re-admission. `nodes` likewise covers the whole document. `operators` (1.8.1) is the
-  distinct operator set, sorted, domain-qualified unless default — empty on a version admitted
-  before it was recorded. **Stored stats are written at admission and never recomputed.**
-- **`/health`'s resident model rows are sessions, not versions (1.8.1).** The session cache keys
-  on digest **+ binding + runtime + device**, because a load is a function of the bytes, the
-  manifest and the device. Registering one artifact under several manifests is expressly
-  representable, so **one digest can appear twice** — key a list on `loadedModelKey(m)`, never on
-  `digest`. The binding covers the inputs' names, dtypes and shapes and the output names, in
-  manifest order, and deliberately nothing else.
 - **`model_infer`** takes `model` (a literal id or JSONLogic routing per message), `input`,
   `output` (default `temp_data.inference`), `raw`, `runtime`, `timeout_ms` (JSONLogic since
   1.8.1, like `channel_call`'s and `http_call`'s — a computed value can only *lower* the host
@@ -295,11 +256,6 @@ operates and does not author, D1 = A). Their pages are read-only views of the he
   stored mapping emitting `{"shape": [6, 7]}` changed meaning in 1.8; the fix is the `$` escape
   (`{"$shape": [6, 7]}`). In 2.0 the server reports it on upload as a definition advisory
   (`logic.escaped_template_key`); `template_at` must still never be hardcoded.
-- **`models.preload` / `models.preload_tags` (1.8.1) are server config with no admin endpoint**,
-  like `[vars]` and `[secrets]`. `preload` reads the *literal* `model` of active workflows, so a
-  workflow routing with a computed one warms nothing; `preload_tags` names the hot set by tag
-  instead, as a union with the mode. This is what makes a model's **tags** operationally
-  load-bearing rather than decorative.
 
 - **A cron channel's schedule is `transport_config` (1.6).** `{ schedule, timezone?, payload?,
   misfire_policy?, max_catch_up?, concurrency? }` — six-field expression (seconds first; five- and
@@ -497,23 +453,21 @@ operates and does not author, D1 = A). Their pages are read-only views of the he
 - **Channel auth secrets** (`auth.keys`, `auth.secret`/`secrets`, `auth.jwt_keys[].key`) come back
   masked as `"******"` in a stored channel definition, so two revisions differing only in a key
   diff as equal — that is the server's masking, not a missing change.
-- **Connectors carry both** `config` (parsed, the shape POST/PUT accept) and `config_json` (the
-  same document as a string). **Prefer `config`.** The list endpoint additionally returns
-  `load_status` / `load_error` / `load_error_stage`.
 - **A deployed entity's identity is its member** (`DeployedEntity`: `revision`, `digest`,
   `member`); the definition holds no id, version, status or timestamps. Equal digests are the same
   definition, whatever the revision numbers say. 1.x's status lifecycle, versions, import/export,
-  validate and per-entity dependencies are gone for workflows, channels and plugins; connectors
-  and models keep them until phase 4.
+  validate and per-entity dependencies are gone for every entity.
 - **Audit logs filter server-side:** `action`, `resource_type`, `resource_id`, `principal`,
   `start_time`, `end_time` (RFC 3339; a trailing `Z` is fine). `limit` clamped 1–1000. The cron
   ledger's `since` / `until` are still zoneless in 2.0 — `api/cron.ts::toNaiveUtc` trims them.
-- **Circuit breakers:** `GET admin/connectors/circuit-breakers` returns
+- **Circuit breakers** (`api/circuit-breakers.ts`, the one `admin/connectors/*` surface 2.0 kept): `GET admin/connectors/circuit-breakers` returns
   `{ enabled, scope, instance_id, breakers }`. State is **per-replica**, never cluster-wide.
   There is no reload of any kind in 2.0.
-- **Connector probe:** `POST admin/connectors/{id}/test` — an unreachable backend is still a 200.
-  Key "broken" on `supported && !reachable`: `es`, `kafka` and MongoDB-backed `db` return
-  `supported: false`. The `http` probe issues one *genuine* request with real credentials.
+- **Read-only keys and the side-effect-free POSTs.** Orion means a read-only key to be allowed
+  `deployment-plans` and `authoring/{scaffold,lint,pack}` (`read_only_may_call`), and the client
+  never takes their success as proof of full access (`auth.ts::readOnlyMayCall`). Orion 2.0.0 as
+  pinned refuses them anyway — its check compares the path with the nested `/api/v2/admin`
+  prefix already stripped — so today a read-only session sees a 403 there like any refusal.
 - **Backups:** `POST` (201 in 2.0) / `GET admin/backups`; a listed file carries `created_at` (1.x:
   `modified_at`). SQLite only (400 otherwise). **No restore endpoint.**
 - **Trace DLQ entry (2.0):** `payload` and `metadata` are objects (1.x sent `payload_json` /
@@ -540,7 +494,7 @@ operates and does not author, D1 = A). Their pages are read-only views of the he
 
 ### Layers
 
-- **`src/api/`** — Typed API client. `client.ts` wraps fetch with the `/api/v2` base path, sends the admin credential and applies the probe-and-hold-back rule (`auth.ts`, above), parses the structured error envelope onto `ApiError` (incl. `details[]`, `requestId` and 2.0's `connector`), and exports `buildQuery()`, `unwrap()`, and `api.send()` for arbitrary-method data-plane calls. `RequestOptions.changeContext` sends `X-Orion-Change-Context` so a multi-request promotion's audit rows can be grouped. Domain modules: `deployments.ts`, `definitions.ts` (incl. `test`), `runtime.ts` and `channels.ts` (only the cron `trigger` is left) for 2.0; `traces.ts`, `trace-dlq.ts`, `engine.ts`, `audit.ts`, `backup.ts`, `functions.ts`, `data.ts`, `cron.ts`, `cache.ts`; and `connectors.ts`, `packages.ts`, `models.ts`, still 1.12 until phase 4. All types hand-written in `types.ts`.
+- **`src/api/`** — Typed API client. `client.ts` wraps fetch with the `/api/v2` base path, sends the admin credential and applies the probe-and-hold-back rule (`auth.ts`, above), parses the structured error envelope onto `ApiError` (incl. `details[]`, `requestId` and 2.0's `connector`), and exports `buildQuery()`, `unwrap()`, and `api.send()` for arbitrary-method data-plane calls. `RequestOptions.changeContext` sends `X-Orion-Change-Context` so a multi-request promotion's audit rows can be grouped. Domain modules: `deployments.ts`, `definitions.ts` (incl. `test`), `connections.ts`, `connector-packages.ts`, `authoring.ts`, `runtime.ts`, `channels.ts` (only the cron `trigger`), `circuit-breakers.ts`, `traces.ts`, `trace-dlq.ts`, `engine.ts`, `audit.ts`, `backup.ts`, `functions.ts`, `data.ts`, `cron.ts`, `cache.ts`. All types hand-written in `types.ts`.
 - **`src/hooks/`** — TanStack Query wrappers. One hook file per domain (`use-channels.ts`, `use-workflows.ts`, etc.). Query keys are `["entity", params]` arrays. Mutations invalidate via `queryClient.invalidateQueries`. The client default is `staleTime: 30_000` (a page visited twice in a row does not refetch its lists; polled queries keep their own `refetchInterval`, and invalidation ignores staleness), and every paginated list hook sets `placeholderData: keepPreviousData` so a page turn holds the last page instead of dropping to a skeleton.
 - **`src/pages/`** — Route-level components. Named exports like `ChannelsPage`, `WorkflowDetailPage`. Data fetching via hooks, not inline.
 - **`src/components/ui/`** — Shadcn-style primitives using `React.forwardRef`, CVA variants, and
@@ -550,7 +504,7 @@ operates and does not author, D1 = A). Their pages are read-only views of the he
   Input/Textarea/Select — change it there, not per field. `Select` renders a wrapper div so it can
   overlay a themed chevron: `className` sizes the *control* (as callers already expected),
   `selectClassName` reaches the `<select>` itself.
-- **`src/components/shared/`** — Shared composed components: `EntityHistoryPanel` (a deployed entity's states across revisions, with a definition diff), `NotDeployedState` / `NothingDeployedState` / `QuarantineBadge` (`deployed-state.tsx`), `JsonViewer`, `JsonDiff`, `PageHeader`, `ConfirmDialog`, `PaginationFooter`, the 1.x `StatusBadge` / `LifecycleActions` / `VersionHistory` / `ValidationResults` / `ImportDialog` (connector and model pages only, until phase 4), `ConnectorTestDialog`, `Fact`/`InlineFact`, `ConfirmButton`, `FilterBar` (with `FilterTextInput` and `UnknownOption`), `EmptyState`/`NoMatches`, `ErrorState` (the one
+- **`src/components/shared/`** — Shared composed components: `EntityHistoryPanel` (a deployed entity's states across revisions, with a definition diff), `NotDeployedState` / `NothingDeployedState` / `QuarantineBadge` (`deployed-state.tsx`), `JsonViewer`, `JsonDiff`, `PageHeader`, `ConfirmDialog`, `PaginationFooter`, `Fact`/`InlineFact`, `ConfirmButton`, `FilterBar` (with `FilterTextInput` and `UnknownOption`), `EmptyState`/`NoMatches`, `ErrorState` (the one
   way a page reports a failed load — reads status, code, field details and request id off
   `ApiError`, with Retry) and `ErrorBoundary`.
 - **`src/components/layout/`** — `AppLayout`, `Sidebar`, `Header`. `AppLayout` owns the two
@@ -562,7 +516,7 @@ operates and does not author, D1 = A). Their pages are read-only views of the he
   list-cell rendering), `formatInstant()` (the ISO instant), `formatDuration()`, `formatRelative()` ("12s ago" / "in 40m"; pair it with the
   absolute `formatDate()` in a `title`), `toRfc3339()` (a `datetime-local` value to the server's
   form, through the zone preference), `parseJson()` (safe parse; returns the *raw string* on failure, not null), `downloadJson()` (the shared export blob helper), and `parseServerDate()` / `serverTime()`: **the admin plane serialises `chrono::NaiveDateTime` — `2026-09-05T12:13:55`, no zone — and every such value is UTC.** `new Date()` reads a zoneless string as local time, so go through these for anything time-based; `formatDate` already does.
-- **`src/lib/use-pagination.ts`** — `usePagination()` + `PAGE_SIZE`, paired with `PaginationFooter`. Lives in `lib/` because the fast-refresh lint rule forbids non-component exports from component files.
+- **`src/lib/use-pagination.ts`** — `PAGE_SIZE`, the page a browser-paged list (`useListState`'s `offset` + `PaginationFooter`) shows.
 - **`src/lib/time-zone.ts`** + `time-zone-provider.tsx` / `use-time-zone.ts` — the display
   zone (`local` | `utc`, `localStorage["orion-timezone"]`), chosen in the header's Display menu
   (which also holds theme, incl. "Follow the system"). A module variable is what
@@ -643,7 +597,7 @@ operates and does not author, D1 = A). Their pages are read-only views of the he
   `sort`/`order` and `offset` — as URL keys: `update(patch)` re-anchors to the first page,
   `prev`/`next` page, `sortQuery` is the request's `sort_by`/`sort_order`, and `sort` feeds
   `EntityTable`. `options.values` declares what a **closed-enum** filter accepts
-  (`ENTITY_STATUSES`, `CHANNEL_PROTOCOLS`, `CHANNEL_TYPES`, `CONNECTOR_TYPES`, `TRACE_STATUSES` —
+  (`CHANNEL_TYPES`, `TRACE_STATUSES` —
   all in `api/types.ts` beside their type alias): a URL carrying anything else reads as unset, so
   the control, the request and the rows agree, where an unchecked value used to leave the
   dropdown reading "All statuses" over a list the server had filtered to nothing. The URL keeps
@@ -716,10 +670,11 @@ operates and does not author, D1 = A). Their pages are read-only views of the he
 - **`src/components/shared/kpi-card.tsx`** and **`outcome-bar.tsx`** — the KPI tile (dashboard,
   Schedules) and the outcome bar / legend / rate-and-errors sparklines (map card, inspector,
   channel page), each defined once.
-- **`src/components/shared/`** also holds `Breadcrumbs`, `TagsInput` (chips; Enter, comma, paste
-  and Backspace), `FormError` (a failed Save with `ApiError.details[]`), `ChannelTrafficCard` /
-  `ChannelRecentTraces` (a channel's own window on its page) and `ConnectorField` in
-  `config-field.tsx` (a connector chosen from the registry, a stray stored value still shown).
+- **`src/components/shared/`** also holds `Breadcrumbs` and `ChannelTrafficCard` /
+  `ChannelRecentTraces` (a channel's own window on its page). `components/connections/`
+  (`ProbeBadge`, `ProbeResult`) and `components/packages/` (`PackagePicker`, `PackageFileList`,
+  `LintReport`, `UploadPackageDialog`, `PackageStudio`, `TierBadge`, `PackageStateBadge`) are the
+  Connect section's own.
 - **`src/lib/topology.ts`** — the entity index (`buildIndex`) and reference extraction
   (`channelCallTargets`, connector refs) that `system-graph.ts` builds on. The per-entity graph
   on a detail page is `components/graph/neighbourhood-map.tsx`: a one-hop projection of the
@@ -796,19 +751,6 @@ operates and does not author, D1 = A). Their pages are read-only views of the he
   `use-cron.ts`. `use-metrics.ts` also exposes `useCronMetrics` (pending gauge, lag p95, occurrences by
   status, lease failures) and `usePluginMetrics` (per-function invocations, errors, p95), both
   reading the shared `["metrics"]` poll.
-- **`src/api/models.ts`** — the 1.8 entity. Hooks in `use-models.ts` (`useModel` polls while
-  `admission.state` is `pending`, the shape `useTrace` uses). `use-metrics.ts` exposes
-  `useModelMetrics` (`orion_model_inferences_total`, `orion_model_inference_duration_seconds`,
-  `orion_model_failures_total` by its nine categories), reading the same `["metrics"]` poll.
-- **`src/lib/model-manifest.ts`** — reading and shape-checking an `orion:model@1.0.0` manifest:
-  `lintManifest` (mirrors the server's `model/manifest.rs`, reporting at the coordinate the
-  author typed so `lib/json-path.ts` can map it to a range, exactly as `lintSteps` does for a
-  workflow's steps), `checkModelName`, `formatTensorType`, `blankManifest`, `admissionStage` /
-  `admissionFailure`. It is the *fast half* — server-side Validate is the authority, since only
-  the serving engine can compile the adapters on its own operator vocabulary. Findings render as
-  CodeMirror diagnostics at **warning** severity (`.cm-lintRange`, never `-error`): they are a
-  squiggle and a hover tooltip, **not page text**, so a test asserting on visible message text
-  passes whether the lint is right or wrong.
 
 ### Routing
 
@@ -834,14 +776,12 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
 /plugins            -> PluginsPage (?q=, ?tag=)
 /plugins/:id        -> PluginDetailPage
 /{channels,workflows,plugins}/new, …/:id/edit -> redirect to the list / the entity (1.x's forms)
-/models             -> ModelsPage
-/models/new         -> ModelFormPage (register)
-/models/:id         -> ModelDetailPage
-/models/:id/edit    -> ModelFormPage (edit; draft only)
-/connectors         -> ConnectorsPage
-/connectors/new     -> ConnectorFormPage (create)
-/connectors/:id     -> ConnectorDetailPage (?test=1 opens the probe dialog)
-/connectors/:id/edit-> ConnectorFormPage (edit)
+/connections        -> ConnectionsPage (one row per connection; ?q=, ?deployed=yes|no, ?family=)
+/connections/:id    -> ConnectionDetailPage (?revision=<n> selects one, default the deployed;
+                                            ?compare=<n> diffs two)
+/provider-packages  -> ProviderPackagesPage (?tab=studio; ?upload=1 opens the upload dialog)
+/provider-packages/:digest -> ProviderPackageDetailPage (?tab=overview|operations|files|manifest)
+/connectors/*, /models/* -> redirect to /connections; /packages -> /deployments
 /traces             -> TracesPage (?channel= and ?status= pre-filter)
 /traces/:id         -> TraceDetailPage (accepts ?token= for async trace polling; ?step=<index>
                                        selects a timeline step)
@@ -852,7 +792,6 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
 /circuit-breakers   -> CircuitBreakersPage (?key=channel:connector highlights that row)
 /audit              -> AuditPage
 /console            -> ConsolePage (?channel=<name> preselects it and seeds its REST route)
-/packages           -> PackagesPage (read-only)
 /engine             -> EnginePage (?tab=health|cluster|maintenance; #component-<name> scrolls
                                    the health report to that row)
 /settings           -> redirect to /engine, keeping search and hash (the page's name until 2026-09-05)
@@ -872,7 +811,7 @@ while their runtime is off and none exist, with live counts from
 title. A list page names the tab through `PageHeader`; a detail page through `Breadcrumbs`
 (`lib/page-title.ts` lets the page win over the shell).
 
-Forms (`connector-form.tsx`, `model-form.tsx`, until phase 4 removes them) use a wrapper page that waits for the edit query, then mounts an inner form seeded via `useState` initializers (keyed to remount on data load) — avoid `setState`-in-`useEffect` for form hydration. Each has a `buildPayload()` shared by Save and Validate, so Validate checks exactly what Save would send. Every form: ids are picked, not typed (the workflow `Select` grouped by status; `ConnectorField` for cache and dedup connectors; HTTP methods as a checkbox group), tags are a `TagsInput`, a failed Save renders `FormError` with the server's `details[]`, and a JSON snapshot of the fields drives `useUnsavedChanges` — `markSaved()` before the post-save `navigate`. JSON is authored in the `JsonEditor`, never a `Textarea`: the workflow's steps (with the form's `lint` mapping `lintSteps` findings to ranges, catalogue completion, and the detail page's diagram redrawn below from the last document that passed the lint), the condition's JSON mode, and every config editor's Advanced view, the console's payload and the workflow dry run's payload (both run on ⌘ Enter through `onRun`).
+There are no entity forms in 2.0.0 (D1 = A): definitions and connection revisions are authored in Git and applied with `orion-cli`. JSON the console does take — the console's payload, a workflow test's payload and edited copy, a provider lock — is authored in the `JsonEditor`, never a `Textarea` (both payload editors run on ⌘ Enter through `onRun`).
 
 ### API Proxy
 
@@ -895,11 +834,9 @@ Dev server proxies `/api`, `/health`, `/healthz`, `/readyz`, `/metrics` to `proc
 **2.0 lists are cursor-paged** (`Page<T>`, above): `useCursorList(key, fetchPage)` loads a page
 at a time and accumulates (`hasMore` / `loadMore`), and `LoadMoreFooter` is its footer — there is
 no page N and no "previous" to offer. The filters stay in the URL (`useListState`); the depth
-loaded does not, because a cursor is opaque. Pages move to it as their modules are ported.
-
-The 1.12 offset/limit pagination (`usePagination()` + `PaginationFooter`, `PaginatedResponse<T>`
-= `{ data, total?, limit, offset }`) remains until its last caller is ported. **`total` is
-optional** on both: treat an absent total as "unknown", never zero.
+loaded does not, because a cursor is opaque. **`total` is optional**: treat an absent total as
+"unknown", never zero. A list the console holds whole — the head's members, every connection —
+pages in the browser instead (`offset` in the URL, `PaginationFooter`).
 
 ## Conventions
 
@@ -944,8 +881,7 @@ optional** on both: treat an absent total as "unknown", never zero.
   An export button is `useExport`.
 - **No index files:** Import directly from the file (`@/components/ui/button`, not `@/components/ui`).
 - **Entity status:** a deployed entity has none — it serves, or this node quarantined it
-  (`QuarantineBadge`). `StatusBadge` / `LifecycleActions` remain only for the 1.x connector and
-  model pages until phase 4.
+  (`QuarantineBadge`); a provider package is admitted, revoked or only stored (`PackageStateBadge`).
 - **Status colours:** add new status/state strings to `src/lib/status.ts` rather than inlining — every map there falls back to neutral, so an unmapped value degrades silently to grey.
 - **Untoasted mutations:** validate/test/dry-run hooks are bare `useMutation({ mutationFn })` with no toast or invalidation — their results render inline, and a "failure" (invalid config, unreachable backend) is information rather than an error.
 - **Failed mutations:** `toastError(title, e)` from `lib/toast-error.tsx`, never `toast.error`

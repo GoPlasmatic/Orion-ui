@@ -1,12 +1,7 @@
 import { useMemo, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router"
 import { useQueryClient } from "@tanstack/react-query"
-import {
-  useCircuitBreakers,
-  useResetCircuitBreaker,
-  useResetCircuitBreakers,
-  useConnectors,
-} from "@/hooks/use-connectors"
+import { useCircuitBreakers, useResetCircuitBreaker, useResetCircuitBreakers } from "@/hooks/use-circuit-breakers"
 import { useChannels } from "@/hooks/use-channels"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -17,7 +12,6 @@ import { PageHeader } from "@/components/shared/page-header"
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
 import { breakerStateBadgeClass } from "@/lib/status"
 import { breakerRows, isBreakerOpen, type BreakerRow } from "@/lib/breakers"
-import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { cn } from "@/lib/utils"
 import { RefreshCw, RotateCcw } from "lucide-react"
 
@@ -28,17 +22,11 @@ export function CircuitBreakersPage() {
   const highlighted = params.get("key")
   const scrolled = useRef(false)
   const { data, isLoading } = useCircuitBreakers({ refetchInterval: 15_000 })
-  const { data: connectors } = useConnectors({ limit: REGISTRY_LIMIT })
   const { data: channels } = useChannels()
   const reset = useResetCircuitBreaker()
   const resetMany = useResetCircuitBreakers()
   const [confirmAll, setConfirmAll] = useState(false)
 
-  const connectorIdByName = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const c of connectors?.data ?? []) m.set(c.name, c.id)
-    return m
-  }, [connectors?.data])
   // A breaker key names the channel by *name*; the page needs its id.
   const channelIdByName = useMemo(() => {
     const m = new Map<string, string>()
@@ -59,7 +47,7 @@ export function CircuitBreakersPage() {
   }, [rows])
   const notClosed = rows.filter((r) => isBreakerOpen(r.state))
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["connectors", "circuit-breakers"] })
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["circuit-breakers"] })
 
   return (
     <div className="space-y-6">
@@ -114,14 +102,13 @@ export function CircuitBreakersPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Channel</TableHead>
-                  <TableHead>Connector</TableHead>
+                  <TableHead>Connection</TableHead>
                   <TableHead>State</TableHead>
                   <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.map((row) => {
-                  const connId = connectorIdByName.get(row.connector)
                   const chanId = channelIdByName.get(row.channel)
                   const isTarget = highlighted === row.key
                   return (
@@ -137,7 +124,7 @@ export function CircuitBreakersPage() {
                     >
                       <TableCell className="font-medium">
                         {chanId ? (
-                          <Link to={`/channels/${chanId}`} className="hover:underline">
+                          <Link to={`/channels/${encodeURIComponent(chanId)}`} className="hover:underline">
                             {row.channel}
                           </Link>
                         ) : (
@@ -145,12 +132,15 @@ export function CircuitBreakersPage() {
                         )}
                       </TableCell>
                       <TableCell className="font-mono text-xs">
-                        {connId ? (
-                          <Link to={`/connectors/${connId}`} className="text-primary hover:underline">
+                        {row.connector ? (
+                          <Link
+                            to={`/connections/${encodeURIComponent(row.connector)}`}
+                            className="text-primary hover:underline"
+                          >
                             {row.connector}
                           </Link>
                         ) : (
-                          row.connector
+                          "—"
                         )}
                       </TableCell>
                       <TableCell>

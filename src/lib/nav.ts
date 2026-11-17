@@ -2,7 +2,6 @@ import type { LucideIcon } from "lucide-react"
 import {
   Activity,
   Blocks,
-  Boxes,
   CalendarClock,
   Cpu,
   DatabaseZap,
@@ -45,7 +44,7 @@ export interface NavItem {
    * `engine/status.capabilities` says the runtime is off *and* nothing of the
    * kind exists; the route, the palette entry and the shortcut keep working.
    */
-  capability?: "plugins" | "models"
+  capability?: "plugins"
 }
 
 export interface NavSection {
@@ -101,17 +100,10 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     label: "Build",
-    hint: "The developer's loop: define, validate, test",
+    hint: "What the head deploys: inspect and test it",
     items: [
       { to: "/channels", label: "Channels", icon: Radio, keywords: "endpoints routes", shortcut: "c" },
       { to: "/workflows", label: "Workflows", icon: GitBranch, keywords: "pipelines tasks", shortcut: "w" },
-      {
-        to: "/connectors",
-        label: "Connectors",
-        icon: Plug,
-        keywords: "http kafka db cache storage smtp elasticsearch",
-        shortcut: "n",
-      },
       {
         to: "/plugins",
         label: "Plugins",
@@ -121,19 +113,31 @@ export const NAV_SECTIONS: NavSection[] = [
         capability: "plugins",
       },
       {
-        to: "/models",
-        label: "Models",
-        icon: Boxes,
-        keywords: "onnx inference model_infer tensor graph admission",
-        shortcut: "i",
-        capability: "models",
-      },
-      {
         to: "/console",
         label: "Data Console",
         icon: Terminal,
         keywords: "send test request payload",
         shortcut: "d",
+      },
+    ],
+  },
+  {
+    label: "Connect",
+    hint: "What workflows call out to, and the providers behind it",
+    items: [
+      {
+        to: "/connections",
+        label: "Connections",
+        icon: Plug,
+        keywords: "connectors http db cache kafka storage smtp probe secrets revisions",
+        shortcut: "n",
+      },
+      {
+        to: "/provider-packages",
+        label: "Provider Packages",
+        icon: Package,
+        keywords: "connector packages providers admit revoke upload scaffold lint pack studio models",
+        shortcut: "k",
       },
     ],
   },
@@ -168,23 +172,16 @@ export const NAV_SECTIONS: NavSection[] = [
         to: "/engine",
         label: "Engine",
         icon: Cpu,
-        keywords: "settings health reload backups api docs swagger openapi cluster generation capabilities",
+        keywords: "settings health node backups api docs swagger openapi cluster runtime capabilities edition",
         shortcut: "e",
       },
     ],
   },
   {
     label: "Govern",
-    hint: "Change control: who changed what, and what was promoted",
+    hint: "Change control: who changed what, and when",
     items: [
       { to: "/audit", label: "Audit Log", icon: FileText, keywords: "who changed what when", shortcut: "a" },
-      {
-        to: "/packages",
-        label: "Packages",
-        icon: Package,
-        keywords: "promotion receipts release applied staged",
-        shortcut: "k",
-      },
     ],
   },
 ]

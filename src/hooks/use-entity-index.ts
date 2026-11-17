@@ -1,10 +1,9 @@
 import { useMemo } from "react"
 import { useRegistry } from "@/hooks/use-registry"
-import { buildIndex } from "@/lib/topology"
+import { buildIndex, type ConnectorRef } from "@/lib/topology"
+import { useConnections, useProviderResolver } from "@/hooks/use-connections"
 import { buildSystemGraph } from "@/lib/system-graph"
-import type { Channel, Connector, Workflow } from "@/api/types"
-
-const NONE: never[] = []
+import type { Channel, Workflow } from "@/api/types"
 
 type Derived = { index: ReturnType<typeof buildIndex>; graph: ReturnType<typeof buildSystemGraph> }
 
@@ -15,7 +14,7 @@ type Derived = { index: ReturnType<typeof buildIndex>; graph: ReturnType<typeof 
  */
 const derived = new WeakMap<object, WeakMap<object, WeakMap<object, Derived>>>()
 
-function derive(channels: Channel[], workflows: Workflow[], connectors: Connector[]): Derived {
+function derive(channels: Channel[], workflows: Workflow[], connectors: ConnectorRef[]): Derived {
   let a = derived.get(channels)
   if (!a) derived.set(channels, (a = new WeakMap()))
   let b = a.get(workflows)
@@ -30,18 +29,30 @@ function derive(channels: Channel[], workflows: Workflow[], connectors: Connecto
 }
 
 /**
- * What the head deploys — every channel and workflow — indexed and built into
- * the system graph, once. The map, the dashboard, a detail page's
- * neighbourhood and a connection's dependants all ask the same question.
- * Connectors are 1.x's: until the connection pages land (phase 4) the index
- * carries none, so the graph draws no connector hubs.
+ * What the head deploys — every channel, workflow and connection — indexed
+ * and built into the system graph, once. The map, the dashboard, a detail
+ * page's neighbourhood and a connection's dependants all ask the same
+ * question. A connection the head deploys is `enabled`; one only stored is
+ * known but not serving.
  */
 export function useEntityIndex() {
   const registry = useRegistry()
+  const connections = useConnections()
+  const provider = useProviderResolver()
+  const refs = useMemo<ConnectorRef[]>(
+    () =>
+      connections.data.map((c) => ({
+        id: c.connection_id,
+        name: c.connection_id,
+        connector_type: provider((c.deployed ?? c.latest).provider_digest).family,
+        enabled: !!c.deployed,
+      })),
+    [connections.data, provider],
+  )
   const loaded = !!registry.revision || registry.empty
   const { index, graph } = useMemo(
-    () => derive(registry.channels, registry.workflows, NONE),
-    [registry.channels, registry.workflows],
+    () => derive(registry.channels, registry.workflows, refs),
+    [registry.channels, registry.workflows, refs],
   )
   return {
     index,
@@ -49,7 +60,7 @@ export function useEntityIndex() {
     /** Undefined until the head (and its definitions) have answered. */
     channels: loaded ? registry.channels : undefined,
     workflows: loaded ? registry.workflows : undefined,
-    connectors: undefined as Connector[] | undefined,
+    connections: connections.isLoading ? undefined : connections.data,
     /** The channels are the part the graph cannot do without. */
     isLoading: registry.isLoading,
   }

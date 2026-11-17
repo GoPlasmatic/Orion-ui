@@ -4,7 +4,7 @@ import { tracesApi } from "@/api/traces"
 import type { ListTracesParams } from "@/api/types"
 import { useHealth } from "@/hooks/use-health"
 import { useEngineStatus } from "@/hooks/use-engine"
-import { useCircuitBreakers, useConnectors } from "@/hooks/use-connectors"
+import { useCircuitBreakers } from "@/hooks/use-circuit-breakers"
 import { useChannels } from "@/hooks/use-channels"
 import { useTraces } from "@/hooks/use-traces"
 import { useTraceDlq } from "@/hooks/use-trace-dlq"
@@ -14,7 +14,6 @@ import { DEFAULT_TRAFFIC_WINDOW, useChannelTraffic } from "@/hooks/use-metrics"
 import { useNow } from "@/lib/use-now"
 import { isComponentFault } from "@/lib/status"
 import { openBreakers } from "@/lib/breakers"
-import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { formatSpan, serverTime } from "@/lib/utils"
 import { readStorageJson, writeStorageJson } from "@/lib/storage"
 import {
@@ -114,7 +113,6 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
   const { data: breakers } = useCircuitBreakers({ refetchInterval: poll })
   const traffic = useChannelTraffic(INCIDENT_WINDOW)
   const { data: channelList } = useChannels()
-  const { data: connectorList } = useConnectors({ limit: REGISTRY_LIMIT })
   const { data: failedTraces } = useTraces(
     { limit: FAILED_TRACE_PAGE, status: "failed" },
     { refetchInterval: poll },
@@ -141,10 +139,6 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
   const channelIdByName = useMemo(
     () => new Map(channelList.map((c) => [c.name, c.channel_id])),
     [channelList],
-  )
-  const connectorIdByName = useMemo(
-    () => new Map((connectorList?.data ?? []).map((c) => [c.name, c.id])),
-    [connectorList?.data],
   )
 
   const groups = useMemo(
@@ -240,7 +234,6 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
       groups,
       evidence,
       channelIdByName,
-      connectorIdByName,
       live: {
         quarantined,
         connectors: failedConnectors,
@@ -288,7 +281,6 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
     runtime,
     hasCron,
     channelIdByName,
-    connectorIdByName,
   ])
 
   const open = useMemo(() => needsAttention(incidents, acks), [incidents, acks])

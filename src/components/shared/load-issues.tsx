@@ -69,11 +69,7 @@ export function LoadIssuesReport({ issues }: { issues: EngineLoadIssues }) {
           {connectors.map((c) => (
             <li key={c.connector_id || c.connector}>
               <Link
-                to={
-                  c.connector_id
-                    ? `/connectors/${encodeURIComponent(c.connector_id)}`
-                    : "/connectors"
-                }
+                to={`/connections/${encodeURIComponent(c.connector_id || c.connector)}`}
                 className="font-mono"
               >
                 {c.connector}
@@ -111,9 +107,9 @@ export function LoadIssuesReport({ issues }: { issues: EngineLoadIssues }) {
         >
           {models.map((m) => (
             <li key={`${m.model}-${m.version}`}>
-              <Link to={`/models/${encodeURIComponent(m.model)}`} className="font-mono">
+              <span className="font-mono">
                 {m.model} v{m.version}
-              </Link>{" "}
+              </span>{" "}
               · <span className="font-mono">{m.stage}</span> — {m.reason}
             </li>
           ))}

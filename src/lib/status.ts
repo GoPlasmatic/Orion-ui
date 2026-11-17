@@ -1,5 +1,3 @@
-import type { EntityStatus } from "@/api/types"
-
 // Single source of truth for status → color across the app. Colors are built from
 // the semantic --success / --warning / --info / --destructive tokens, which carry
 // a *readable* ink value per theme (the raw brand green and amber fall to ~2:1 as
@@ -17,13 +15,6 @@ export const GOOD = "border-success/40 text-success bg-success/10"
 export const INFO = "border-info/40 text-info bg-info/10"
 export const WARN = "border-warning/40 text-warning bg-warning/10"
 export const BAD = "border-destructive/40 text-destructive bg-destructive/10"
-
-// Entity lifecycle: draft / active / archived
-export const entityStatusClass: Record<EntityStatus, string> = {
-  draft: INFO,
-  active: GOOD,
-  archived: NEUTRAL,
-}
 
 // Trace status: pending / running / completed / failed
 export const traceStatusClass: Record<string, string> = {
@@ -59,10 +50,6 @@ export const breakerStateClass: Record<string, string> = {
 export function breakerStateBadgeClass(state: string): string {
   return breakerStateClass[state] ?? WARN
 }
-
-// Connector enabled flag
-export const enabledBadgeClass = GOOD
-export const disabledBadgeClass = NEUTRAL
 
 // Cron occurrence status (1.6). A skip is the scheduler doing what the
 // channel's policy told it to — visible, not a failure — so it reads as a

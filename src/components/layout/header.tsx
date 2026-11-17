@@ -1,6 +1,6 @@
 import { Link } from "react-router"
 import { useHealth } from "@/hooks/use-health"
-import { useCircuitBreakers } from "@/hooks/use-connectors"
+import { useCircuitBreakers } from "@/hooks/use-circuit-breakers"
 import { useTheme } from "@/lib/use-theme"
 import { useTimeZone } from "@/lib/use-time-zone"
 import { isComponentFault } from "@/lib/status"

@@ -53,11 +53,11 @@ describe("load issues", () => {
     expect(screen.getByRole("link", { name: "nightly" })).toHaveAttribute("href", "/workflows/nightly")
   })
 
-  it("names the stage that refused a connector", () => {
+  it("names the stage that refused a connection, and links it", () => {
     renderIn(<LoadIssuesReport issues={issues} />)
     expect(screen.getByRole("link", { name: "billing-api" })).toHaveAttribute(
       "href",
-      "/connectors/9a1b-uuid"
+      "/connections/9a1b-uuid"
     )
     expect(screen.getByText("endpoint")).toBeInTheDocument()
   })

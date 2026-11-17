@@ -11,17 +11,18 @@
 import { describe, it, expect, afterEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
 import { MemoryRouter, useLocation } from "react-router"
-import { ENTITY_STATUSES } from "@/api/types"
 import { useListState } from "@/lib/use-list-state"
 
 const KEYS = ["status", "tag"] as const
+/** A closed vocabulary, as a filter dropdown declares one. */
+const STATUSES = ["draft", "active", "archived"] as const
 const SORT_FIELDS = { name: "name" }
 
 function Probe() {
   const { filters, hasFilters, offset, sortQuery, update, clear } = useListState(
     KEYS,
     SORT_FIELDS,
-    { values: { status: ENTITY_STATUSES } },
+    { values: { status: STATUSES } },
   )
   const { search } = useLocation()
   return (

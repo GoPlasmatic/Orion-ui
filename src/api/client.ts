@@ -7,6 +7,7 @@ import {
   noteAuthorized,
   noteForbidden,
   noteMutationAccepted,
+  readOnlyMayCall,
   noteUnauthorized,
   whenProbed,
 } from "./auth"
@@ -115,7 +116,7 @@ async function request<T>(path: string, options?: RequestInit, onHeaders?: (h: H
 
   if (guarded) {
     noteAuthorized()
-    if (MUTATING.has(method)) noteMutationAccepted()
+    if (MUTATING.has(method) && !readOnlyMayCall(url)) noteMutationAccepted()
   }
 
   // Handle 204 No Content

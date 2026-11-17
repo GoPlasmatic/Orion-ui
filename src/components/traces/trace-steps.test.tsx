@@ -20,9 +20,6 @@ vi.mock("@/hooks/use-functions", async () => {
   const { functionIndex } = await import("@/lib/function-effects")
   return { useFunctionIndex: () => functionIndex(CATALOGUE) }
 })
-vi.mock("@/hooks/use-connectors", () => ({
-  useConnectors: () => ({ data: { data: [{ id: "c-cache", name: "soma-cache" }] } }),
-}))
 
 afterEach(cleanup)
 
@@ -46,7 +43,7 @@ describe("TraceSteps", () => {
   it("selects the failing step by default and opens its connector", () => {
     renderAt("/traces/x", trace, channel({ task_details: true }))
     const detail = screen.getByRole("region", { name: "Step bump_work.bump" })
-    expect(within(detail).getByRole("link", { name: /Open soma-cache/ })).toHaveAttribute("href", "/connectors/c-cache")
+    expect(within(detail).getByRole("link", { name: /Open soma-cache/ })).toHaveAttribute("href", "/connections/soma-cache")
     expect(screen.getByText(/Snapshots from step 11 \(bump_work.bump\) on were dropped/)).toBeInTheDocument()
     expect(screen.getByText("Not reached: after.")).toBeInTheDocument()
   })

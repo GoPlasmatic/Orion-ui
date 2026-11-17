@@ -5,7 +5,7 @@
 
   **The operations console for the [Orion](https://github.com/GoPlasmatic/Orion) services runtime.**
 
-  Live dashboards, a system map of your channels and connectors, what is deployed and what
+  Live dashboards, a system map of your channels and connections, what is deployed and what
   changed, rollbacks, workflow tests, and trace drill-downs. Changes ship as deployments with
   `orion-cli`; the console operates them.
 
@@ -110,8 +110,9 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 | **Schedules** | Cron channels as first-class: what is scheduled and when it next fires, the durable occurrence ledger with retry and cancel, and "Trigger now" |
 | **Plugins** | Deployed WebAssembly plugins — manifest, component digest and size, signature, what requires them, per-function invocation metrics, and this node's load state |
 | **Workflows** | Deployed workflows as a visual DAG with four lenses (structure, dependencies, cost, last run), the channels and canary shares that route to them, their history across revisions, and a live test of the deployed definition — or an edited copy that is never saved |
-| **Connectors** | Create and manage HTTP, database, Kafka, cache, storage, and Elasticsearch connectors — including per-operation gates on db/es (make a connector delete-proof with one toggle) |
-| **Circuit Breakers** | Monitor and reset per-connector circuit breakers |
+| **Connections** | Every connection and its revisions — the provider each names, the one deployed, its settings, where its secrets are read from (never the values), what requires it, a live probe from the node, and its circuit breakers |
+| **Provider Packages** | Connector providers shipped as packages — upload a folder, admit it under the node's policy, revoke it; and a studio that scaffolds, lints and packs one |
+| **Circuit Breakers** | Monitor and reset per-connection circuit breakers |
 | **Traces** | Execution history (sync, async, Kafka and cron runs) with per-task detail and latency/error analytics |
 | **Audit Log** | Who changed what, when — across every admin operation |
 | **Data Console** | Send test requests to any channel — including REST-routed channels by method and path — with optional profiling |
@@ -129,8 +130,8 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 | `/channels`, `/channels/:id` | Deployed channels and one channel in full |
 | `/workflows`, `/workflows/:id` | Deployed workflows; the DAG with its lenses, test and history |
 | `/plugins`, `/plugins/:id` | Deployed WebAssembly plugins (manifest, dependants, invocations, load state, history) |
-| `/packages` | Promotion receipts (read-only) |
-| `/connectors`, `/connectors/new`, `/connectors/:id`, `/connectors/:id/edit` | Connector management |
+| `/connections`, `/connections/:id` | Connections, their revisions and probes |
+| `/provider-packages`, `/provider-packages/:digest` | Provider packages (upload, admit, revoke) and the package studio |
 | `/circuit-breakers` | Circuit breaker status and reset |
 | `/traces`, `/traces/:id` | Execution traces and per-task drill-down |
 | `/schedules`, `/schedules/occurrences/:id` | Cron schedules, the occurrence ledger, and one occurrence in full |

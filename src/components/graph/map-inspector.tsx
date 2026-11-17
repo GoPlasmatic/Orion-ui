@@ -20,7 +20,6 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Callout } from "@/components/ui/callout"
 import { OutcomeBar, OutcomeLegend, TrafficSparklines } from "@/components/shared/outcome-bar"
-import { StatusBadge } from "@/components/shared/status-badge"
 import { useTraces } from "@/hooks/use-traces"
 import { useTriggerChannel } from "@/hooks/use-channels"
 import { cn, formatDate, formatRelative } from "@/lib/utils"
@@ -158,7 +157,6 @@ export function MapInspector({
           </Callout>
         ) : (
           <div className="flex flex-wrap items-center gap-1.5">
-            <StatusBadge status={node.status} />
             <Badge variant="outline" className="text-[10px]">
               {node.channelType} · {node.protocol}
             </Badge>
@@ -477,7 +475,7 @@ export function MapInspector({
                         ? "opacity-60"
                         : ""
                   return use?.known ? (
-                    <Link key={name} to={`/connectors/${use.refId}`}>
+                    <Link key={name} to={`/connections/${encodeURIComponent(use.refId)}`}>
                       <Badge
                         variant="outline"
                         className={cn("text-[10px] transition-colors hover:bg-accent", tone)}

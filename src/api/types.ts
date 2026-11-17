@@ -1,14 +1,5 @@
-// Shared types
-export type EntityStatus = "draft" | "active" | "archived"
-export type SortOrder = "asc" | "desc"
 
-/**
- * The lifecycle values a list filter accepts. A filter reads its values from
- * here rather than from the `<option>`s beside it, so a URL carrying a spelling
- * the server never had — a stale link, a typo — reads as unset instead of
- * silently selecting nothing.
- */
-export const ENTITY_STATUSES = ["draft", "active", "archived"] as const satisfies readonly EntityStatus[]
+export type SortOrder = "asc" | "desc"
 
 export type JsonLogicValue =
   | string
@@ -17,16 +8,6 @@ export type JsonLogicValue =
   | null
   | JsonLogicValue[]
   | { [key: string]: JsonLogicValue }
-
-export interface PaginatedResponse<T> {
-  data: T[]
-  // Every list endpoint returns `total` except the trace list, which makes it
-  // opt-in via `?include_total=true` (the count is a full scan of the filtered
-  // set). Treat an absent total as "unknown", not as zero.
-  total?: number
-  limit: number
-  offset: number
-}
 
 export interface DataResponse<T> {
   data: T
@@ -97,34 +78,6 @@ export interface ErrorFieldDetail {
   got?: unknown
 }
 
-export interface StatusChangeRequest {
-  status: EntityStatus
-  // Accepted on workflow activation only; defaults to 100 server-side.
-  rollout_percentage?: number
-}
-
-// `?reload=` on the status and rollout endpoints. `defer` commits the row but
-// leaves the running engine (and every peer) on the previous configuration
-// until POST admin/engine/reload — one rebuild for a whole bundle apply.
-export type ReloadMode = "now" | "defer"
-
-// `?on_conflict=` on the import endpoints: what an already-stored conflict key
-// means. `new_version` is the upsert mode that makes re-importing an unchanged
-// artifact a no-op.
-export type OnConflict = "fail" | "skip" | "new_version"
-
-export interface StatusChangeOptions {
-  // Runs every gate the real transition runs and answers the /validate
-  // envelope without writing. Gates that would 4xx are reported as `errors`.
-  dryRun?: boolean
-  reload?: ReloadMode
-}
-
-export interface ImportOptions {
-  dryRun?: boolean
-  onConflict?: OnConflict
-}
-
 // Channel types
 export type ChannelType = "sync" | "async"
 // `cron` (1.6) is the one protocol with no caller: the channel is started by a
@@ -134,7 +87,6 @@ export type ChannelType = "sync" | "async"
 export type ChannelProtocol = "rest" | "http" | "kafka" | "cron" | (string & {})
 
 export const CHANNEL_TYPES = ["sync", "async"] as const satisfies readonly ChannelType[]
-export const CHANNEL_PROTOCOLS = ["rest", "http", "kafka", "cron"] as const satisfies readonly ChannelProtocol[]
 
 // Trace storage mode (global default + per-channel override via config.tracing)
 export type TraceStorageMode = "sync" | "async" | "batch" | "off"
@@ -817,200 +769,6 @@ export interface TestDefinitionResponse {
   error?: string | null
 }
 
-// 1.x validation envelope (still read by the connector and model pages until phase 4)
-export interface ValidationIssue {
-  field: string
-  message: string
-}
-
-export interface ValidationResponse {
-  valid: boolean
-  errors: ValidationIssue[]
-  warnings: ValidationIssue[]
-}
-
-// Bulk import (channels / connectors / workflows).
-// At most 1000 items per request; above that the server answers 400.
-export interface ImportError {
-  index: number
-  error: string
-}
-
-// What one item did, or on a dry run would do.
-export type ImportAction =
-  | "created"
-  | "updated_draft"
-  | "updated"
-  | "new_version"
-  | "unchanged"
-  | "skipped"
-  | (string & {})
-
-export interface ImportItemResult {
-  index: number
-  // The item's conflict key (workflow_id / channel_id / connector name).
-  id: string | null
-  action: ImportAction
-}
-
-// Since 1.0 a dry run reports in the same fields as a real run — the old
-// `would_create` / `would_fail` pair is gone.
-export interface ImportResult {
-  dry_run: boolean
-  imported: number
-  failed: number
-  // Content-identical items under on_conflict=new_version: nothing written.
-  unchanged: number
-  // Items skipped under on_conflict=skip.
-  skipped: number
-  errors: ImportError[]
-  results: ImportItemResult[]
-}
-
-// Connector types. `smtp` is the sixth type, added in 1.1.
-export type ConnectorType = "http" | "kafka" | "db" | "cache" | "storage" | "es" | "smtp"
-
-export const CONNECTOR_TYPES = [
-  "http",
-  "kafka",
-  "db",
-  "cache",
-  "storage",
-  "es",
-  "smtp",
-] as const satisfies readonly ConnectorType[]
-
-/**
- * Per-operation gates. All default true server-side except
- * `aggregate_write_stages`, which is the one deliberate default-deny.
- * The gate set differs per connector type — see CONNECTOR_GATES.
- */
-export interface OperationGates {
-  // db / es
-  read?: boolean
-  insert?: boolean
-  update?: boolean
-  delete?: boolean
-  upsert?: boolean
-  raw_write?: boolean
-  // cache
-  write?: boolean
-  // kafka
-  publish?: boolean
-  // storage
-  presign_get?: boolean
-  presign_put?: boolean
-  head?: boolean
-  // http: an allow-list of methods, not a boolean
-  methods?: string[]
-}
-
-export type BooleanGate = Exclude<keyof OperationGates, "methods">
-
-// Which gates apply to which connector type. `http` gates by method allow-list
-// rather than by boolean, so it carries no boolean gates.
-export const CONNECTOR_GATES: Record<ConnectorType, BooleanGate[]> = {
-  db: ["read", "insert", "update", "delete", "upsert", "raw_write"],
-  es: ["read", "insert", "update", "delete", "upsert", "raw_write"],
-  cache: ["read", "write"],
-  kafka: ["publish"],
-  storage: ["presign_get", "presign_put", "head"],
-  http: [],
-  smtp: [],
-}
-
-// Why a connector failed to load, when `load_status === "failed"`.
-export type ConnectorLoadStatus = "loaded" | "failed" | "disabled"
-
-export interface Connector {
-  id: string
-  name: string
-  connector_type: ConnectorType
-  // The parsed masked config — the shape POST/PUT accept, so a read response
-  // can be edited and written straight back. Prefer this over config_json.
-  config: Record<string, unknown>
-  // The stored document verbatim as a string, secrets masked. Kept for the
-  // life of the 1.x line; a client reading it has to parse before writing back.
-  config_json: string
-  enabled: boolean
-  tags: string[]
-  content_hash: string
-  created_at: string
-  updated_at: string
-}
-
-// The list endpoint additionally reports why a connector is not serving.
-export interface ConnectorListItem extends Connector {
-  load_status: ConnectorLoadStatus
-  load_error?: string | null
-  load_error_stage?: string | null
-}
-
-// The shape /import accepts, secrets masked. Only env:// and vault://
-// references round-trip; a literal credential exports as "******" and is
-// refused on import.
-export interface ConnectorExportItem {
-  id: string
-  name: string
-  connector_type: ConnectorType
-  config: Record<string, unknown>
-  enabled: boolean
-  tags: string[]
-  content_hash: string
-}
-
-export interface ListConnectorsParams {
-  limit?: number
-  offset?: number
-  tag?: string
-  sort_by?: string
-  sort_order?: SortOrder
-}
-
-export interface ExportConnectorsParams {
-  tag?: string
-  limit?: number
-  offset?: number
-  sort_by?: string
-  sort_order?: SortOrder
-}
-
-export interface CreateConnectorRequest {
-  id?: string
-  name: string
-  connector_type: ConnectorType
-  config: Record<string, unknown>
-  tags?: string[]
-}
-
-export interface UpdateConnectorRequest {
-  name?: string
-  connector_type?: ConnectorType
-  config?: Record<string, unknown>
-  enabled?: boolean
-  tags?: string[]
-}
-
-/**
- * Connector reachability probe. A backend that cannot be reached is still a
- * 200 — the probe ran, and `reachable: false` is its answer.
- *
- * `supported: false` means no probe exists for this kind (`es`, `kafka`, or a
- * `db` connector pointing at MongoDB), so key "broken" on
- * `supported && !reachable`, never on `reachable` alone.
- *
- * The `http` probe issues one genuine request with genuine credentials; a
- * 401/403 is reported as NOT reachable, which is the failure it exists to find.
- */
-export interface ProbeResult {
-  reachable: boolean
-  supported: boolean
-  connector_type: ConnectorType
-  // What the probe did, named plainly, e.g. "SELECT 1".
-  probe: string
-  error?: string | null
-}
-
 // Circuit breaker state is per-replica, never cluster-wide.
 export interface CircuitBreakerStatus {
   enabled: boolean
@@ -1678,80 +1436,6 @@ export interface DlqPurgeResult {
   older_than_hours: number
 }
 
-// --- Package promotion receipts --------------------------------------------
-// One receipt per package version. An applied version is immutable: the same
-// version arriving with a different content hash is refused with a 409.
-
-export type PackageState = "staged" | "applied"
-
-/**
- * What one package version carried (1.9), keyed the way each kind is matched:
- * `plugin_id`, `model_id`, the connector's `name`, `workflow_id`,
- * `channel_id`. Each list is sorted and free of duplicates, so two applies of
- * one artifact record identical JSON.
- *
- * This is what `package apply --prune` reads to find what a new version
- * dropped — the receipt is the only record of what the previous version owned.
- */
-export interface PackageInventory {
-  plugins?: string[]
-  connectors?: string[]
-  models?: string[]
-  workflows?: string[]
-  channels?: string[]
-}
-
-/** The five inventory kinds, in the order an apply activates them. */
-export const PACKAGE_INVENTORY_KINDS = [
-  "plugins",
-  "connectors",
-  "models",
-  "workflows",
-  "channels",
-] as const satisfies readonly (keyof PackageInventory)[]
-
-/** How many entities an inventory names, across every kind. */
-export function inventorySize(inv: PackageInventory | null | undefined): number {
-  if (!inv) return 0
-  return PACKAGE_INVENTORY_KINDS.reduce((n, kind) => n + (inv[kind]?.length ?? 0), 0)
-}
-
-export interface PackageReceipt {
-  name: string
-  version: string
-  content_hash: string
-  state: PackageState
-  // Who recorded this receipt (admin key id, or "anonymous").
-  principal: string
-  created_at: string
-  updated_at: string
-  /**
-   * What this version carried (1.9). Absent from a receipt written before
-   * receipts recorded one, and from the plain `GET /packages` listing — the
-   * package detail and `?current=true` are what carry it.
-   */
-  inventory?: PackageInventory | null
-}
-
-export interface PackageDetail {
-  name: string
-  // The newest applied version, or null when nothing has been applied.
-  current: PackageReceipt | null
-  // Every receipt for this package, newest first.
-  versions: PackageReceipt[]
-}
-
-export interface ListPackagesParams {
-  limit?: number
-  offset?: number
-  /**
-   * List each package's *current* receipt instead of every receipt (1.9), with
-   * its `inventory`. One row per package, which is what "what is running
-   * here?" actually asks.
-   */
-  current?: boolean
-}
-
 // --- Cron occurrences (1.6) --------------------------------------------------
 // Every scheduled instant of a cron channel becomes a durable **occurrence**:
 // a row written before the work starts and kept after it finishes. It is
@@ -1943,16 +1627,6 @@ export interface PluginManifest {
   [key: string]: unknown
 }
 
-/** Whether the node answering loaded a plugin version, and if not, why. */
-export interface PluginHealth {
-  // `loaded`, `failed` (with the stage and reason), `disabled` (the sandbox is
-  // off on this node) or `inactive` (not the version this node's generation
-  // carries).
-  state: "loaded" | "failed" | "disabled" | "inactive" | (string & {})
-  reason?: string | null
-  compile_ms?: number | null
-}
-
 /**
  * A WebAssembly plugin as the head deploys it: its `plugin.toml` manifest and
  * the facts of its component. The component itself (base64 in the stored
@@ -1974,351 +1648,6 @@ export interface Plugin extends DeployedEntity {
   /** `sha256:…` of the component bytes, when this browser could hash them. */
   component_digest?: string
   component_bytes?: number
-}
-
-// --- Models (1.8) ------------------------------------------------------------
-// ONNX graphs as the fifth versioned entity, with the workflow's lifecycle and
-// one verb of its own: `admit`. What sets a model apart is that Orion never
-// holds its bytes. A row names an object in a bucket — a `storage` connector,
-// a key, and the `sha256:` digest the bytes must hash to — and no node serves
-// an artifact it has not fetched from that bucket and hashed to the claim
-// itself. Registration answers 202: the manifest, the connector and the
-// object's existence are checked synchronously, and the node's admission
-// worker then fetches, verifies, reads the graph and probes it before the
-// verdict lands on the row. Activation is refused until that verdict is
-// `passed`.
-//
-// Off by default (`models.enabled = false`): registering, admitting and
-// activating answer 400 while reads answer normally, and a stored active row
-// quarantines the workflows naming it rather than aborting the node.
-
-/**
- * How far admission got. `pending` until a node has probed the artifact, then
- * `passed` or `failed` with the `stage` it stopped at. The wire value is an
- * open string — an unknown one reads as neutral rather than as a failure.
- */
-export const ADMISSION_STATES = [
-  { value: "pending", label: "Admission pending" },
-  { value: "passed", label: "Admission passed" },
-  { value: "failed", label: "Admission failed" },
-] as const
-export type AdmissionState = (typeof ADMISSION_STATES)[number]["value"] | (string & {})
-
-/** The admission verdict on a model version — whether a node fetched, verified and loaded the artifact. */
-export interface ModelAdmission {
-  state: AdmissionState
-  // The stage a `failed` verdict stopped at. Set alongside a verdict, so
-  // `{ state: "pending" }` is the whole of a fresh version's admission.
-  stage?: string | null
-  reason?: string | null
-  // The node that recorded the verdict. In a cluster admission runs *once*,
-  // on the node that took the registration, and peers load on that verdict
-  // without re-probing — so this keeps naming the one that ran it.
-  node?: string | null
-  at?: string | null
-}
-
-/**
- * Where a model version's bytes are. The reference *is* the content — a row
- * never carries bytes — so `connector`, `key` and `digest` are what the
- * content hash covers. `size` is an advisory hint admission confirms.
- */
-export interface ModelArtifactRef {
-  // The `storage` connector the artifact is read through, by name. It must
-  // exist and allow reads (`operations.presign_get`) on every instance the
-  // model is promoted to — the bytes travel through it, never in the package.
-  connector: string
-  key: string
-  // `sha256:<hex>` of the artifact bytes, as claimed at registration and
-  // confirmed by admission. The identity a generation, a trace and a package
-  // all name the model by.
-  digest: string
-  size?: number | null
-}
-
-/**
- * What admission read out of the model, on the node that admitted it. Absent
- * until the verdict passes. The graph numbers are read from the ONNX protobuf
- * itself, so they are identical on every node and every runtime; the probe
- * numbers describe the admitting node alone.
- */
-export interface ModelStats {
-  // Every value the graph carries, wherever it carries it (1.8.1): each
-  // initializer, each tensor or list of numbers a node holds in an attribute,
-  // through every subgraph body (`If`, `Loop`, `Scan`) and every model-local
-  // function. Before 1.8.1 this summed the initializers alone, so a graph
-  // carrying its weights in `Constant` attributes — every `ai.onnx.ml` model,
-  // with no rewrite at all — reported zero. `models.max_parameters` applies to
-  // this, not to whatever the manifest claimed. Stored stats are written at
-  // admission and never recomputed, so a row keeps the number the node that
-  // admitted it measured.
-  parameters?: number
-  // The whole document's node count since 1.8.1 — the graph, every subgraph
-  // body and every model-local function — where it was the top-level graph's.
-  nodes?: number
-  ir_version?: number
-  opset?: number
-  artifact_bytes?: number
-  /**
-   * The distinct operators those nodes ask a runtime for (1.8.1), sorted, each
-   * qualified by its domain unless that is the default one — so
-   * `ai.onnx.ml.LinearRegressor`, but plain `Gemm`.
-   *
-   * What the graph needs *implemented*, which is the one question a model row
-   * cannot otherwise answer: the row holds the artifact's reference and not
-   * its bytes, and the node may no longer have them cached. Empty on a version
-   * admitted before 1.8.1 recorded it.
-   */
-  operators?: string[]
-  /**
-   * What each named dimension was bound to for the admission probe (1.8.1).
-   * Absent when the manifest declares fixed shapes, which is most of them —
-   * present when it does not, because `probe_ms` over a variable axis says
-   * nothing without the size behind it. A declared name this leaves out was
-   * probed at 1.
-   */
-  probe_dims?: Record<string, number>
-  // Median of five probe inferences over zero-filled inputs, in ms. Admission
-  // requires it within `models.max_probe_ms`.
-  probe_ms?: number
-  runtime?: string
-  device?: string
-}
-
-/** Whether the node answering has a model version resident, and if not, why. */
-export interface ModelHealth {
-  // From the verdict and the lifecycle: `disabled` (models are off here),
-  // `pending` / `rejected` while admission has not passed, `inactive` for a
-  // draft or archived version. For the active admitted version, on a node
-  // that loads models: `admitted` (nothing has asked for it yet), `loaded`,
-  // `evicted` (was resident, dropped under `models.max_loaded_bytes`) or
-  // `failed` (the generation could not carry it).
-  state:
-    | "disabled"
-    | "pending"
-    | "rejected"
-    | "inactive"
-    | "admitted"
-    | "loaded"
-    | "evicted"
-    | "failed"
-    | (string & {})
-  reason?: string | null
-  runtime?: string | null
-  device?: string | null
-  resident_bytes?: number | null
-}
-
-/**
- * One dimension of a declared shape (1.8.1): a positive count, or a name
- * standing for whatever the call brings.
- *
- * A name **binds on its first occurrence in a call** and every later
- * occurrence — in another input, or in an output — must equal that binding,
- * which is what makes `["N", 3]` on an output mean the N the input had. Every
- * axis the author did not name stays exactly as strict as it was. A fixed
- * dimension serialises as the number it always was, so a manifest that names
- * nothing is byte-identical to one written before 1.8.1 — which matters,
- * because a loaded session's cache key is a hash of the binding.
- */
-export type ModelDim = number | string
-
-/** One input tensor and how a message becomes it. */
-export interface ModelInputDecl {
-  // The graph's input name — also the context key the default adapter reads.
-  name: string
-  // A datavalue dtype wire name (`f32`, `i64`, `bool`, …), lowercase.
-  dtype: string
-  // Every dimension a positive count or a name a call decides — see `ModelDim`.
-  shape: ModelDim[]
-  // JSONLogic over the JSON the task hands over, producing this input's
-  // tensor. Absent means the default, `{"tensor": [{"var": name}, dtype]}`.
-  // May not read `{"secret": …}`, `now` or `random`: a manifest's author is
-  // not the secrets' owner, and a replay must reproduce the same tensors.
-  adapter?: JsonLogicValue
-  [key: string]: unknown
-}
-
-/** One output tensor the graph declares. */
-export interface ModelOutputDecl {
-  name: string
-  dtype: string
-  // A name here must be one an input also declares, or it binds to whatever
-  // the graph produces.
-  shape: ModelDim[]
-  [key: string]: unknown
-}
-
-/**
- * Where a pipeline put the bytes for a serving instance — the deployable twin
- * of `artifact`, which is a path on the authoring machine. `compile` writes
- * both into a package's `models[]` entry. A served row ignores both: the
- * registration request's own `artifact` reference is its authority.
- */
-export interface ModelManifestReference {
-  connector: string
-  key: string
-}
-
-/**
- * The `orion:model@1.0.0` document: what the model takes, what it gives back,
- * and the JSONLogic that marshals a message into tensors and a result back
- * out. Leave an adapter or the result out and the default applies, which is
- * enough for a caller that already speaks tensors.
- */
-export interface ModelManifest {
-  // Must be `orion:model@1.0.0`.
-  abi?: string
-  // The model id: lowercase labels joined by `.`; `orion.*` is reserved.
-  name?: string
-  // The author's own version string. Orion assigns the entity version.
-  version?: string
-  // The artifact format a runtime this build knows serves (`onnx`). Which
-  // runtime loads it is the node's `[models.default_runtime]` row.
-  format?: string
-  // Path of the artifact relative to the manifest — read by the offline
-  // tooling and the CLI only (`lint`, `dry-run`, `test`, `compile`).
-  artifact?: string
-  reference?: ModelManifestReference
-  description?: string
-  inputs?: ModelInputDecl[]
-  outputs?: ModelOutputDecl[]
-  // JSONLogic over the outputs, each by name, producing what the task writes.
-  // Absent means a nested list per output.
-  result?: JsonLogicValue
-  /**
-   * What each named dimension is worth to the admission probe (1.8.1), which
-   * needs concrete shapes to build the zero-filled tensors it runs. Only for
-   * the probe: a declared name left out of it is probed at 1, the smallest
-   * tensor there is. The binding lands in `stats.probe_dims`, which is the
-   * only thing that makes `probe_ms` comparable between two models with a
-   * variable axis. An entry naming a dimension no shape declares is refused.
-   */
-  probe_dims?: Record<string, number>
-  [key: string]: unknown
-}
-
-/** One version of a model, as every model endpoint returns it. */
-export interface Model {
-  model_id: string
-  version: number
-  status: EntityStatus
-  // `sha256:…` of the artifact bytes, as claimed at registration.
-  digest: string
-  // The manifest ABI the model was registered against.
-  abi: string
-  // The author's own version string from the manifest, informational.
-  model_version: string
-  // The artifact format the manifest declares (`onnx`).
-  format: string
-  // The validated manifest as JSON — what was registered, with nothing the
-  // server inferred added to it.
-  manifest: ModelManifest
-  // The tensor names, in manifest order, repeated at the top level so a client
-  // need not walk the manifest to learn the model's signature.
-  inputs: string[]
-  outputs: string[]
-  artifact: ModelArtifactRef
-  admission: ModelAdmission
-  // `null` until admission passes.
-  stats?: ModelStats | null
-  // Detached Ed25519 signature over `digest`, base64, when the registration
-  // carried one. Not part of the content hash: the digest is the identity and
-  // the signature only attests to it.
-  signature?: string | null
-  tags: string[]
-  // Over the importable content (manifest, the artifact reference without its
-  // size, tags). The signature, the verdict and the stats are not in it.
-  content_hash: string
-  // Present only on the single-entity read, and only when the serving node has
-  // an opinion: this node's residency for the version.
-  health?: ModelHealth | null
-  created_at: string
-  updated_at: string
-}
-
-/** One active workflow that names a model, and the tasks that do. */
-export interface ModelDependant {
-  workflow_id: string
-  version: number
-  // The ids of the `model_infer` tasks whose `input.model` is this id as a
-  // literal.
-  task_ids: string[]
-}
-
-/** What depends on a model: the active workflows naming it. */
-export interface ModelDependencies {
-  model_id: string
-  version: number
-  // The ones an archive or delete is refused for (409).
-  workflows: ModelDependant[]
-  // Always true. A task whose `input.model` is an expression resolves per
-  // message, so a reference of that kind is neither listed nor gated on — it
-  // fails the call as `unavailable` instead.
-  dynamic_references_unlisted: boolean
-}
-
-/** What the bucket said about the object, when `validate` got that far. */
-export interface ArtifactHead {
-  size?: number | null
-  etag?: string | null
-}
-
-/** The `/validate` envelope for models: the shared shape plus the object's HEAD. */
-export interface ModelValidationResponse extends ValidationResponse {
-  head?: ArtifactHead | null
-}
-
-export interface ListModelsParams {
-  limit?: number
-  offset?: number
-  status?: EntityStatus
-  tag?: string
-  // Narrow to a verdict: `pending`, `passed` or `failed`.
-  admission?: AdmissionState
-  // `model_id` (default), `status`, `created_at`, `updated_at`.
-  sort_by?: string
-  sort_order?: SortOrder
-}
-
-/**
- * No `include_artifacts` counterpart to the plugin export: a model *always*
- * exports as a reference. The target fetches the object through its own
- * connector of that name and admits it itself.
- */
-export type ExportModelsParams = ListModelsParams
-
-/**
- * What `POST admin/models` and the import accept. Nothing is uploaded: the
- * server fetches the bytes from the connector at admission.
- */
-export interface CreateModelRequest {
-  manifest: ModelManifest
-  artifact: ModelArtifactRef
-  // Must equal the manifest's `name` when given; the manifest is the source of
-  // truth for the id.
-  model_id?: string | null
-  // Detached Ed25519 signature over the digest string, base64. Required when
-  // the node's `[models.trust]` names keys; stored either way.
-  signature?: string | null
-  tags?: string[]
-}
-
-/** `PUT admin/models/{id}`: every field optional, absent means keep. */
-export interface UpdateModelRequest {
-  manifest?: ModelManifest
-  // A changed artifact reference resets the verdict to `pending` and queues
-  // the draft again; a manifest or tag change alone keeps it.
-  artifact?: ModelArtifactRef | null
-  signature?: string | null
-  tags?: string[] | null
-}
-
-/** `POST admin/models/{id}/admit`: 202 with the job queued, or 200 with the verdict. */
-export interface AdmitModelOptions {
-  // Run admission inline and answer with the verdict recorded, rather than
-  // queueing it and answering 202.
-  wait?: boolean
 }
 
 // ── Orion 2.0: probes and runtime capabilities ──────────────────────────────
@@ -2588,4 +1917,161 @@ export interface StoredDefinition {
    * its place) so no cache, viewer or diff ever holds the bytes.
    */
   component?: { size_bytes: number; digest?: string }
+}
+
+// ── Orion 2.0: connections and provider packages ────────────────────────────
+
+/**
+ * One immutable connection revision (bare). `provider_digest` names the
+ * provider: a built-in Rust driver's `package_digest` from
+ * `runtime-capabilities.provider_backends`, or an admitted provider package.
+ * A deployment member for it names `configuration_digest`.
+ */
+export interface ConnectionRevision {
+  connection_id: string
+  revision: number
+  provider_digest: string
+  /** The settings, as created. Never a secret: the server refuses credential-shaped keys. */
+  public_config: unknown
+  /** Config path → where the secret is read from (`env://…`, `vault://…`). The value itself is never returned. */
+  secret_locators: Record<string, string>
+  /** Dependency alias → the connection it calls through (a provider that declares dependencies). */
+  bindings: Record<string, string>
+  /** Over the settings, the locators and the bindings: what a manifest member names. */
+  configuration_digest: string
+}
+
+/** The normalised class of a connector failure; open for classes a later server adds. */
+export type ConnectorErrorClass =
+  | "invalid_input"
+  | "unauthorized"
+  | "forbidden"
+  | "not_found"
+  | "conflict"
+  | "rate_limited"
+  | "unavailable"
+  | "deadline"
+  | "cancelled"
+  | "provider_failure"
+  | "contract_violation"
+  | (string & {})
+
+/** What the host observed of an external effect, by uncertainty. */
+export type EffectStatus = "not_started" | "completed" | "unknown" | (string & {})
+
+/** `POST …/revisions/{rev}/probes` (bare). 200 whatever it found: `healthy` is the finding. */
+export interface ConnectionProbe {
+  connection_id: string
+  revision: number
+  /** The built-in driver, or the backend id of the provider package. */
+  driver_id: string
+  healthy: boolean
+  latency_ms: number
+  details: {
+    /** The check: `configuration`, `SELECT 1`, `TCP connect to the URL's host`, … */
+    probe: string
+    error?: string | null
+    error_class?: ConnectorErrorClass | null
+    effect_status?: EffectStatus | null
+  }
+}
+
+export type PackageArtifactState = "active" | "draining" | "deleted" | (string & {})
+
+/** One file of a package's `inventory.json`. */
+export interface PackageInventoryFile {
+  path: string
+  sha256: string
+  size: number
+}
+
+/** A stored provider package, as the list carries it (bare). */
+export interface ConnectorPackageSummary {
+  publisher: string
+  provider_id: string
+  version: string
+  /** `sha256:<64 hex>`: the package's identity. */
+  digest: string
+  implementation: ImplementationKind
+  /** What `distribution.json` declares; `community` when it declares none. */
+  tier: EditionTier
+  /** Admitted and not revoked. */
+  admitted: boolean
+  revoked: boolean
+  artifact_state: PackageArtifactState
+  /** `connector.json`: operations, schemas, dependencies, payload limits. */
+  manifest: Record<string, unknown>
+  /** `distribution.json`. */
+  distribution: Record<string, unknown>
+  /** `inventory.json`. */
+  inventory: { files?: PackageInventoryFile[] } & Record<string, unknown>
+}
+
+/** A package's admission record. An admission under another fingerprint is invalid. */
+export interface ProviderAdmission {
+  package_digest: string
+  policy_id: string
+  admission_fingerprint: string
+  revoked: boolean
+}
+
+/** `GET admin/connector-packages/{digest}` and the upload's 201 (bare). */
+export interface ConnectorPackage {
+  package: ConnectorPackageSummary
+  admission?: ProviderAdmission | null
+}
+
+/** A package's files: relative path → UTF-8 text or `base64:<…>`. */
+export type PackageFiles = Record<string, string>
+
+export interface UploadPackageRequest {
+  files: PackageFiles
+  /** Admit in the same request. */
+  admit?: boolean
+  /** With `admit`: the provider lock the admission must verify against. */
+  lock?: unknown
+}
+
+export interface AdmitPackageResponse {
+  admission: ProviderAdmission
+}
+
+export interface RevokePackageResponse {
+  package_digest: string
+  reason?: string | null
+}
+
+/** `POST admin/authoring/scaffold`. */
+export interface ScaffoldRequest {
+  publisher: string
+  provider_id: string
+  kind: ImplementationKind
+  tier?: EditionTier
+  /** Semantic version; `1.0.0` when absent. */
+  version?: string
+}
+
+export interface ScaffoldResponse {
+  files: PackageFiles
+  implementation: ImplementationKind
+  package_digest: string
+  provider_id: string
+  publisher: string
+  version: string
+}
+
+/** `POST admin/authoring/lint`: 200 whenever linting ran; `valid` is the verdict. */
+export interface LintResponse {
+  valid: boolean
+  /** Each problem, `CODE: where`. */
+  errors: string[]
+  implementation?: ImplementationKind | null
+  provider_id?: string | null
+  version?: string | null
+}
+
+/** `POST admin/authoring/pack`: the files, `inventory.json` included, and the digest an upload gets. */
+export interface PackResponse {
+  files: PackageFiles
+  package_digest: string
 }

@@ -5,14 +5,11 @@
  * engine page does.
  */
 const COMPONENT_ROUTES: Record<string, string> = {
-  connectors: "/connectors",
+  connectors: "/connections",
   channels: "/channels",
   plugins: "/plugins",
-  models: "/models",
   cron: "/schedules",
-  // 1.9: `[packages] apply`. The receipts page is where the versions this
-  // node applied are readable; the per-file progress is only in the report.
-  packages: "/packages",
+  packages: "/deployments",
 }
 
 /** The page that acts on a degraded component, or null when only the health report explains it. */

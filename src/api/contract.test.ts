@@ -70,7 +70,6 @@ vi.mock("@/api/client", async (importOriginal) => {
 })
 
 const { channelsApi } = await import("@/api/channels")
-const { connectorsApi } = await import("@/api/connectors")
 const { engineApi } = await import("@/api/engine")
 const { auditApi } = await import("@/api/audit")
 const { backupApi } = await import("@/api/backup")
@@ -78,13 +77,15 @@ const { functionsApi } = await import("@/api/functions")
 const { tracesApi } = await import("@/api/traces")
 const { dataApi } = await import("@/api/data")
 const { traceDlqApi } = await import("@/api/trace-dlq")
-const { packagesApi } = await import("@/api/packages")
 const { cronApi } = await import("@/api/cron")
 const { cacheApi } = await import("@/api/cache")
-const { modelsApi } = await import("@/api/models")
 const { runtimeApi } = await import("@/api/runtime")
 const { deploymentsApi } = await import("@/api/deployments")
 const { definitionsApi } = await import("@/api/definitions")
+const { connectionsApi } = await import("@/api/connections")
+const { connectorPackagesApi } = await import("@/api/connector-packages")
+const { authoringApi } = await import("@/api/authoring")
+const { circuitBreakersApi } = await import("@/api/circuit-breakers")
 
 /** Resolve a client path ("admin/workflows/x?y=1" or "/health") to spec-path + query. */
 function normalize(rawPath: string): { url: string; query: string | undefined } {
@@ -164,23 +165,30 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
     get: () => definitionsApi.get("sha256:00"),
     test: () => definitionsApi.test({ definition: { name: "w", tasks: [] }, data: {} }),
   },
+  connectionsApi: {
+    list: () => connectionsApi.list({ limit: 10, cursor: "c", include_total: true }),
+    revisions: () => connectionsApi.revisions("billing-api", { limit: 10, cursor: "c" }),
+    get: () => connectionsApi.get("billing-api", 2),
+    probe: () => connectionsApi.probe("billing-api", 2),
+  },
+  connectorPackagesApi: {
+    list: () => connectorPackagesApi.list({ limit: 10, cursor: "c", include_total: true }),
+    get: () => connectorPackagesApi.get("sha256:00"),
+    upload: () => connectorPackagesApi.upload({ files: {}, admit: true }),
+    admit: () => connectorPackagesApi.admit("sha256:00"),
+    revoke: () => connectorPackagesApi.revoke("sha256:00", "why"),
+  },
+  authoringApi: {
+    scaffold: () => authoringApi.scaffold({ publisher: "acme", provider_id: "acme.x", kind: "workflow" }),
+    lint: () => authoringApi.lint({}),
+    pack: () => authoringApi.pack({}),
+  },
+  circuitBreakersApi: {
+    list: () => circuitBreakersApi.list(),
+    reset: () => circuitBreakersApi.reset("ch-1:conn-1"),
+  },
   channelsApi: {
     trigger: () => channelsApi.trigger("ch-1"),
-  },
-  connectorsApi: {
-    list: () =>
-      connectorsApi.list({ limit: 10, offset: 0, tag: "t", sort_by: "name", sort_order: "asc" }),
-    get: () => connectorsApi.get("conn-1"),
-    create: () => connectorsApi.create({ name: "c", connector_type: "http", config: {} }),
-    update: () => connectorsApi.update("conn-1", { enabled: false }),
-    delete: () => connectorsApi.delete("conn-1"),
-    validate: () => connectorsApi.validate({ name: "c", connector_type: "http", config: {} }),
-    test: () => connectorsApi.test("conn-1"),
-    import: () => connectorsApi.import([], { dryRun: true, onConflict: "fail" }),
-    export: () =>
-      connectorsApi.export({ tag: "t", limit: 10, offset: 0, sort_by: "name", sort_order: "asc" }),
-    getCircuitBreakers: () => connectorsApi.getCircuitBreakers(),
-    resetCircuitBreaker: () => connectorsApi.resetCircuitBreaker("ch-1:conn-1"),
   },
   engineApi: {
     status: () => engineApi.status(),
@@ -225,14 +233,6 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
     requeue: () => traceDlqApi.requeue("dlq-1"),
     purge: () => traceDlqApi.purge({ older_than_hours: 24 }),
   },
-  packagesApi: {
-    list: () => packagesApi.list({ limit: 10, offset: 0 }),
-    // 1.9: one row per package, its current receipt, carrying the inventory.
-    // Not a module function — an extra invocation, so the query param the
-    // `current` flag turns into is checked against the spec like any other.
-    "list?current": () => packagesApi.list({ limit: 10, offset: 0, current: true }),
-    get: () => packagesApi.get("payments"),
-  },
   cacheApi: {
     invalidateNamespace: () => cacheApi.invalidateNamespace("posts"),
   },
@@ -252,49 +252,6 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
     cancelOccurrence: () => cronApi.cancelOccurrence("occ-1"),
     status: () => cronApi.status(),
   },
-  modelsApi: {
-    list: () =>
-      modelsApi.list({
-        limit: 10,
-        offset: 0,
-        status: "active",
-        tag: "t",
-        admission: "passed",
-        sort_by: "model_id",
-        sort_order: "asc",
-      }),
-    get: () => modelsApi.get("ada.c4-tiny"),
-    create: () =>
-      modelsApi.create({
-        manifest: { abi: "orion:model@1.0.0", name: "ada.c4-tiny" },
-        artifact: { connector: "models", key: "c4-tiny.onnx", digest: "sha256:0" },
-      }),
-    update: () => modelsApi.update("ada.c4-tiny", { tags: ["t"] }),
-    delete: () => modelsApi.delete("ada.c4-tiny"),
-    validate: () =>
-      modelsApi.validate({
-        manifest: { abi: "orion:model@1.0.0", name: "ada.c4-tiny" },
-        artifact: { connector: "models", key: "c4-tiny.onnx", digest: "sha256:0" },
-      }),
-    changeStatus: () =>
-      modelsApi.changeStatus("ada.c4-tiny", { status: "active" }, { reload: "defer" }),
-    changeStatusDryRun: () => modelsApi.changeStatusDryRun("ada.c4-tiny", { status: "active" }),
-    admit: () => modelsApi.admit("ada.c4-tiny", { wait: true }),
-    listVersions: () => modelsApi.listVersions("ada.c4-tiny", { limit: 10, offset: 0 }),
-    createVersion: () => modelsApi.createVersion("ada.c4-tiny"),
-    dependencies: () => modelsApi.dependencies("ada.c4-tiny"),
-    import: () => modelsApi.import([], { dryRun: true, onConflict: "new_version" }),
-    export: () =>
-      modelsApi.export({
-        status: "active",
-        tag: "t",
-        admission: "passed",
-        limit: 10,
-        offset: 0,
-        sort_by: "model_id",
-        sort_order: "asc",
-      }),
-  },
 }
 
 /**
@@ -303,48 +260,24 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
  * 2–4 replace the per-entity CRUD modules with deployments, definitions and
  * connections. Each entry must still fail; remove it when it is ported.
  */
-const PENDING_V2 = new Set<string>([
-  "connectorsApi.list",
-  "connectorsApi.get",
-  "connectorsApi.create",
-  "connectorsApi.update",
-  "connectorsApi.delete",
-  "connectorsApi.validate",
-  "connectorsApi.test",
-  "connectorsApi.import",
-  "connectorsApi.export",
-  "packagesApi.list",
-  "packagesApi.list?current",
-  "packagesApi.get",
-  "modelsApi.list",
-  "modelsApi.get",
-  "modelsApi.create",
-  "modelsApi.update",
-  "modelsApi.delete",
-  "modelsApi.validate",
-  "modelsApi.changeStatus",
-  "modelsApi.changeStatusDryRun",
-  "modelsApi.admit",
-  "modelsApi.listVersions",
-  "modelsApi.createVersion",
-  "modelsApi.dependencies",
-  "modelsApi.import",
-  "modelsApi.export",
-])
+// Empty since phase 4: every call speaks 2.0. Keep it that way — a call
+// added here must still fail against the spec, so the list can only shrink.
+const PENDING_V2 = new Set<string>([])
 
 const MODULES: Record<string, object> = {
   channelsApi,
-  connectorsApi,
+  connectionsApi,
+  connectorPackagesApi,
+  authoringApi,
+  circuitBreakersApi,
   engineApi,
   auditApi,
   backupApi,
   functionsApi,
   tracesApi,
   traceDlqApi,
-  packagesApi,
   cronApi,
   cacheApi,
-  modelsApi,
   runtimeApi,
   deploymentsApi,
   definitionsApi,

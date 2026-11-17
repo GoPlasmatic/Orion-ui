@@ -8,7 +8,8 @@ import { describe, it, expect } from "vitest"
 import { buildIndex } from "@/lib/topology"
 import { buildSystemGraph, neighbourhood } from "@/lib/system-graph"
 import { deriveLoad } from "@/lib/traffic-encoding"
-import type { Channel, Connector, Workflow } from "@/api/types"
+import type { Channel, Workflow } from "@/api/types"
+import type { ConnectorRef } from "@/lib/topology"
 import type { ChannelTraffic } from "@/hooks/use-metrics"
 
 function channel(name: string, over: Partial<Channel> = {}): Channel {
@@ -64,22 +65,11 @@ const mongo = (connector: string) => ({
   function: { name: "mongo_read", input: { connector } },
 })
 
-function connector(name: string): Connector {
-  return {
-    id: `conn-${name}`,
-    name,
-    connector_type: "db",
-    config: {},
-    config_json: "{}",
-    enabled: true,
-    tags: [],
-    content_hash: "sha256:z",
-    created_at: "",
-    updated_at: "",
-  } as Connector
+function connector(name: string): ConnectorRef {
+  return { id: name, name, connector_type: "db", enabled: true }
 }
 
-function graphOf(channels: Channel[], workflows: Workflow[], connectors: Connector[] = []) {
+function graphOf(channels: Channel[], workflows: Workflow[], connectors: ConnectorRef[] = []) {
   return buildSystemGraph(buildIndex(channels, workflows, connectors))
 }
 
@@ -170,7 +160,7 @@ describe("buildSystemGraph", () => {
     )
     expect(graph.nodes.map((n) => n.id)).toEqual(["a", "b"])
     expect(graph.connectors).toEqual([
-      { name: "sias-mongo", users: ["a", "b"], enabled: true, known: true, refId: "conn-sias-mongo" },
+      { name: "sias-mongo", users: ["a", "b"], enabled: true, known: true, refId: "sias-mongo" },
     ])
   })
 

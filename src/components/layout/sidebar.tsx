@@ -5,7 +5,6 @@ import { NAV_SECTIONS, type NavItem } from "@/lib/nav"
 import { useNavCounts } from "@/hooks/use-attention"
 import { useEngineStatus } from "@/hooks/use-engine"
 import { usePlugins } from "@/hooks/use-plugins"
-import { useModels } from "@/hooks/use-models"
 
 /** How a count reads: what needs a hand is red, what is merely backed up is amber. */
 const BADGE_TONE: Record<NonNullable<NavItem["badge"]>, string> = {
@@ -26,26 +25,18 @@ const BADGE_NAME: Record<NonNullable<NavItem["badge"]>, string> = {
 const isOff = (v: unknown) => v === false || v === "off"
 
 /**
- * The nav items to leave out: Plugins and Models while their runtime is off
- * on this node *and* none exists. A runtime that is off with entities stored
- * keeps its item — those rows quarantine what names them, which is something
- * to go and look at. Plugins answer every route with 400 while off, which
- * reads as "none" here; models keep answering reads. Until both answers are
- * in, nothing is hidden, so the sidebar does not flicker an item away.
+ * The nav items to leave out: Plugins while the sandbox is off on this node
+ * *and* the head deploys none. One that is off with plugins deployed keeps
+ * its item — those quarantine what requires them, which is something to go
+ * and look at. Until the head has answered nothing is hidden, so the sidebar
+ * does not flicker an item away.
  */
 function useHiddenNavItems(): Set<string> {
   const capabilities = useEngineStatus().data?.capabilities
   const pluginsOff = isOff(capabilities?.plugins)
-  const modelsOff = isOff(capabilities?.models)
-  // The head says whether any plugin is deployed; it is read for the map and
-  // the palette anyway.
   const plugins = usePlugins()
-  const models = useModels({ limit: 1 }, modelsOff)
   const hidden = new Set<string>()
-  const none = (q: { data?: { data: unknown[] }; isError: boolean }) =>
-    q.isError || (q.data != null && q.data.data.length === 0)
   if (pluginsOff && !plugins.isLoading && plugins.data.length === 0) hidden.add("plugins")
-  if (modelsOff && none(models)) hidden.add("models")
   return hidden
 }
 

@@ -20,27 +20,24 @@ import { ChannelsPage } from "@/pages/channels"
 import { ChannelDetailPage } from "@/pages/channel-detail"
 import { WorkflowsPage } from "@/pages/workflows"
 import { WorkflowDetailPage } from "@/pages/workflow-detail"
-import { ConnectorsPage } from "@/pages/connectors"
-import { ConnectorDetailPage } from "@/pages/connector-detail"
-import { ConnectorFormPage } from "@/pages/connector-form"
 import { CircuitBreakersPage } from "@/pages/circuit-breakers"
 import { TracesPage } from "@/pages/traces"
 import { TraceDlqPage } from "@/pages/trace-dlq"
 import { TraceDetailPage } from "@/pages/trace-detail"
 import { AuditPage } from "@/pages/audit"
 import { ConsolePage } from "@/pages/console"
-import { PackagesPage } from "@/pages/packages"
 import { PluginsPage } from "@/pages/plugins"
 import { PluginDetailPage } from "@/pages/plugin-detail"
-import { ModelsPage } from "@/pages/models"
-import { ModelDetailPage } from "@/pages/model-detail"
-import { ModelFormPage } from "@/pages/model-form"
 import { SchedulesPage } from "@/pages/schedules"
 import { OccurrenceDetailPage } from "@/pages/occurrence-detail"
 import { EnginePage } from "@/pages/engine"
 import { CachesPage } from "@/pages/caches"
 import { DeploymentsPage } from "@/pages/deployments"
 import { DeploymentDetailPage } from "@/pages/deployment-detail"
+import { ConnectionsPage } from "@/pages/connections"
+import { ConnectionDetailPage } from "@/pages/connection-detail"
+import { ProviderPackagesPage } from "@/pages/provider-packages"
+import { ProviderPackageDetailPage } from "@/pages/provider-package-detail"
 import { NotFoundPage } from "@/pages/not-found"
 
 const queryClient = new QueryClient({
@@ -99,14 +96,18 @@ const router = createBrowserRouter(
       <Route path="plugins/new" element={<AuthoringRedirect to="/plugins" />} />
       <Route path="plugins/:id" element={<PluginDetailPage />} />
       <Route path="plugins/:id/edit" element={<AuthoringRedirect to="/plugins" />} />
-      <Route path="models" element={<ModelsPage />} />
-      <Route path="models/new" element={<ModelFormPage />} />
-      <Route path="models/:id" element={<ModelDetailPage />} />
-      <Route path="models/:id/edit" element={<ModelFormPage />} />
-      <Route path="connectors" element={<ConnectorsPage />} />
-      <Route path="connectors/new" element={<ConnectorFormPage />} />
-      <Route path="connectors/:id" element={<ConnectorDetailPage />} />
-      <Route path="connectors/:id/edit" element={<ConnectorFormPage />} />
+      <Route path="connections" element={<ConnectionsPage />} />
+      <Route path="connections/:id" element={<ConnectionDetailPage />} />
+      <Route path="provider-packages" element={<ProviderPackagesPage />} />
+      <Route path="provider-packages/:digest" element={<ProviderPackageDetailPage />} />
+      {/* 1.x surfaces 2.0 replaced: connectors became connections (their ids
+          were UUIDs, which name nothing now), models a provider behind a
+          connection, and package receipts the deployment history. */}
+      <Route path="connectors/*" element={<Navigate to="/connections" replace />} />
+      <Route path="connectors" element={<Navigate to="/connections" replace />} />
+      <Route path="models/*" element={<Navigate to="/connections" replace />} />
+      <Route path="models" element={<Navigate to="/connections" replace />} />
+      <Route path="packages" element={<Navigate to="/deployments" replace />} />
       <Route path="caches" element={<CachesPage />} />
       <Route path="circuit-breakers" element={<CircuitBreakersPage />} />
       <Route path="traces" element={<TracesPage />} />
@@ -116,7 +117,6 @@ const router = createBrowserRouter(
       <Route path="schedules/occurrences/:id" element={<OccurrenceDetailPage />} />
       <Route path="audit" element={<AuditPage />} />
       <Route path="console" element={<ConsolePage />} />
-      <Route path="packages" element={<PackagesPage />} />
       <Route path="engine" element={<EnginePage />} />
       {/* "Settings" until 2026-09-05: old links and bookmarks still land. */}
       <Route path="settings" element={<SettingsRedirect />} />

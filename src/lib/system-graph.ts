@@ -6,7 +6,14 @@ import {
   workflowConnectorRefs,
   type EntityIndex,
 } from "@/lib/topology"
-import type { ChannelProtocol, ChannelType, EntityStatus } from "@/api/types"
+import type { ChannelProtocol, ChannelType } from "@/api/types"
+
+/**
+ * 1.x's lifecycle, still drawn by the map's "lifecycle" colour mode. Every
+ * channel the head deploys serves, so it is always `active` in 2.0; phase 6
+ * replaces the mode with health (ok / load issue / quarantined).
+ */
+export type LifecycleStatus = "draft" | "active" | "archived"
 
 /**
  * The whole system as one graph, rather than one rooted walk per channel.
@@ -43,7 +50,7 @@ export interface SystemNode {
   channelId: string
   name: string
   description: string | null
-  status: EntityStatus
+  status: LifecycleStatus
   channelType: ChannelType
   protocol: ChannelProtocol
   route: string | null

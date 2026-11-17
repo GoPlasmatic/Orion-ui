@@ -1,6 +1,6 @@
 # Orion-ui 2.0: implementation plan
 
-Status: Phases 0–2 done on branch `v2` (2026-11-16), Phase 3 done (2026-11-17); Phase 5 deferred to 2.1 (D1 = A). Target: Orion `v2.0.0` (Orion `main` @ `1e58099f`, not yet tagged).
+Status: Phases 0–2 done on branch `v2` (2026-11-16), Phases 3–4 done (2026-11-17); Phase 5 deferred to 2.1 (D1 = A). Target: Orion `v2.0.0` (Orion `main` @ `1e58099f`, not yet tagged).
 
 ## Goal and definition of done
 
@@ -309,6 +309,45 @@ Rework rather than rewrite: keep the detail and lens components and replace thei
     - **revoke**: `POST …/revocations` with a reason; warn when a deployed connection uses this digest
   - The tier badge versus `edition` says why a Standard package can't be admitted on Community.
 - **Authoring tools** (S, optional for 2.0.0): a "Package studio" tab. Scaffold a provider package (`publisher, provider_id, kind, tier, version`), lint the files and show errors, pack it and show the digest. Read-only keys may use all three.
+
+**Phase 4 outcome (2026-11-17).** Done:
+- **Connections:**
+  - `api/connections.ts` and `hooks/use-connections.ts`. Every revision is read to the end (`fetchAllPages`, capped at 5,000 rows, with a notice when truncated) and grouped by id with the revision the head deploys (`lib/connections.ts::groupConnections`).
+  - A provider digest resolves against `provider_backends` and the stored packages (`resolveProvider`: the driver id or `publisher/provider@version`, plus a family for the map's hub icons).
+  - **List:** id with its quarantine, provider, the deployed revision (and a newer stored one), the revision count, what requires it, and the last probe.
+  - **Detail:**
+    - the revisions table (deployed badge, the deployments that carried each, per-revision probe);
+    - the selected revision's settings, its secret locators (scheme and locator, never a value) and its bindings;
+    - what requires it, its circuit breakers (with reset), and a compare between any two revisions.
+  - **Probe:** gated on `useCanMutate`. The result is held per revision for the session.
+- **Provider packages:**
+  - `api/connector-packages.ts` and `hooks/use-provider-packages.ts`.
+  - **List** (cursor-paged): publisher and provider, version, implementation, the tier against this node's edition, state, and the connections over each package.
+  - **Detail:** overview, admission (policy and fingerprint), the operations from `connector.json`, the inventory files, the manifest and distribution, admit, and revoke with a reason. Revoking warns about deployed connections over the package.
+  - **Upload** dialog: a folder or loose files; text is sent as text and binaries as `base64:`. It offers lint before upload, and admit-now with an optional lock.
+  - **Studio** tab: scaffold (publisher, provider, kind, tier, version) → files, lint, pack (with the digest), download, upload.
+- **Circuit breakers** moved to `api/circuit-breakers.ts` and `hooks/use-circuit-breakers.ts`.
+- **Connector links now point at connections.** A task's `connector`, a breaker key and `/health`'s failed loads all name a connection by id, so links need no lookup. This covers the map hubs (fed from `useConnections` through the entity index), incidents, load issues, the trace step detail, the palette and the breakers page.
+- **Old routes:** `/connectors/*` and `/models/*` redirect to `/connections`; `/packages` redirects to `/deployments`. The nav gains a Connect section; Govern drops Packages.
+- **Deleted:**
+  - the connector, model and package pages and their API modules and hooks;
+  - the connector config editor and test dialog;
+  - `config-field`, `config-editor-shell`, `lifecycle-actions`, `version-history`, `version-compare`, `import-dialog`, `status-badge`, `validation-results`, `tags-input`, `form-error`, `unsaved-changes-dialog` and `use-unsaved-changes`;
+  - `model-manifest`, `usePagination`, `REGISTRY_LIMIT`, `more-actions` and `Switch`;
+  - every 1.x type (connector, model, package receipt, `EntityStatus`, import, validate, status change, `PaginatedResponse`). The map's lifecycle colouring keeps a local `LifecycleStatus` until Phase 6.
+- **The contract ratchet is complete:** `PENDING_V2` is empty, and every function in the API layer is checked against the 2.0 spec and its envelope.
+- **Fixed (client):** a successful plan or authoring call no longer marks a read-only session as full access (`auth.ts::readOnlyMayCall`).
+- **Found (server, Orion 2.0.0 @ `1e58099f`):** a read-only key is refused (403) `deployment-plans` and `authoring/{scaffold,lint,pack}`, though `read_only_may_call` lists them. The admin router is mounted with `.nest("/api/v2/admin", …)`, so the middleware sees the path with that prefix stripped and never matches. The unit test passes full paths, and no integration test sends a read-only plan. The OpenAPI spec also lists no 403 for the authoring routes. The UI reports the server's 403 like any refusal, and the studio e2e test uses a full-access key.
+- **Departures:**
+  - No "new connection revision" form (D1 = A; it would come with Phase 5).
+  - Probes are not stored by the server, so "last probe" lasts the session.
+- **E2E** (`e2e/connect.spec.ts`, 6 tests; the seed now also deploys `e2e-cache` over the in-memory cache driver):
+  - the grouped connection list;
+  - a healthy probe;
+  - a read-only key refused a probe;
+  - studio scaffold, lint and pack;
+  - upload with admission, then revoke;
+  - the old routes.
 
 ### Phase 5: Change sets: author and apply in the browser (L, only if D1 = B)
 

@@ -27,7 +27,8 @@ import {
 import { edgeKey, type ConnectorChannelTraffic } from "@/hooks/use-ops-metrics"
 import type { ChannelTraffic } from "@/hooks/use-metrics"
 import { functionIndex } from "@/lib/function-effects"
-import type { Channel, Connector, FunctionSchema, Workflow } from "@/api/types"
+import type { Channel, FunctionSchema, Workflow } from "@/api/types"
+import type { ConnectorRef } from "@/lib/topology"
 
 function channel(name: string, over: Partial<Channel> = {}): Channel {
   return {
@@ -76,20 +77,8 @@ function workflow(id: string, tasks: unknown[]): Workflow {
   } as unknown as Workflow
 }
 
-function connector(name: string, over: Partial<Connector> = {}): Connector {
-  return {
-    id: `conn-${name}`,
-    name,
-    connector_type: "db",
-    config: {},
-    config_json: "{}",
-    enabled: true,
-    tags: [],
-    content_hash: "sha256:z",
-    created_at: "",
-    updated_at: "",
-    ...over,
-  } as Connector
+function connector(name: string, over: Partial<ConnectorRef> = {}): ConnectorRef {
+  return { id: name, name, connector_type: "db", enabled: true, ...over }
 }
 
 /** Domain → [thing, connectors…] */

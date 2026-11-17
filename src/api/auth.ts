@@ -91,6 +91,16 @@ export function isGuardedPath(url: string): boolean {
 }
 
 /**
+ * Mutating requests a read-only key is *also* allowed — planning a deployment
+ * and the authoring tools, which store nothing. Their success says nothing
+ * about the key's access, so it must not mark the session full.
+ */
+export function readOnlyMayCall(url: string): boolean {
+  const path = url.split("?")[0]
+  return path === "/api/v2/admin/deployment-plans" || path.startsWith("/api/v2/admin/authoring/")
+}
+
+/**
  * Paths the admin key may travel to: the guarded ones, and `/health` for its
  * admin-only detail. **Never the data plane** — a channel is called the way a
  * real caller would call it, with only the headers the console was given; the

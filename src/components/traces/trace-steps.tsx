@@ -4,12 +4,10 @@ import type { Channel, TraceDetail } from "@/api/types"
 import { useWorkflow } from "@/hooks/use-workflows"
 import { useWorkflowCost } from "@/hooks/use-ops-metrics"
 import { useFunctionIndex } from "@/hooks/use-functions"
-import { useConnectors } from "@/hooks/use-connectors"
 import { stepEffect } from "@/lib/function-effects"
 import { buildTimeline, notReached, stepDataGap, traceWorkflowId, type StepDataGap } from "@/lib/trace-timeline"
 import { loopBinding } from "@/lib/workflow-steps"
 import { useUrlFilters } from "@/lib/use-url-filters"
-import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Callout } from "@/components/ui/callout"
 import { TraceTimeline } from "./trace-timeline"
@@ -31,7 +29,6 @@ export function TraceSteps({ trace, channel }: { trace: TraceDetail; channel: Ch
   const timeline = useMemo(() => buildTimeline(trace, workflow), [trace, workflow])
   const cost = useWorkflowCost(workflowId)
   const index = useFunctionIndex()
-  const connectors = useConnectors({ limit: REGISTRY_LIMIT }, !!timeline)
   const { values, set } = useUrlFilters(STEP_KEYS)
 
   const effects = useMemo(
@@ -48,10 +45,6 @@ export function TraceSteps({ trace, channel }: { trace: TraceDetail; channel: Ch
       : (timeline.failed ?? timeline.dominant)?.index ?? null
   const selected = selectedIndex != null ? timeline.steps[selectedIndex] : null
   const selectedEffect = selected ? (effects[selected.index] ?? null) : null
-  const connectorName = selectedEffect?.resource?.kind === "connector" ? selectedEffect.resource.name : null
-  const connectorId = connectorName
-    ? (connectors.data?.data.find((c) => c.name === connectorName)?.id ?? null)
-    : null
 
   const firstDropped = timeline.truncated ? timeline.steps.find((s) => s.outcome !== "skipped" && !s.hasSnapshot) : undefined
   const missed = trace.status === "failed" || trace.status === "completed" ? notReached(timeline, workflow) : []
@@ -99,7 +92,6 @@ export function TraceSteps({ trace, channel }: { trace: TraceDetail; channel: Ch
             index={index}
             trace={trace}
             workflowId={workflowId}
-            connectorId={connectorId}
           />
         )}
       </CardContent>

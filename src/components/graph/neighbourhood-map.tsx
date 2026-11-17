@@ -122,7 +122,7 @@ export function NeighbourhoodMap({ kind, id }: { kind: NeighbourhoodKind; id: st
                 if (!h?.known) return
                 navigate(
                   hub.kind === "connector"
-                    ? `/connectors/${h.refId}`
+                    ? `/connections/${encodeURIComponent(h.refId)}`
                     : `/${hub.kind}s/${encodeURIComponent(h.refId)}`,
                 )
                 return

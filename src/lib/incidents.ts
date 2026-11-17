@@ -471,7 +471,6 @@ export interface IncidentInput {
   live: LiveSignals
   /** channel name → id, for links when the signal did not carry one. */
   channelIdByName?: ReadonlyMap<string, string>
-  connectorIdByName?: ReadonlyMap<string, string>
 }
 
 const COMPONENT_DETAIL: Record<string, string> = {
@@ -513,7 +512,6 @@ function signal(spec: SignalSpec): Incident {
 interface Lookups {
   now: number
   channelIdByName: ReadonlyMap<string, string>
-  connectorIdByName: ReadonlyMap<string, string>
 }
 
 function channelRef(name: string, l: Lookups, channelId?: string | null): IncidentChannel {
@@ -605,18 +603,18 @@ function quarantineIncidents(list: ChannelLoadIssue[], l: Lookups): Incident[] {
   )
 }
 
-function loadIncidents(live: LiveSignals, l: Lookups): Incident[] {
+function loadIncidents(live: LiveSignals): Incident[] {
   return [
     ...(live.connectors ?? []).map((c) => {
-      const page = entityRoute("connector", c.connector_id || l.connectorIdByName.get(c.connector))
+      const page = entityRoute("connector", c.connector_id || c.connector)
       return signal({
         key: `connector:${c.connector}`,
         kind: "connector",
         severity: 1,
         tone: "destructive",
-        title: `Connector failed to load: ${c.connector}`,
+        title: `Connection failed to load: ${c.connector}`,
         detail: c.reason ? `${c.stage}: ${c.reason}` : "Every task using it is failing",
-        to: page ? `${page}?test=1` : "/connectors",
+        to: page ?? "/connections",
       })
     }),
     ...(live.plugins ?? []).map((p) =>
@@ -638,7 +636,7 @@ function loadIncidents(live: LiveSignals, l: Lookups): Incident[] {
         tone: "destructive",
         title: `Model not serving: ${m.model} v${m.version}`,
         detail: `${m.stage}: ${m.reason}`,
-        to: entityRoute("model", m.model) ?? "/models",
+        to: "/connections",
       }),
     ),
   ]
@@ -793,9 +791,8 @@ export function buildIncidents({
   evidence,
   live,
   channelIdByName = new Map(),
-  connectorIdByName = new Map(),
 }: IncidentInput): Incident[] {
-  const l: Lookups = { now, channelIdByName, connectorIdByName }
+  const l: Lookups = { now, channelIdByName }
   const failingNow = new Set(
     (live.traffic?.channels ?? []).filter((c) => c.failed > 0 && isFailing(c.errorPct)).map((c) => c.channel),
   )
@@ -803,7 +800,7 @@ export function buildIncidents({
   return sortIncidents([
     ...failures.incidents,
     ...quarantineIncidents(live.quarantined ?? [], l),
-    ...loadIncidents(live, l),
+    ...loadIncidents(live),
     ...failingIncidents(live.traffic, failures.covered, l),
     ...componentIncidents(live.components ?? []),
     ...taskIncidents(live.tasks ?? []),

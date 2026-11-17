@@ -1,5 +1,5 @@
 import { useDocsServed, useEngineStatus } from "@/hooks/use-engine"
-import { useCircuitBreakers } from "@/hooks/use-connectors"
+import { useCircuitBreakers } from "@/hooks/use-circuit-breakers"
 import { useBackups, useCreateBackup } from "@/hooks/use-backup"
 import { useHealth } from "@/hooks/use-health"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"

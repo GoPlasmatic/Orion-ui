@@ -22,18 +22,13 @@ import { ThemeProvider } from "@/lib/theme-provider"
 import { TimeZoneProvider } from "@/lib/time-zone-provider"
 import type {
   AuditLog,
-  ConnectorListItem,
-  Model,
-  PaginatedResponse,
+  ConnectionRevision,
+  ConnectorPackageSummary,
+  Page,
   Trace,
 } from "@/api/types"
 
-const page = <T,>(rows: T[]): PaginatedResponse<T> => ({
-  data: rows,
-  total: rows.length,
-  limit: 25,
-  offset: 0,
-})
+const page = <T,>(rows: T[]): Page<T> => ({ data: rows, total: rows.length, limit: 25 })
 
 const auditRows: AuditLog[] = [
   {
@@ -57,19 +52,41 @@ const channelRows = [
   }),
 ]
 
-const connectorRows: ConnectorListItem[] = [
+const connectionRows: ConnectionRevision[] = [
   {
-    id: "co-1",
-    name: "ledger-http",
-    connector_type: "http",
-    config: {},
-    config_json: "{}",
-    enabled: true,
-    tags: [],
-    content_hash: "sha256:bbb",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-02T00:00:00Z",
-    load_status: "loaded",
+    connection_id: "ledger-http",
+    revision: 2,
+    provider_digest: "sha256:http",
+    public_config: { url: "https://ledger.example" },
+    secret_locators: { "auth.token": "env://LEDGER_TOKEN" },
+    bindings: {},
+    configuration_digest: "sha256:cfg2",
+  },
+  {
+    connection_id: "ledger-http",
+    revision: 1,
+    provider_digest: "sha256:http",
+    public_config: { url: "https://old.example" },
+    secret_locators: {},
+    bindings: {},
+    configuration_digest: "sha256:cfg1",
+  },
+]
+
+const packageRows: ConnectorPackageSummary[] = [
+  {
+    publisher: "acme",
+    provider_id: "acme.echo",
+    version: "1.2.0",
+    digest: "sha256:feb3512751903c850e3b68800acf77c20e00ce6046c673a00b0c58a67a862f3f",
+    implementation: "workflow",
+    tier: "standard",
+    admitted: false,
+    revoked: false,
+    artifact_state: "active",
+    manifest: {},
+    distribution: {},
+    inventory: {},
   },
 ]
 
@@ -98,56 +115,46 @@ const workflowRows = [
   }),
 ]
 
-const modelRows: Model[] = [
-  {
-    model_id: "ada.c4-tiny",
-    version: 2,
-    status: "active",
-    digest: "sha256:ddd",
-    abi: "orion:model@1.0.0",
-    model_version: "0.1.0",
-    format: "onnx",
-    manifest: { abi: "orion:model@1.0.0", name: "ada.c4-tiny" },
-    inputs: ["board"],
-    outputs: ["policy"],
-    artifact: { connector: "models", key: "c4-tiny.onnx", digest: "sha256:ddd", size: 6144 },
-    admission: { state: "passed", node: "node-a", at: "2026-01-02T00:00:00Z" },
-    stats: { parameters: 1479, nodes: 12, opset: 17, artifact_bytes: 6144, probe_ms: 0.0055 },
-    tags: ["games"],
-    content_hash: "sha256:eee",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-02T00:00:00Z",
-  },
-]
-
 vi.mock("@/api/audit", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/audit")>()
   return { ...mod, auditApi: { ...mod.auditApi, list: async () => page(auditRows) } }
 })
 vi.mock("@/api/deployments", async () => (await import("@/test/deployed-api")).deploymentsModule())
 vi.mock("@/api/definitions", async () => (await import("@/test/deployed-api")).definitionsModule())
-vi.mock("@/api/connectors", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/connectors")>()
+vi.mock("@/api/connections", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/api/connections")>()
+  return { ...mod, connectionsApi: { ...mod.connectionsApi, list: async () => ({ data: connectionRows, limit: 200 }) } }
+})
+vi.mock("@/api/connector-packages", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/api/connector-packages")>()
   return {
     ...mod,
-    connectorsApi: { ...mod.connectorsApi, list: async () => page(connectorRows) },
+    connectorPackagesApi: { ...mod.connectorPackagesApi, list: async () => ({ data: packageRows, limit: 50 }) },
+  }
+})
+vi.mock("@/api/runtime", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/api/runtime")>()
+  return {
+    ...mod,
+    runtimeApi: {
+      capabilities: async () => ({
+        edition: "community",
+        provider_backends: [{ kind: "rust", driver_id: "org.orion.http", package_digest: "sha256:http" }],
+        node_status: { applied_revision: 1, quarantined_entities: [] },
+      }),
+    },
   }
 })
 vi.mock("@/api/traces", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/traces")>()
   return { ...mod, tracesApi: { ...mod.tracesApi, list: async () => page(traceRows) } }
 })
-vi.mock("@/api/models", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/models")>()
-  return { ...mod, modelsApi: { ...mod.modelsApi, list: async () => page(modelRows) } }
-})
-
 import { AuditPage } from "@/pages/audit"
 import { ChannelsPage } from "@/pages/channels"
-import { ConnectorsPage } from "@/pages/connectors"
+import { ConnectionsPage } from "@/pages/connections"
 import { TracesPage } from "@/pages/traces"
 import { WorkflowsPage } from "@/pages/workflows"
-import { ModelsPage } from "@/pages/models"
+import { ProviderPackagesPage } from "@/pages/provider-packages"
 
 function renderPage(ui: ReactElement) {
   const queryClient = new QueryClient({
@@ -193,11 +200,14 @@ describe("list page tables", () => {
     expect(screen.getByText("r7")).toBeInTheDocument()
   })
 
-  it("connectors renders headers and row cells", async () => {
-    renderPage(<ConnectorsPage />)
+  it("connections renders one row per connection over its revisions", async () => {
+    renderPage(<ConnectionsPage />)
     expect(await screen.findByText("ledger-http")).toBeInTheDocument()
-    expectHeaders(["Name", "Type", "Status", "Load", "Updated"])
-    expect(screen.getByText("Loaded")).toBeInTheDocument()
+    expectHeaders(["Connection", "Provider", "Deployed", "Revisions", "Required by", "Last probe"])
+    // Two revisions, one row; the provider digest resolves to the built-in driver.
+    expect(screen.getAllByText("ledger-http")).toHaveLength(1)
+    expect(await screen.findByText("org.orion.http")).toBeInTheDocument()
+    expect(screen.getByText("not deployed")).toBeInTheDocument()
   })
 
   it("traces renders headers and row cells", async () => {
@@ -217,13 +227,12 @@ describe("list page tables", () => {
     expect(screen.getByText("payments-intake")).toBeInTheDocument()
   })
 
-  it("models renders headers and row cells", async () => {
-    renderPage(<ModelsPage />)
-    expect(await screen.findByText("ada.c4-tiny")).toBeInTheDocument()
-    expectHeaders(["Model", "Admission", "Parameters", "Status", "This node", "Version", "Updated"])
-    // The verdict is the column no other entity has, and the stats are only
-    // there once it has passed — so both are real assertions, not decoration.
-    expect(screen.getByText("passed")).toBeInTheDocument()
-    expect(screen.getByText("1,479")).toBeInTheDocument()
+  it("provider packages renders headers and row cells", async () => {
+    renderPage(<ProviderPackagesPage />)
+    expect(await screen.findByText("acme.echo")).toBeInTheDocument()
+    expectHeaders(["Provider", "Version", "Implementation", "Tier", "State", "Connections", "Digest"])
+    expect(screen.getByText("not admitted")).toBeInTheDocument()
+    // A Standard package on a Community node: stored, not admissible here.
+    expect(await screen.findByText(/needs edition/)).toBeInTheDocument()
   })
 })

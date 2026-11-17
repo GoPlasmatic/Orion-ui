@@ -140,7 +140,6 @@ describe("StepDetail", () => {
           index={index}
           trace={TRACE}
           workflowId="soma-clock-pair-run"
-          connectorId="c-cache"
         />
       </MemoryRouter>,
     )
@@ -161,7 +160,7 @@ describe("StepDetail", () => {
       "href",
       "/traces?channel=soma-clock-pair&status=failed",
     )
-    expect(screen.getByRole("link", { name: /Open soma-cache/ })).toHaveAttribute("href", "/connectors/c-cache")
+    expect(screen.getByRole("link", { name: /Open soma-cache/ })).toHaveAttribute("href", "/connections/soma-cache")
   })
 
   it("shows a step's writes and expands their values", () => {
@@ -184,7 +183,6 @@ describe("StepDetail", () => {
           index={index}
           trace={TRACE}
           workflowId={null}
-          connectorId={null}
         />
       </MemoryRouter>,
     )
