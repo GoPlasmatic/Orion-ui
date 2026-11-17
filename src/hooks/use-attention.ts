@@ -113,7 +113,7 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
   const { data: runtime } = useRuntimeCapabilities()
   const { data: breakers } = useCircuitBreakers({ refetchInterval: poll })
   const traffic = useChannelTraffic(INCIDENT_WINDOW)
-  const { data: channelList } = useChannels({ limit: REGISTRY_LIMIT })
+  const { data: channelList } = useChannels()
   const { data: connectorList } = useConnectors({ limit: REGISTRY_LIMIT })
   const { data: failedTraces } = useTraces(
     { limit: FAILED_TRACE_PAGE, status: "failed" },
@@ -139,8 +139,8 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
   )
 
   const channelIdByName = useMemo(
-    () => new Map((channelList?.data ?? []).map((c) => [c.name, c.channel_id])),
-    [channelList?.data],
+    () => new Map(channelList.map((c) => [c.name, c.channel_id])),
+    [channelList],
   )
   const connectorIdByName = useMemo(
     () => new Map((connectorList?.data ?? []).map((c) => [c.name, c.id])),

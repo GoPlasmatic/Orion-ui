@@ -8,7 +8,6 @@ import { useTrace } from "@/hooks/use-traces"
 import { useLastTraceInput } from "@/hooks/use-last-trace-input"
 import { readStorageJson, writeStorageJson } from "@/lib/storage"
 import { useUrlFilters } from "@/lib/use-url-filters"
-import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { traceStatusBadgeClass } from "@/lib/status"
 import type {
   AsyncSubmitResponse,
@@ -290,7 +289,7 @@ export function ConsolePage() {
   const handed = (location.state as { payload?: unknown } | null)?.payload
   const initialPayload =
     handed !== undefined && handed !== null ? JSON.stringify(handed, null, 2) : undefined
-  const { data: channels, isLoading } = useChannels({ limit: REGISTRY_LIMIT })
+  const { data: channels, isLoading } = useChannels()
 
   if (requested.channel && isLoading) {
     return (
@@ -303,7 +302,7 @@ export function ConsolePage() {
 
   return (
     <ConsoleForm
-      channels={channels?.data ?? []}
+      channels={channels}
       initialChannel={requested.channel}
       initialPayload={initialPayload}
       initialMethod={requested.method || undefined}
@@ -546,7 +545,7 @@ function ConsoleForm({
                 <option value="">Select a channel...</option>
                 {channelList.map((c) => (
                   <option key={c.channel_id} value={c.name}>
-                    {c.name} ({c.channel_type}/{c.protocol}{c.status !== "active" ? ` · ${c.status}` : ""})
+                    {c.name} ({c.channel_type}/{c.protocol})
                   </option>
                 ))}
               </Select>

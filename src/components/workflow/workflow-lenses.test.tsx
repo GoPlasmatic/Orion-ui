@@ -9,35 +9,20 @@ import { useState } from "react"
 import { render, screen, cleanup, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, useLocation } from "react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import type { Channel, Connector, PaginatedResponse } from "@/api/types"
-import { clockPair, clockPairCatalogue, clockPairCost, clockPairDeps, failedRun } from "@/lib/workflow-lens.fixture"
+import { beforeEach } from "vitest"
+import type { Channel } from "@/api/types"
+import { clockPair, clockPairCatalogue, clockPairCost, failedRun } from "@/lib/workflow-lens.fixture"
+import { deployedChannel, deployedPlugin, setDeployed } from "@/test/deployed-api"
 
-const page = <T,>(data: T[]): PaginatedResponse<T> => ({ data, total: data.length, limit: 1000, offset: 0 })
-
-const channel = {
+const channel: Channel = deployedChannel({
   channel_id: "c-1",
   name: "soma-clock-pair",
-  description: null,
   channel_type: "async",
   protocol: "cron",
-  route_pattern: null,
-  methods: null,
-  topic: null,
-  consumer_group: null,
   transport_config: { schedule: "*/15 * * * * *" },
   workflow_id: "soma-clock-pair-run",
   config: { tracing: { task_details: true, errors_only: true } },
-  status: "active",
-  version: 1,
-  priority: 0,
-  tags: [],
-  content_hash: "sha256:01",
-  created_at: "2026-10-01T00:00:00",
-  updated_at: "2026-10-01T00:00:00",
-} as unknown as Channel
-
-const connector = (id: string, name: string, connector_type: string) =>
-  ({ id, name, connector_type, config: {}, config_json: "{}", enabled: true, tags: [], content_hash: "", created_at: "", updated_at: "" }) as unknown as Connector
+})
 
 // A stand-in for the dataflow-ui visualizer with its starting state: nothing
 // selected (an empty pane) unless the host asks for `initialSelection`.
@@ -59,37 +44,9 @@ vi.mock("@/hooks/use-ops-metrics", () => {
   const cost = { ...clockPairCost, state: "live", workflow: "soma-clock-pair-run", taskMsPerRun: 124.9 }
   return { useWorkflowCost: () => cost }
 })
-vi.mock("@/api/workflows", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/workflows")>()
-  return {
-    ...mod,
-    workflowsApi: { ...mod.workflowsApi, list: async () => page([clockPair]), dependencies: async () => clockPairDeps },
-  }
-})
-vi.mock("@/api/channels", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/channels")>()
-  return { ...mod, channelsApi: { ...mod.channelsApi, list: async () => page([channel]) } }
-})
-vi.mock("@/api/connectors", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/connectors")>()
-  return {
-    ...mod,
-    connectorsApi: {
-      ...mod.connectorsApi,
-      list: async () => page([connector("k-1", "soma-db", "db"), connector("k-2", "soma-cache", "cache")]),
-    },
-  }
-})
-vi.mock("@/api/plugins", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/plugins")>()
-  return {
-    ...mod,
-    pluginsApi: {
-      ...mod.pluginsApi,
-      dependencies: async () => ({ plugin_id: "tb.pairing", version: 2, functions: ["tb.pairing.pair"], workflows: ["soma-clock-pair-run"] }),
-    },
-  }
-})
+// The head: this workflow, its cron channel, the plugin and the two connections it requires.
+vi.mock("@/api/deployments", async () => (await import("@/test/deployed-api")).deploymentsModule())
+vi.mock("@/api/definitions", async () => (await import("@/test/deployed-api")).definitionsModule())
 vi.mock("@/api/traces", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/traces")>()
   const row = {
@@ -139,6 +96,14 @@ function renderAt(url: string, runsOn: Channel[] = [channel]) {
 }
 
 afterEach(cleanup)
+beforeEach(() =>
+  setDeployed({
+    channels: [channel],
+    workflows: [clockPair],
+    plugins: [deployedPlugin({ plugin_id: "tb.pairing", revision: 2, functions: ["tb.pairing.pair"] })],
+    connections: ["soma-db", "soma-cache"],
+  }),
+)
 
 describe("WorkflowLenses", () => {
   it("opens on Structure, with the whole pipeline selected rather than an empty pane", async () => {

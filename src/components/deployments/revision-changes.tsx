@@ -9,7 +9,6 @@ import { RolloutBar } from "@/components/deployments/rollout-bar"
 import {
   diffManifests,
   diffSentence,
-  memberKey,
   refLabel,
   shortDigest,
   summarizeDiff,
@@ -69,7 +68,7 @@ export function RevisionChanges({
           </TableHeader>
           <TableBody>
             {changes.map((c) => {
-              const key = memberKey(c)
+              const key = c.key
               const isOpen = open === key
               return (
                 <Fragment key={key}>

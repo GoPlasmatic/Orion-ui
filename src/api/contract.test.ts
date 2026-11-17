@@ -69,7 +69,6 @@ vi.mock("@/api/client", async (importOriginal) => {
   }
 })
 
-const { workflowsApi } = await import("@/api/workflows")
 const { channelsApi } = await import("@/api/channels")
 const { connectorsApi } = await import("@/api/connectors")
 const { engineApi } = await import("@/api/engine")
@@ -80,7 +79,6 @@ const { tracesApi } = await import("@/api/traces")
 const { dataApi } = await import("@/api/data")
 const { traceDlqApi } = await import("@/api/trace-dlq")
 const { packagesApi } = await import("@/api/packages")
-const { pluginsApi } = await import("@/api/plugins")
 const { cronApi } = await import("@/api/cron")
 const { cacheApi } = await import("@/api/cache")
 const { modelsApi } = await import("@/api/models")
@@ -164,59 +162,10 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
   },
   definitionsApi: {
     get: () => definitionsApi.get("sha256:00"),
-  },
-  workflowsApi: {
-    list: () => workflowsApi.list({ limit: 10, offset: 0, status: "active", tag: "t" }),
-    get: () => workflowsApi.get("wf-1"),
-    create: () => workflowsApi.create({ name: "wf", tasks: [] }),
-    update: () => workflowsApi.update("wf-1", { name: "wf" }),
-    delete: () => workflowsApi.delete("wf-1"),
-    changeStatus: () => workflowsApi.changeStatus("wf-1", { status: "active" }, { reload: "defer" }),
-    changeStatusDryRun: () => workflowsApi.changeStatusDryRun("wf-1", { status: "active" }),
-    setRollout: () =>
-      workflowsApi.setRollout("wf-1", { rollout_percentage: 50 }, { reload: "defer" }),
-    listVersions: () => workflowsApi.listVersions("wf-1", { limit: 10, offset: 0 }),
-    createVersion: () => workflowsApi.createVersion("wf-1"),
-    test: () => workflowsApi.test("wf-1", { data: {} }),
-    validate: () => workflowsApi.validate({ name: "wf", tasks: [] }),
-    dependencies: () => workflowsApi.dependencies("wf-1"),
-    import: () => workflowsApi.import([], { dryRun: true, onConflict: "new_version" }),
-    export: () => workflowsApi.export({ status: "active", tag: "t" }),
+    test: () => definitionsApi.test({ definition: { name: "w", tasks: [] }, data: {} }),
   },
   channelsApi: {
-    list: () =>
-      channelsApi.list({
-        limit: 10,
-        offset: 0,
-        status: "active",
-        channel_type: "sync",
-        protocol: "rest",
-        tag: "t",
-        sort_by: "name",
-        sort_order: "asc",
-      }),
-    get: () => channelsApi.get("ch-1"),
-    create: () => channelsApi.create({ name: "ch", channel_type: "sync", protocol: "rest" }),
-    update: () => channelsApi.update("ch-1", { name: "ch" }),
-    delete: () => channelsApi.delete("ch-1"),
-    validate: () => channelsApi.validate({ name: "ch", channel_type: "sync", protocol: "rest" }),
-    changeStatus: () => channelsApi.changeStatus("ch-1", { status: "active" }, { reload: "defer" }),
-    changeStatusDryRun: () => channelsApi.changeStatusDryRun("ch-1", { status: "active" }),
-    listVersions: () => channelsApi.listVersions("ch-1", { limit: 10, offset: 0 }),
-    createVersion: () => channelsApi.createVersion("ch-1"),
     trigger: () => channelsApi.trigger("ch-1"),
-    import: () => channelsApi.import([], { dryRun: true, onConflict: "skip" }),
-    export: () =>
-      channelsApi.export({
-        status: "active",
-        channel_type: "sync",
-        protocol: "rest",
-        tag: "t",
-        limit: 10,
-        offset: 0,
-        sort_by: "name",
-        sort_order: "asc",
-      }),
   },
   connectorsApi: {
     list: () =>
@@ -283,39 +232,6 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
     // `current` flag turns into is checked against the spec like any other.
     "list?current": () => packagesApi.list({ limit: 10, offset: 0, current: true }),
     get: () => packagesApi.get("payments"),
-  },
-  pluginsApi: {
-    list: () =>
-      pluginsApi.list({
-        limit: 10,
-        offset: 0,
-        status: "active",
-        tag: "t",
-        sort_by: "plugin_id",
-        sort_order: "asc",
-      }),
-    get: () => pluginsApi.get("acme.codec"),
-    create: () => pluginsApi.create({ manifest: 'abi = "orion:plugin@1.0.0"', component: "AA==" }),
-    update: () => pluginsApi.update("acme.codec", { tags: ["t"] }),
-    delete: () => pluginsApi.delete("acme.codec"),
-    validate: () => pluginsApi.validate({ manifest: {}, digest: "sha256:0" }),
-    changeStatus: () =>
-      pluginsApi.changeStatus("acme.codec", { status: "active" }, { reload: "defer" }),
-    changeStatusDryRun: () => pluginsApi.changeStatusDryRun("acme.codec", { status: "active" }),
-    listVersions: () => pluginsApi.listVersions("acme.codec", { limit: 10, offset: 0 }),
-    createVersion: () => pluginsApi.createVersion("acme.codec"),
-    dependencies: () => pluginsApi.dependencies("acme.codec"),
-    import: () => pluginsApi.import([], { dryRun: true, onConflict: "new_version" }),
-    export: () =>
-      pluginsApi.export({
-        status: "active",
-        tag: "t",
-        limit: 10,
-        offset: 0,
-        sort_by: "plugin_id",
-        sort_order: "asc",
-        include_artifacts: true,
-      }),
   },
   cacheApi: {
     invalidateNamespace: () => cacheApi.invalidateNamespace("posts"),
@@ -388,33 +304,6 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
  * connections. Each entry must still fail; remove it when it is ported.
  */
 const PENDING_V2 = new Set<string>([
-  "workflowsApi.list",
-  "workflowsApi.get",
-  "workflowsApi.create",
-  "workflowsApi.update",
-  "workflowsApi.delete",
-  "workflowsApi.changeStatus",
-  "workflowsApi.changeStatusDryRun",
-  "workflowsApi.setRollout",
-  "workflowsApi.listVersions",
-  "workflowsApi.createVersion",
-  "workflowsApi.test",
-  "workflowsApi.validate",
-  "workflowsApi.dependencies",
-  "workflowsApi.import",
-  "workflowsApi.export",
-  "channelsApi.list",
-  "channelsApi.get",
-  "channelsApi.create",
-  "channelsApi.update",
-  "channelsApi.delete",
-  "channelsApi.validate",
-  "channelsApi.changeStatus",
-  "channelsApi.changeStatusDryRun",
-  "channelsApi.listVersions",
-  "channelsApi.createVersion",
-  "channelsApi.import",
-  "channelsApi.export",
   "connectorsApi.list",
   "connectorsApi.get",
   "connectorsApi.create",
@@ -427,19 +316,6 @@ const PENDING_V2 = new Set<string>([
   "packagesApi.list",
   "packagesApi.list?current",
   "packagesApi.get",
-  "pluginsApi.list",
-  "pluginsApi.get",
-  "pluginsApi.create",
-  "pluginsApi.update",
-  "pluginsApi.delete",
-  "pluginsApi.validate",
-  "pluginsApi.changeStatus",
-  "pluginsApi.changeStatusDryRun",
-  "pluginsApi.listVersions",
-  "pluginsApi.createVersion",
-  "pluginsApi.dependencies",
-  "pluginsApi.import",
-  "pluginsApi.export",
   "modelsApi.list",
   "modelsApi.get",
   "modelsApi.create",
@@ -457,7 +333,6 @@ const PENDING_V2 = new Set<string>([
 ])
 
 const MODULES: Record<string, object> = {
-  workflowsApi,
   channelsApi,
   connectorsApi,
   engineApi,
@@ -467,7 +342,6 @@ const MODULES: Record<string, object> = {
   tracesApi,
   traceDlqApi,
   packagesApi,
-  pluginsApi,
   cronApi,
   cacheApi,
   modelsApi,

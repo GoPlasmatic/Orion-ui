@@ -15,7 +15,6 @@ import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter
 import { InvalidateNamespaceButton } from "@/components/admin/invalidate-namespace"
 import { cacheNamespaces, hitRatio, lintNamespace, type CacheNamespace } from "@/lib/cache-namespaces"
 import { useUrlFilters } from "@/lib/use-url-filters"
-import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { cn, plural } from "@/lib/utils"
 import { formatPct } from "@/lib/traffic-encoding"
 import { metricsShort } from "@/lib/metrics-state"
@@ -37,9 +36,9 @@ const SHOWN = 4
  */
 export function CachesPage() {
   const { values, set } = useUrlFilters(KEYS)
-  const channelsQuery = useChannels({ limit: REGISTRY_LIMIT })
+  const channelsQuery = useChannels()
   const cache = useCacheHitsByChannel()
-  const rows = useMemo(() => cacheNamespaces(channelsQuery.data?.data ?? []), [channelsQuery.data])
+  const rows = useMemo(() => cacheNamespaces(channelsQuery.data), [channelsQuery.data])
 
   const q = values.q.trim().toLowerCase()
   const shown = q ? rows.filter((r) => r.namespace.includes(q) || r.channels.some((c) => c.name.toLowerCase().includes(q))) : rows
@@ -62,7 +61,7 @@ export function CachesPage() {
 
       {channelsQuery.error ? (
         <ErrorState
-          title="Failed to load the channel registry"
+          title="Failed to read the deployed channels"
           error={channelsQuery.error}
           onRetry={() => channelsQuery.refetch()}
         />
@@ -222,14 +221,14 @@ function NamespaceRow({
           {visible.map((c) => (
             <Link
               key={c.channel_id}
-              to={`/channels/${c.channel_id}`}
-              title={`${c.name} · ${c.status}${c.cacheEnabled ? "" : " · cache off"}`}
+              to={`/channels/${encodeURIComponent(c.channel_id)}`}
+              title={`${c.name}${c.cacheEnabled ? "" : " · cache off"}`}
             >
               <Badge
                 variant="outline"
                 className={cn(
                   "font-mono text-xs hover:bg-accent",
-                  (c.status !== "active" || !c.cacheEnabled) && "border-dashed text-muted-foreground"
+                  !c.cacheEnabled && "border-dashed text-muted-foreground"
                 )}
               >
                 {c.name}

@@ -10,7 +10,7 @@ import {
   formatOps,
   insightText,
   lensSections,
-  mergeServerResources,
+  mergeRequiredResources,
   parseLens,
   resourceColumns,
   runInsights,
@@ -19,7 +19,7 @@ import {
   taskRows,
   type LensTaskRow,
 } from "@/lib/workflow-lens"
-import { clockPair, clockPairCatalogue, clockPairCost, clockPairDeps, failedRun } from "@/lib/workflow-lens.fixture"
+import { clockPair, clockPairCatalogue, clockPairCost, failedRun } from "@/lib/workflow-lens.fixture"
 
 const index = functionIndex(clockPairCatalogue)
 const sections = lensSections(clockPair, index)
@@ -120,12 +120,12 @@ describe("resourceColumns", () => {
     expect(columns[0].steps).toEqual(["pick", "demand", "trials", "insert"])
   })
 
-  it("adds what only the server's walk found", () => {
-    const merged = mergeServerResources(
-      columns,
-      { ...clockPairDeps, connectors: [...clockPairDeps.connectors, { connector: "soma-search", function: "http_call" }] },
-      index,
-    )
+  it("adds what only the member's requires names", () => {
+    const merged = mergeRequiredResources(columns, [
+      { kind: "connection", id: "soma-db", revision: 1 },
+      { kind: "connection", id: "soma-search", revision: 3 },
+      { kind: "plugin", id: "tb.pairing", revision: 2 },
+    ])
     expect(merged.map((c) => c.key)).toContain("connector:soma-search")
     expect(merged.find((c) => c.key === "connector:soma-search")?.steps).toEqual([])
     expect(merged).toHaveLength(4)
@@ -186,7 +186,7 @@ describe("dependency read-outs", () => {
       "tb.pairing v2 serves only this workflow. Archiving it affects nothing else, and a failed plugin load quarantines only Clock: pair.",
     )
     expect(text[2]).toBe(
-      "soma-db is shared by 145 channels; this workflow makes 3 reads and 1 write to it. A slow soma-db shows up first in demand, its heaviest step here.",
+      "soma-db is shared by 145 workflows; this workflow makes 3 reads and 1 write to it. A slow soma-db shows up first in demand, its heaviest step here.",
     )
   })
 

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { deploymentsApi } from "@/api/deployments"
 import { definitionsApi } from "@/api/definitions"
 import { useCursorList } from "@/hooks/use-cursor-list"
@@ -7,6 +7,7 @@ import type {
   DeploymentsPage,
   EntityKind,
   RollbackDeploymentRequest,
+  StoredDefinition,
 } from "@/api/types"
 
 /** The deployment history, newest first, a page at a time; `first` carries the head and what this node serves. */
@@ -78,15 +79,53 @@ export function useConvergence(revision: number | null | undefined, target: Conv
 /** Kinds whose member names a stored definition; a connection names a configuration digest instead. */
 export const hasDefinition = (kind: EntityKind) => kind !== "connection"
 
-/** A stored definition. Content-addressed, so it never changes: fetched once, held for the session. */
-export function useDefinition(digest: string | null | undefined, enabled = true) {
-  return useQuery({
+/** `sha256:<hex>` of `bytes`, or undefined where WebCrypto is unavailable (a page served over plain http to a remote host). */
+async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string | undefined> {
+  if (typeof crypto === "undefined" || !crypto.subtle) return undefined
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))
+  return `sha256:${Array.from(hash, (b) => b.toString(16).padStart(2, "0")).join("")}`
+}
+
+/**
+ * A plugin definition carries its WebAssembly component as base64 — up to
+ * megabytes. Keep its size and digest and drop the bytes, writing the facts
+ * where they were so a viewer or a diff still shows that the component
+ * changed. Every other definition passes through.
+ */
+export async function withoutComponentBytes(stored: StoredDefinition): Promise<StoredDefinition> {
+  const component = stored.definition.component
+  if (stored.kind !== "plugin" || typeof component !== "string") return stored
+  let bytes: Uint8Array<ArrayBuffer> | null = null
+  try {
+    const raw = atob(component.trim())
+    bytes = new Uint8Array(raw.length)
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
+  } catch {
+    // Not base64: the server would not have stored it, but say so rather than throw.
+  }
+  const size_bytes = bytes?.length ?? 0
+  const digest = bytes ? await sha256(bytes) : undefined
+  return {
+    ...stored,
+    definition: { ...stored.definition, component: `${digest ?? "component"} · ${size_bytes} bytes (base64 omitted)` },
+    component: { size_bytes, digest },
+  }
+}
+
+/** The query for one stored definition — shared by `useDefinition` and the registry's `useQueries`. */
+export const definitionQuery = (digest: string | null | undefined, enabled = true) =>
+  queryOptions({
     queryKey: ["definitions", digest],
-    queryFn: () => definitionsApi.get(digest!),
+    queryFn: () => definitionsApi.get(digest!).then(withoutComponentBytes),
     enabled: enabled && !!digest,
+    // Content-addressed: a definition never changes, so it is fetched once.
     staleTime: Infinity,
     gcTime: 30 * 60_000,
   })
+
+/** A stored definition. Content-addressed, so it never changes: fetched once, held for the session. */
+export function useDefinition(digest: string | null | undefined, enabled = true) {
+  return useQuery(definitionQuery(digest, enabled))
 }
 
 /**

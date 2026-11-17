@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 import { Link } from "react-router"
 import type { Channel, TraceDetail } from "@/api/types"
-import { useActiveWorkflow } from "@/hooks/use-workflows"
+import { useWorkflow } from "@/hooks/use-workflows"
 import { useWorkflowCost } from "@/hooks/use-ops-metrics"
 import { useFunctionIndex } from "@/hooks/use-functions"
 import { useConnectors } from "@/hooks/use-connectors"
@@ -24,9 +24,10 @@ const STEP_KEYS = ["step"] as const
  */
 export function TraceSteps({ trace, channel }: { trace: TraceDetail; channel: Channel | undefined }) {
   // The workflow the run's own steps name — the channel may have been
-  // re-pointed since — at its active version, since a trace records none.
+  // re-pointed since — at the revision the head serves most, since a trace
+  // records none (a canary's split is per message).
   const workflowId = traceWorkflowId(trace, channel)
-  const { workflow } = useActiveWorkflow(workflowId ?? "")
+  const { data: workflow } = useWorkflow(workflowId ?? "")
   const timeline = useMemo(() => buildTimeline(trace, workflow), [trace, workflow])
   const cost = useWorkflowCost(workflowId)
   const index = useFunctionIndex()
@@ -148,7 +149,6 @@ function gapText(gap: StepDataGap, trace: TraceDetail, channelName: string | und
  */
 function NoStepData({ trace, channel }: { trace: TraceDetail; channel: Channel | undefined }) {
   const gap = stepDataGap(trace, channel)
-  const draft = channel?.status === "draft"
   const showEdit = !!channel && (gap === "details_off" || gap === "errors_only")
   return (
     <Card>
@@ -160,8 +160,8 @@ function NoStepData({ trace, channel }: { trace: TraceDetail; channel: Channel |
           <p>No step data for this run. {gapText(gap, trace, channel?.name)}</p>
           {showEdit && (
             <p className="mt-2">
-              <Link to={draft ? `/channels/${channel.channel_id}/edit` : `/channels/${channel.channel_id}`}>
-                {draft ? "Edit the channel's tracing" : "Open the channel (a new version changes tracing)"}
+              <Link to={`/channels/${encodeURIComponent(channel.channel_id)}?tab=config`}>
+                Open the channel's tracing (a deployment changes it)
               </Link>
             </p>
           )}

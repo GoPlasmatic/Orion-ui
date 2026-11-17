@@ -1,4 +1,4 @@
-import type { Channel, EntityStatus } from "@/api/types"
+import type { Channel } from "@/api/types"
 
 /**
  * Response-cache invalidation namespaces (Orion 1.10).
@@ -6,8 +6,8 @@ import type { Channel, EntityStatus } from "@/api/types"
  * A channel's `config.cache.namespaces` names 1–8 namespaces its cached
  * responses belong to; each is a version counter in the cache store, and
  * `POST admin/cache/namespaces/{ns}/invalidate` bumps it. The server has no
- * listing endpoint, so the console reads the namespaces in use off the channel
- * registry — which is also the only place that says *who shares* one.
+ * listing endpoint, so the console reads the namespaces in use off the
+ * deployed channels — which is also the only place that says *who shares* one.
  */
 
 /** What the server accepts as a namespace name: 1–64 chars of `a-z0-9_-.:`. */
@@ -42,7 +42,6 @@ export function lintNamespaces(names: string[] | undefined): string[] {
 export interface NamespaceChannel {
   channel_id: string
   name: string
-  status: EntityStatus
   /** Whether the channel's cache is switched on; a declared namespace on a disabled cache stores nothing. */
   cacheEnabled: boolean
   connector?: string
@@ -50,24 +49,19 @@ export interface NamespaceChannel {
 
 export interface CacheNamespace {
   namespace: string
-  /** Channels declaring it, active first, then by name. */
+  /** Deployed channels declaring it, by name. */
   channels: NamespaceChannel[]
   /** Distinct cache connectors behind those channels (absent = the in-memory store). */
   connectors: string[]
-  /** How many of `channels` are active with the cache on — the ones whose entries an invalidation reaches. */
+  /** How many of `channels` have the cache on — the ones whose entries an invalidation reaches. */
   live: number
 }
 
-const STATUS_ORDER: Record<string, number> = { active: 0, draft: 1, archived: 2 }
-
 /**
  * Every namespace declared across `channels`, with the channels that declare
- * it. Sorted by how many live channels share it, then by name. A channel
- * listed twice (several versions in the registry) counts once, by id.
+ * it. Sorted by how many live channels share it, then by name.
  */
-export function cacheNamespaces(
-  channels: Pick<Channel, "channel_id" | "name" | "status" | "config">[]
-): CacheNamespace[] {
+export function cacheNamespaces(channels: Pick<Channel, "channel_id" | "name" | "config">[]): CacheNamespace[] {
   const byNs = new Map<string, Map<string, NamespaceChannel>>()
   for (const c of channels) {
     const cache = c.config?.cache
@@ -75,29 +69,21 @@ export function cacheNamespaces(
     if (!names || names.length === 0) continue
     for (const ns of new Set(names)) {
       const members = byNs.get(ns) ?? new Map<string, NamespaceChannel>()
-      const prev = members.get(c.channel_id)
-      // Keep the most live version of a channel the registry returns twice.
-      if (!prev || (STATUS_ORDER[c.status] ?? 9) < (STATUS_ORDER[prev.status] ?? 9)) {
-        members.set(c.channel_id, {
-          channel_id: c.channel_id,
-          name: c.name,
-          status: c.status,
-          cacheEnabled: cache?.enabled === true,
-          connector: cache?.connector || undefined,
-        })
-      }
+      members.set(c.channel_id, {
+        channel_id: c.channel_id,
+        name: c.name,
+        cacheEnabled: cache?.enabled === true,
+        connector: cache?.connector || undefined,
+      })
       byNs.set(ns, members)
     }
   }
 
   const out: CacheNamespace[] = []
   for (const [namespace, members] of byNs) {
-    const list = [...members.values()].sort(
-      (a, b) =>
-        (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9) || a.name.localeCompare(b.name)
-    )
+    const list = [...members.values()].sort((a, b) => a.name.localeCompare(b.name))
     const connectors = [...new Set(list.map((c) => c.connector).filter((c): c is string => !!c))].sort()
-    const live = list.filter((c) => c.status === "active" && c.cacheEnabled).length
+    const live = list.filter((c) => c.cacheEnabled).length
     out.push({ namespace, channels: list, connectors, live })
   }
   return out.sort((a, b) => b.live - a.live || a.namespace.localeCompare(b.namespace))

@@ -130,7 +130,8 @@ export type ChannelType = "sync" | "async"
 // `cron` (1.6) is the one protocol with no caller: the channel is started by a
 // clock, registers no route and no topic, and is not reachable at
 // `data/{name}` or by `channel_call`. A cron channel must be `async`.
-export type ChannelProtocol = "rest" | "http" | "kafka" | "cron"
+// Open in 2.0: a channel driver an edition composes may serve its own protocol.
+export type ChannelProtocol = "rest" | "http" | "kafka" | "cron" | (string & {})
 
 export const CHANNEL_TYPES = ["sync", "async"] as const satisfies readonly ChannelType[]
 export const CHANNEL_PROTOCOLS = ["rest", "http", "kafka", "cron"] as const satisfies readonly ChannelProtocol[]
@@ -575,7 +576,27 @@ export interface ChannelConfig {
   oauth2_login?: OAuth2LoginConfig
 }
 
-export interface Channel {
+/**
+ * What every deployed entity carries from its manifest member (2.0). A
+ * definition has no identity of its own; the member names it.
+ */
+export interface DeployedEntity {
+  /** The member's revision — the author's numbering (`orion-cli` reuses it while the definition is unchanged), not a deployment revision. */
+  revision: number
+  /** `sha256:…` of the stored definition: what it *is*. */
+  digest: string
+  member: ManifestMember
+}
+
+/**
+ * A channel as the head deploys it: the member's identity and requirements
+ * over its stored definition — built by `lib/deployed-registry.ts` exactly as
+ * the server's `channel_row` builds the row it serves. `channel_id` is the
+ * member's id (what traces carry as `channel_id`, the cron ledger filters on
+ * and `trigger` takes); `name` is the definition's (what `channel_call`,
+ * `/data/{name}` and `orion_messages_total{channel}` use).
+ */
+export interface Channel extends DeployedEntity {
   channel_id: string
   name: string
   description: string | null
@@ -583,79 +604,14 @@ export interface Channel {
   protocol: ChannelProtocol
   route_pattern: string | null
   methods: string[] | null
-  topic: string | null
-  consumer_group: string | null
   transport_config: Record<string, unknown>
+  /** The workflow its member requires; null for a channel that requires none. */
   workflow_id: string | null
   config: ChannelConfig
-  status: EntityStatus
-  version: number
   priority: number
   tags: string[]
-  // sha256:… over the canonical importable content, excluding the DB-owned
-  // fields. Equal hashes mean importing one over the other is a no-op.
-  content_hash: string
-  created_at: string
-  updated_at: string
-}
-
-export interface ListChannelsParams {
-  limit?: number
-  offset?: number
-  status?: EntityStatus
-  channel_type?: ChannelType
-  protocol?: ChannelProtocol
-  tag?: string
-  sort_by?: string
-  sort_order?: SortOrder
-}
-
-export interface ExportChannelsParams {
-  status?: EntityStatus
-  channel_type?: ChannelType
-  protocol?: ChannelProtocol
-  tag?: string
-  limit?: number
-  offset?: number
-  sort_by?: string
-  sort_order?: SortOrder
-}
-
-export interface CreateChannelRequest {
-  channel_id?: string
-  name: string
-  description?: string
-  channel_type: ChannelType
-  protocol: ChannelProtocol
-  methods?: string[]
-  route_pattern?: string
-  topic?: string
-  consumer_group?: string
-  transport_config?: Record<string, unknown>
-  workflow_id?: string
-  config?: ChannelConfig
-  priority?: number
-  tags?: string[]
-}
-
-export interface UpdateChannelRequest {
-  name?: string
-  description?: string
-  methods?: string[]
-  route_pattern?: string
-  topic?: string
-  consumer_group?: string
-  transport_config?: Record<string, unknown>
-  workflow_id?: string
-  config?: ChannelConfig
-  priority?: number
-  tags?: string[]
-}
-
-export interface ChannelVersion {
-  version: number
-  status: EntityStatus
-  created_at: string
+  /** A canary split (Standard+): disjoint bucket intervals over `[0, 100)`. Absent means one workflow revision serves everything. */
+  rollouts?: RolloutInterval[]
 }
 
 // Workflow types
@@ -720,17 +676,21 @@ export interface TaskForEach {
 /** One element of a workflow's `tasks` array: a task, or a group of them. */
 export type Step = Task | TaskGroup
 
-export interface Workflow {
+/**
+ * A workflow as the head deploys it, at one revision. A workflow may be
+ * deployed at several revisions at once — a channel's canary routes a share
+ * of its buckets to each — so `lib/deployed-registry.ts` keeps every deployed
+ * revision and names one per id as the primary.
+ */
+export interface Workflow extends DeployedEntity {
   workflow_id: string
   name: string
   description: string | null
   priority: number
   tags: string[]
   condition?: JsonLogicValue
-  continue_on_error?: boolean
-  status: EntityStatus
-  version: number
-  rollout_percentage?: number
+  /** What a failing task does to the run (`continue` is 1.x's workflow-level `continue_on_error`). */
+  on_failure?: "fail" | "continue" | (string & {})
   // Each element is a `Task` or a `TaskGroup` — use `flattenSteps` for the
   // leaf tasks the engine actually runs.
   tasks: Step[]
@@ -738,11 +698,7 @@ export interface Workflow {
   // absent for a workflow that runs its tasks once. Its `setup` steps run
   // first, once; `tasks` is then the body. `workflowSteps()` walks both.
   loop?: WorkflowLoop
-  content_hash: string
-  created_at: string
-  updated_at: string
 }
-
 /**
  * A workflow `loop` (dataflow-rs 3.14). `setup` runs once before the body and
  * holds steps exactly like `tasks` (groups included). `over` iterates a list —
@@ -761,79 +717,14 @@ export interface WorkflowLoop {
   [key: string]: unknown
 }
 
-// What a workflow's tasks reference. The server walks the latest version's
-// tasks, so this is authoritative where client-side task parsing is a guess.
-export interface ConnectorDependency {
-  connector: string
-  // The task function that uses it (`db_read`, `http_call`, …).
-  function: string
-}
-
 /**
- * One plugin a workflow depends on, as this node's generation serves it (1.6):
- * the active version and the component digest its functions currently resolve
- * to — what a package records and a promotion target is checked for.
+ * `POST admin/definitions/test`: run a workflow definition once on the node's
+ * engine — live functions, plugins and connectors — without deploying it.
  */
-export interface PluginDependency {
-  id: string
-  version: number
-  // `sha256:…` of the component the functions resolve to.
-  digest: string
-  // The plugin's functions this workflow names, task order kept.
-  functions: string[]
-}
-
-export interface WorkflowDependencies {
-  workflow_id: string
-  version: number
-  connectors: ConnectorDependency[]
-  // Channel names targeted by `channel_call` tasks, statically.
-  channels: string[]
-  // True when a `channel_call` computes its target at runtime — the *shape*
-  // of `channel` (an expression rather than a literal). The static `channels`
-  // list is then incomplete by construction.
-  has_dynamic_channel_calls: boolean
-  // Plugins whose functions the tasks name, resolved against this node's
-  // generation. Absent on a server before 1.6.
-  plugins?: PluginDependency[]
-  // Function names the tasks call that this generation's registry does not
-  // know — a plugin archived since the workflow was written, or one this node
-  // could not load. Empty for a workflow that would activate here.
-  unresolved_functions?: string[]
-}
-
-export interface ListWorkflowsParams {
-  limit?: number
-  offset?: number
-  status?: EntityStatus
-  tag?: string
-  sort_by?: string
-  sort_order?: SortOrder
-}
-
-export interface CreateWorkflowRequest {
-  workflow_id?: string
-  name: string
-  description?: string
-  priority?: number
-  condition?: JsonLogicValue
-  tasks: unknown[]
-  tags?: string[]
-  continue_on_error?: boolean
-}
-
-export interface UpdateWorkflowRequest {
-  name?: string
-  description?: string
-  priority?: number
-  condition?: JsonLogicValue
-  tasks?: unknown[]
-  tags?: string[]
-  continue_on_error?: boolean
-}
-
-export interface WorkflowTestRequest {
-  data: Record<string, unknown>
+export interface TestDefinitionRequest {
+  /** The workflow document, as `POST admin/definitions` would take it. */
+  definition: Record<string, unknown>
+  data: unknown
   metadata?: Record<string, unknown>
 }
 
@@ -917,24 +808,16 @@ export interface ExecutionTrace {
   [key: string]: unknown
 }
 
-export interface WorkflowTestResponse {
+/** `POST admin/definitions/test` (bare). The trace is kept on every outcome; `error` says why a run stopped short. */
+export interface TestDefinitionResponse {
   matched: boolean
   trace: ExecutionTrace
-  output: Record<string, unknown>
+  output: unknown
   errors: unknown[]
+  error?: string | null
 }
 
-export interface WorkflowVersion {
-  version: number
-  status: EntityStatus
-  created_at: string
-}
-
-export interface WorkflowRolloutRequest {
-  rollout_percentage: number
-}
-
-// Workflow validation
+// 1.x validation envelope (still read by the connector and model pages until phase 4)
 export interface ValidationIssue {
   field: string
   message: string
@@ -2070,85 +1953,27 @@ export interface PluginHealth {
   compile_ms?: number | null
 }
 
-/** One version of a plugin, as every plugin endpoint returns it. */
-export interface Plugin {
+/**
+ * A WebAssembly plugin as the head deploys it: its `plugin.toml` manifest and
+ * the facts of its component. The component itself (base64 in the stored
+ * definition) is never kept — `useDefinition` replaces it with its size and
+ * `sha256:` digest, which is what the catalogue and `/health` name it by.
+ */
+export interface Plugin extends DeployedEntity {
   plugin_id: string
-  version: number
-  status: EntityStatus
-  // `sha256:…` of the component bytes — the identity a generation, a trace, a
-  // package and the catalogue all name the artifact by.
-  digest: string
-  // The WIT package version the component was built against.
+  manifest: PluginManifest
+  // The function names the manifest declares.
+  functions: string[]
+  // The WIT package version the component was built against (manifest `abi`).
   abi: string
   // The author's own version string from the manifest, informational.
   plugin_version: string
-  manifest: PluginManifest
-  // The function names the manifest declares, repeated at the top level.
-  functions: string[]
-  // The detached Ed25519 signature over `digest` the upload carried, base64.
+  // The detached Ed25519 signature over the component digest, base64.
   signature?: string | null
   tags: string[]
-  // Over the importable content (manifest, digest, tags) — the digest is the
-  // identity, the signature only attests to it.
-  content_hash: string
-  // Present only on the single-entity read, and only when the serving node has
-  // an opinion: whether *this node* loaded the digest.
-  health?: PluginHealth | null
-  created_at: string
-  updated_at: string
-}
-
-/** What depends on a plugin: the active workflows calling its functions. */
-export interface PluginDependencies {
-  plugin_id: string
-  version: number
-  functions: string[]
-  // Active workflows whose tasks call any of `functions` — the ones an archive
-  // or delete is refused for (409).
-  workflows: string[]
-}
-
-export interface ListPluginsParams {
-  limit?: number
-  offset?: number
-  status?: EntityStatus
-  tag?: string
-  // `plugin_id` (default), `status`, `created_at`, `updated_at`.
-  sort_by?: string
-  sort_order?: SortOrder
-}
-
-export interface ExportPluginsParams extends ListPluginsParams {
-  // Carry each component as base64 under `component` — what a promotion needs
-  // and what a listing does not.
-  include_artifacts?: boolean
-}
-
-/**
- * What `POST admin/plugins` and the import accept. `manifest` is either the
- * TOML text or the manifest as a JSON object; `component` is the bytes as
- * base64, and may be omitted when `digest` names an artifact this instance
- * already holds (what an export without `?include_artifacts=true` produces).
- */
-export interface CreatePluginRequest {
-  manifest: string | PluginManifest
-  component?: string | null
-  digest?: string | null
-  // Must equal the manifest's `name` when given.
-  plugin_id?: string | null
-  // Detached Ed25519 signature over the digest string, base64. Required when
-  // the node's `[plugins.trust]` names keys; stored but ignored otherwise.
-  signature?: string | null
-  tags?: string[]
-}
-
-/** `PUT admin/plugins/{id}`: every field optional, absent means keep. */
-export interface UpdatePluginRequest {
-  manifest?: string | PluginManifest
-  component?: string | null
-  digest?: string | null
-  signature?: string | null
-  tags?: string[] | null
+  /** `sha256:…` of the component bytes, when this browser could hash them. */
+  component_digest?: string
+  component_bytes?: number
 }
 
 // --- Models (1.8) ------------------------------------------------------------
@@ -2757,4 +2582,10 @@ export type DefinitionKind = "workflow" | "channel" | "plugin"
 export interface StoredDefinition {
   kind: DefinitionKind
   definition: Record<string, unknown>
+  /**
+   * Client-side, a plugin's only: the component's facts. `useDefinition`
+   * drops the base64 from `definition.component` (writing these facts in
+   * its place) so no cache, viewer or diff ever holds the bytes.
+   */
+  component?: { size_bytes: number; digest?: string }
 }

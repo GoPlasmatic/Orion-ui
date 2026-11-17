@@ -79,17 +79,21 @@ Orion UI is a React 19 dashboard for the Orion workflow engine. It uses Vite 8, 
 ### Core Domain
 
 Being ported from the Orion **v1.12.0** API to **2.0** (dataflow-rs 4 / datalogic-rs 5.9;
-`PLAN-2.0.md`). What follows describes the 1.12 surfaces the pages still render; 2.0 replaces the
-per-entity lifecycle below with immutable definitions bound into a deployment manifest. Five
-primitives with a Draft -> Active -> Archived lifecycle, plus the read-only operator surfaces:
+`PLAN-2.0.md`). In 2.0 a node serves exactly its deployed manifest: workflows, channels and
+plugins are **members** of it — immutable, content-addressed definitions bound to an id and a
+revision — and change only by applying a deployment (`orion-cli deployments apply`; the UI
+operates and does not author, D1 = A). Their pages are read-only views of the head
+(`hooks/use-registry.ts`, below). Connectors and models (phase 4) still render 1.12's lifecycle.
 
-- **Channels** — Service endpoints (sync/async, REST/HTTP/Kafka/**cron**). Config covers `auth`
+- **Channels** — Service endpoints (sync/async, REST/HTTP/**cron**, plus whatever protocol an
+  edition's driver adds — `ChannelProtocol` is open). Config covers `auth`
   (`api_key` | `hmac` | `jwt`), rate limits (incl. `key_logic` + `key_headers`), backpressure,
   dedup, caching (incl. `key_logic` since 1.5), `origin_allow_list`, `request`, `response`
   (incl. `cookies`), `validation_logic`, `tracing` and **`oauth2_login`** (1.6, inbound OAuth2 /
-  OIDC sign-in; `oauth2-login-editor.tsx`). `transport_config` is a JSON editor for Kafka and a
-  structured schedule editor (`cron-transport-editor.tsx`) for cron. Full CRUD (create/edit
-  forms, server-side Validate, bulk import, export). `methods` is `string[] | null`. A **cron
+  OIDC sign-in), all rendered read-only on the channel page. The workflow a channel runs is the
+  one its member `requires` (the definition names none), and a Standard+ canary splits its 100
+  buckets across workflow revisions (`rollouts`, drawn by `RolloutBar`). `methods` is
+  `string[] | null`. A **cron
   channel** (`protocol: "cron"`, 1.6) is started by a clock: its schedule lives in
   `transport_config`, it is always `async`, registers no route or topic, is refused everything
   caller-shaped in `config` (`lib/cron.ts::CRON_REFUSED_CONFIG_KEYS`), and is run manually with
@@ -99,21 +103,21 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
   `GET admin/cron/occurrences` (every instant a schedule was due, with `retry` for a failed or
   skipped one). An occurrence detail page carries the trace id, the executing version and the
   lease. Also embedded on a cron channel's detail page.
-- **Plugins** — Custom task functions as sandboxed WebAssembly components (`/plugins`, 1.6): a
-  versioned entity with the workflow's lifecycle. Upload (manifest as TOML text or JSON +
-  component as base64, encoded in the browser; the sha256 is computed client-side to compare),
-  Validate, activate/archive with pre-flight, versions, `GET admin/plugins/{id}/dependencies`
-  (the active workflows calling its functions), import/export (`?include_artifacts=true`).
-  The single read carries `health` — whether *this node* loaded the digest.
+- **Plugins** — Custom task functions as sandboxed WebAssembly components (`/plugins`): a
+  member whose definition carries its `plugin.toml` manifest and the component as base64. The
+  console never keeps the bytes: `useDefinition` replaces them with their size and `sha256:`
+  digest (`withoutComponentBytes`), which is what `/health`'s plugin loads and the catalogue name
+  it by. Dependants are the members whose `requires` names it.
 - **Workflows** — Step pipelines with JSONLogic conditions. A step is a **task** (carries
   `function`) or, since 1.2, a **task group** (carries its own `tasks`) — one condition gating a
-  contiguous run, plus `terminal` to end the workflow after a step. Full authoring via
-  `workflow-form.tsx` (visual condition editor + steps JSON with a client-side shape lint and
-  task/guard-clause snippets + server-side Validate), plus import wizard, dry-run test, export,
-  canary rollout (`PATCH /{id}/rollout`), and four **lenses** over the diagram — Structure (the
-  visualizer), Dependencies (backed by `GET admin/workflows/{id}/dependencies`), Cost (per-task
-  share of a run from metrics) and Last run (a trace's steps overlaid). Uses `@goplasmatic/dataflow-ui` `WorkflowVisualizer`
-  and `@goplasmatic/datalogic-ui` `DataLogicEditor`.
+  contiguous run, plus `terminal` to end the workflow after a step. **A workflow may be deployed
+  at several revisions at once** (a canary): the registry keeps every one and names a primary
+  (`?revision=` picks another on its page). Four **lenses** over the diagram — Structure (the
+  visualizer), Dependencies (the steps plus the member's `requires`, the compiler's own walk),
+  Cost (per-task share of a run from metrics) and Last run (a trace's steps overlaid). **Test**
+  runs the deployed definition — or an edited copy that is never saved — through `POST
+  admin/definitions/test` (live backends, so a read-only key is refused). Uses
+  `@goplasmatic/dataflow-ui` `WorkflowVisualizer` and `@goplasmatic/datalogic-ui` `DataLogicEditor`.
 - **Connectors** — External system connections: `http`, `kafka`, `db`, `cache`, `es`, `storage`,
   **`smtp`**. Full CRUD + Validate + **Test** (reachability probe) + export. Keyed by `id` (a UUID,
   distinct from `name`).
@@ -165,7 +169,7 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
   There is **no namespace listing** — `lib/cache-namespaces.ts` reads them off the channel
   registry. `oauth2_login` (1.11) is the flat form *or* `providers` keyed by slug (routes and
   `redirect_uri` then carry `{provider}`), with `issuer` (OIDC discovery), `kind`,
-  `userinfo_url`, `identity` and `providers_from_instance`; `lib/oauth2-login.ts` lints it.
+  `userinfo_url`, `identity` and `providers_from_instance`; the channel page shows it read-only.
   Audit gained `cancel` / `invalidate` / `cache_namespace` (`lib/audit-vocabulary.ts`).
 - **A workflow's steps are `loop.setup` then `tasks` (1.10).** Every server walk covers the
   loop's setup; `workflowSteps(workflow)` is the client's. A task may carry `for_each`. Counting
@@ -240,8 +244,7 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
   so `"Bearer"` and the old spelling `"Bearer "` are the same scheme and `Bearer<key>` with no
   space is refused. An empty value means no scheme — the bare credential. A value that is not an
   RFC 9110 token, like `"Key="`, is a **400** at create, update, validate and import, and
-  quarantines a channel already stored with one. `lib/channel-auth.ts::lintAuthScheme` mirrors the
-  server's `scheme_name`. The same applies to `jwt`'s `source.scheme`.
+  quarantines a channel already stored with one. The same applies to `jwt`'s `source.scheme`.
 - **A connector config reference may stand in any field (1.9)**, not only a string one —
   `{"url": "env://PEER_API_URL", "allow_private_urls": "env://PEER_API_PRIVATE"}`. An `env://` or
   `vault://` reference always resolves to text, so in a boolean field it must read `true` or
@@ -290,8 +293,8 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
   `shape`, `full`, `cast`, `pad`, `crop`, `concat`, `stack` — are ordinary JSON keys, and in a
   template position a single-key object whose key is a live operator is a *call*, not data. A
   stored mapping emitting `{"shape": [6, 7]}` changed meaning in 1.8; the fix is the `$` escape
-  (`{"$shape": [6, 7]}`). `lib/tensor-keys.ts` is the advisory, driven by the catalogue's
-  `template_at`, and is why `template_at` must never be hardcoded.
+  (`{"$shape": [6, 7]}`). In 2.0 the server reports it on upload as a definition advisory
+  (`logic.escaped_template_key`); `template_at` must still never be hardcoded.
 - **`models.preload` / `models.preload_tags` (1.8.1) are server config with no admin endpoint**,
   like `[vars]` and `[secrets]`. `preload` reads the *literal* `model` of active workflows, so a
   workflow routing with a computed one warms nothing; `preload_tags` names the hot set by tag
@@ -437,13 +440,14 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
   the task id namespace. Anything asking "what does this workflow run / reference / cost" must
   descend — use `flattenSteps`/`countLeafSteps` from `lib/workflow-steps.ts`, never
   `tasks.length`. `"tasks": []` is a 400 at create since 1.2.
-- **Three identifier spaces, and `channel_call` uses the third.** `channel.channel_id` is a
-  **UUID**; `channel.name` is the slug; `workflow.workflow_id` is a slug equal to the channel's
-  `workflow_id`, while `workflow.name` is a human title ("Auth - login"). A `channel_call` task's
-  `input.channel` names the channel **by `name`**, and `orion_messages_total{channel}` is labelled
-  the same way. Resolve a call target through `channelsByName` — `channelsById` is UUID-keyed and
-  misses every time, which is how the relationship graphs used to render every callee as a dashed
-  "missing" node and stop the walk one hop in.
+- **Three identifier spaces, and `channel_call` uses the third** (confirmed on a 2.0 server,
+  2026-11-17). `channel.channel_id` is the **member id** — what a trace carries as `channel_id`,
+  the cron ledger filters on, `trigger` takes and the page is keyed by; `channel.name` is the
+  **definition's** `name` (often, not always, the same slug); `workflow.workflow_id` is the
+  workflow member's id, the one a channel `requires`, while `workflow.name` is a human title
+  ("Auth - login"). A `channel_call` task's `input.channel` names the channel **by `name`**, and
+  `orion_messages_total{channel}` and a trace's `channel` are the same name. Resolve a call target
+  through `channelsByName`; ids go in URLs (`encodeURIComponent` — a member id may hold a dot).
 - **`orion_messages_total` counts ingress, not execution.** A channel reached only by
   `channel_call` — every `internal-*` route in a fan-out design — is dispatched inside the engine
   and gets **no series at all**, in that family or in `orion_workflow_duration_seconds`. So the
@@ -491,19 +495,16 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
   (incl. status-keyed `error_bodies`), `validation_logic`, `tracing`. **Unknown keys are refused**,
   so a stale spelling is a 400, not a no-op.
 - **Channel auth secrets** (`auth.keys`, `auth.secret`/`secrets`, `auth.jwt_keys[].key`) come back
-  masked as `"******"`. Sending a mask back on update *restores* the stored value — forms must
-  round-trip masks untouched.
+  masked as `"******"` in a stored channel definition, so two revisions differing only in a key
+  diff as equal — that is the server's masking, not a missing change.
 - **Connectors carry both** `config` (parsed, the shape POST/PUT accept) and `config_json` (the
   same document as a string). **Prefer `config`.** The list endpoint additionally returns
   `load_status` / `load_error` / `load_error_stage`.
-- **Every entity carries `tags` and `content_hash`** (`sha256:…` over the canonical importable
-  content, DB-owned fields excluded). Equal hashes mean importing one over the other is a no-op.
-- **Bulk import:** `POST {channels|connectors|workflows}/import?dry_run=&on_conflict=` returns
-  `{ dry_run, imported, failed, unchanged, skipped, errors[], results[] }` — dry runs report in the
-  *same* fields as real runs. `on_conflict` is `fail` | `skip` | `new_version`. Max 1000 items.
-- **Status changes** take `?dry_run=true` (answers the `/validate` envelope instead of the entity —
-  used by the activation pre-flight in `LifecycleActions`) and `?reload=now|defer`.
-- **Channel activation requires an active workflow.**
+- **A deployed entity's identity is its member** (`DeployedEntity`: `revision`, `digest`,
+  `member`); the definition holds no id, version, status or timestamps. Equal digests are the same
+  definition, whatever the revision numbers say. 1.x's status lifecycle, versions, import/export,
+  validate and per-entity dependencies are gone for workflows, channels and plugins; connectors
+  and models keep them until phase 4.
 - **Audit logs filter server-side:** `action`, `resource_type`, `resource_id`, `principal`,
   `start_time`, `end_time` (RFC 3339; a trailing `Z` is fine). `limit` clamped 1–1000. The cron
   ledger's `since` / `until` are still zoneless in 2.0 — `api/cron.ts::toNaiveUtc` trims them.
@@ -539,17 +540,17 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
 
 ### Layers
 
-- **`src/api/`** — Typed API client. `client.ts` wraps fetch with the `/api/v2` base path, sends the admin credential and applies the probe-and-hold-back rule (`auth.ts`, above), parses the structured error envelope onto `ApiError` (incl. `details[]`, `requestId` and 2.0's `connector`), and exports `buildQuery()`, `unwrap()`, and `api.send()` for arbitrary-method data-plane calls. `RequestOptions.changeContext` sends `X-Orion-Change-Context` so a multi-request promotion's audit rows can be grouped. Domain modules: `channels.ts`, `workflows.ts`, `connectors.ts`, `traces.ts`, `trace-dlq.ts`, `packages.ts`, `engine.ts`, `audit.ts`, `backup.ts`, `functions.ts`, `data.ts`, `plugins.ts`, `cron.ts`, `models.ts`, `runtime.ts` (2.0). All types hand-written in `types.ts`.
+- **`src/api/`** — Typed API client. `client.ts` wraps fetch with the `/api/v2` base path, sends the admin credential and applies the probe-and-hold-back rule (`auth.ts`, above), parses the structured error envelope onto `ApiError` (incl. `details[]`, `requestId` and 2.0's `connector`), and exports `buildQuery()`, `unwrap()`, and `api.send()` for arbitrary-method data-plane calls. `RequestOptions.changeContext` sends `X-Orion-Change-Context` so a multi-request promotion's audit rows can be grouped. Domain modules: `deployments.ts`, `definitions.ts` (incl. `test`), `runtime.ts` and `channels.ts` (only the cron `trigger` is left) for 2.0; `traces.ts`, `trace-dlq.ts`, `engine.ts`, `audit.ts`, `backup.ts`, `functions.ts`, `data.ts`, `cron.ts`, `cache.ts`; and `connectors.ts`, `packages.ts`, `models.ts`, still 1.12 until phase 4. All types hand-written in `types.ts`.
 - **`src/hooks/`** — TanStack Query wrappers. One hook file per domain (`use-channels.ts`, `use-workflows.ts`, etc.). Query keys are `["entity", params]` arrays. Mutations invalidate via `queryClient.invalidateQueries`. The client default is `staleTime: 30_000` (a page visited twice in a row does not refetch its lists; polled queries keep their own `refetchInterval`, and invalidation ignores staleness), and every paginated list hook sets `placeholderData: keepPreviousData` so a page turn holds the last page instead of dropping to a skeleton.
 - **`src/pages/`** — Route-level components. Named exports like `ChannelsPage`, `WorkflowDetailPage`. Data fetching via hooks, not inline.
 - **`src/components/ui/`** — Shadcn-style primitives using `React.forwardRef`, CVA variants, and
   `cn()` for class merging: `Button`, `Card`, `Badge`, `Table`, `Tabs`, `Dialog`, `Input`,
-  `Textarea`, `Select`, `Label`, `Checkbox`, `Switch`, `Slider`, `Callout`, `Separator`,
+  `Textarea`, `Select`, `Label`, `Checkbox`, `Switch`, `Callout`, `Separator`,
   `Skeleton`, `Sparkline`. `field.ts` holds the border/focus/invalid chrome shared by
   Input/Textarea/Select — change it there, not per field. `Select` renders a wrapper div so it can
   overlay a themed chevron: `className` sizes the *control* (as callers already expected),
   `selectClassName` reaches the `<select>` itself.
-- **`src/components/shared/`** — Shared composed components: `StatusBadge`, `LifecycleActions` (incl. the activation pre-flight), `VersionHistory`, `JsonViewer`, `PageHeader`, `ConfirmDialog`, `PaginationFooter`, `ValidationResults`, `ImportDialog`/`ImportSummary`, `ChannelAuthEditor`, `ConnectorTestDialog`, `Fact`/`InlineFact`, `ConfirmButton`, `FilterBar` (with `FilterTextInput` and `UnknownOption`), `EmptyState`/`NoMatches`, `ErrorState` (the one
+- **`src/components/shared/`** — Shared composed components: `EntityHistoryPanel` (a deployed entity's states across revisions, with a definition diff), `NotDeployedState` / `NothingDeployedState` / `QuarantineBadge` (`deployed-state.tsx`), `JsonViewer`, `JsonDiff`, `PageHeader`, `ConfirmDialog`, `PaginationFooter`, the 1.x `StatusBadge` / `LifecycleActions` / `VersionHistory` / `ValidationResults` / `ImportDialog` (connector and model pages only, until phase 4), `ConnectorTestDialog`, `Fact`/`InlineFact`, `ConfirmButton`, `FilterBar` (with `FilterTextInput` and `UnknownOption`), `EmptyState`/`NoMatches`, `ErrorState` (the one
   way a page reports a failed load — reads status, code, field details and request id off
   `ApiError`, with Retry) and `ErrorBoundary`.
 - **`src/components/layout/`** — `AppLayout`, `Sidebar`, `Header`. `AppLayout` owns the two
@@ -674,8 +675,8 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
 - **`src/lib/retry-safety.ts`** + `hooks/use-retry-safety.ts` + `shared/retry-safety-warning.tsx` —
   the guard in front of a DLQ requeue and a cron occurrence retry: `retryRisks(steps, catalogue)`
   names the tasks whose function is `unsafe_write` or `depends_on` its input. It reads the
-  workflow's *active* version (`useActiveWorkflow` in `use-workflows.ts`), because that is what a
-  retry runs — the latest version is the draft while one is open. Rendered in the DLQ entry and
+  revision the head deploys (`useWorkflow`, the primary under a canary), because a retry runs on
+  the node's current generation, not the one the failed run saw. Rendered in the DLQ entry and
   bulk dialogs, on an occurrence page and on a cron channel's occurrences tab.
 - **`src/lib/trace-payload.ts`** — `firstTaskPayload` (on `executionTrace`; a v4 trace's `initial.data`): the request as the first
   task saw it, the closest thing to the original input a trace keeps (the read carries no raw
@@ -691,11 +692,22 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
   (a read that answers `null` and a write that does nothing when the accessor throws), plus
   `readSessionStorage` / `writeSessionStorage` for the one credential (the admin key). No other
   file touches browser storage.
-- **`src/hooks/use-entity-index.ts`** — `useEntityIndex()`: the whole registry (`REGISTRY_LIMIT`
-  rows of channels, workflows and connectors, the cap exported from `lib/use-pagination.ts`)
-  indexed and built into the system graph once, for the map, the dashboard, a neighbourhood and
-  a connector's dependants. A name → id join elsewhere reads `useChannels({ limit:
-  REGISTRY_LIMIT })` under the same key, so nothing is fetched twice.
+- **`src/hooks/use-registry.ts`** + **`src/lib/deployed-registry.ts`** — what the head deploys,
+  as entities: `useRegistry()` reads the head manifest, fetches every workflow, channel and plugin
+  definition it names (once — content-addressed), and projects each member exactly as the
+  server's `channel_row` / `workflow_row` / `plugin_row` do (`orion-runtime/src/runtime/
+  definitions.rs`): identity and the required workflow from the member, the rest from the
+  definition. The single source for "which entities exist" — `useChannels` / `useWorkflows` /
+  `usePlugins` and their single-entity hooks (`notDeployed` for an id the head lacks), the
+  palette, the console, caches, breakers, the DLQ and the attention list all read it, and the
+  derivation is shared at module scope. Also `useEntityHistory(kind, id)` (an entity's states
+  over the newest `HISTORY_DEPTH` revisions, for `EntityHistoryPanel`), `useNodeHealth()` and
+  `useQuarantineReason(entity)` (this node's `quarantined_entities`, keyed by
+  `memberRefKey` — meaningful only when it applied the head). List pages filter, sort and page in
+  the browser (`lib/deployed-list.ts`); a head with none of them renders `NothingDeployedState`.
+- **`src/hooks/use-entity-index.ts`** — `useEntityIndex()`: the registry indexed and built into
+  the system graph once, for the map, the dashboard and a neighbourhood. It carries no connectors
+  until the connection pages land (phase 4).
 - **`src/hooks/use-export.ts`** — `useExport(run)`: an export button's pending flag and its
   outcome toasts; the callback fetches, downloads (`downloadJson` / `downloadText`) and returns
   the success line.
@@ -778,14 +790,10 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
   labels.
 - **`src/lib/health.ts`** — `componentRoute`: which page acts on a degraded `/health` component,
   or null when only the health report explains it (callers fall back to `/engine#component-…`).
-- **`src/lib/channel-auth.ts`** — `lintAuthScheme` / `isLegacySchemePrefix`: reading `auth.scheme`
-  as the RFC 9110 scheme name it became in 1.8.2, mirroring the server's `scheme_name`.
 - **`src/components/shared/load-issues.tsx`** — `LoadIssuesReport`: the four lists a generation
   refused, from `engine/status.load_issues` or `/health`, rendered once so the two cannot drift.
-- **`src/api/plugins.ts`, `src/api/cron.ts`** — the 1.6 entity and the ledger;
-  `channelsApi.trigger` is the manual cron run. Hooks in `use-plugins.ts` / `use-cron.ts`; a
-  plugin status change invalidates `["functions"]` and `["workflows"]` because the vocabulary
-  moved. `use-metrics.ts` also exposes `useCronMetrics` (pending gauge, lag p95, occurrences by
+- **`src/api/cron.ts`** — the ledger; `channelsApi.trigger` is the manual cron run. Hooks in
+  `use-cron.ts`. `use-metrics.ts` also exposes `useCronMetrics` (pending gauge, lag p95, occurrences by
   status, lease failures) and `usePluginMetrics` (per-function invocations, errors, p95), both
   reading the shared `["metrics"]` poll.
 - **`src/api/models.ts`** — the 1.8 entity. Hooks in `use-models.ts` (`useModel` polls while
@@ -801,9 +809,6 @@ primitives with a Draft -> Active -> Archived lifecycle, plus the read-only oper
   CodeMirror diagnostics at **warning** severity (`.cm-lintRange`, never `-error`): they are a
   squiggle and a hover tooltip, **not page text**, so a test asserting on visible message text
   passes whether the lint is right or wrong.
-- **`src/lib/tensor-keys.ts`** — the 1.8 tensor-operator advisory: which stored expressions hold
-  a single-key object whose key is now a live tensor operator, and therefore changed meaning.
-  Driven by the catalogue's `template_at`, never a hardcoded field list.
 
 ### Routing
 
@@ -818,20 +823,17 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
                                       auto) &group=prefix|tag:<a,b> &select=<channel name |
                                       connector:<name>> &q=&tag=&lifecycle=all&window=&size=
                                       &colour=&hops=1|2|all)
-/channels           -> ChannelsPage (?q= name search in the browser; ?status absent = active,
-                                     ?status=all for everything)
-/channels/new       -> ChannelFormPage (create; ?protocol=cron preselects a schedule)
-/channels/:id       -> ChannelDetailPage
-/channels/:id/edit  -> ChannelFormPage (edit; draft only)
-/workflows          -> WorkflowsPage
-/workflows/new      -> WorkflowFormPage (create)
+/channels           -> ChannelsPage (the head's channels; ?q= name/id/route, ?protocol=, ?type=,
+                                     ?tag=, all in the browser)
+/channels/:id       -> ChannelDetailPage (by member id; ?tab=overview|occurrences|config|
+                                     relationships|history|definition)
+/workflows          -> WorkflowsPage (?q=, ?tag=)
 /workflows/:id      -> WorkflowDetailPage (?lens=structure|deps|cost|run, ?trace=<id> pins
-                                          the run the Last run lens overlays)
-/workflows/:id/edit -> WorkflowFormPage (edit; draft only)
-/plugins            -> PluginsPage
-/plugins/new        -> PluginFormPage (upload)
+                                          the run the Last run lens overlays; ?tab=test|history|
+                                          definition; ?revision= under a canary)
+/plugins            -> PluginsPage (?q=, ?tag=)
 /plugins/:id        -> PluginDetailPage
-/plugins/:id/edit   -> PluginFormPage (edit; draft only)
+/{channels,workflows,plugins}/new, …/:id/edit -> redirect to the list / the entity (1.x's forms)
 /models             -> ModelsPage
 /models/new         -> ModelFormPage (register)
 /models/:id         -> ModelDetailPage
@@ -870,7 +872,7 @@ while their runtime is off and none exist, with live counts from
 title. A list page names the tab through `PageHeader`; a detail page through `Breadcrumbs`
 (`lib/page-title.ts` lets the page win over the shell).
 
-Forms (`channel-form.tsx`, `connector-form.tsx`, `workflow-form.tsx`, `plugin-form.tsx`) use a wrapper page that waits for the edit query, then mounts an inner form seeded via `useState` initializers (keyed to remount on data load) — avoid `setState`-in-`useEffect` for form hydration. Each has a `buildPayload()` shared by Save and Validate, so Validate checks exactly what Save would send. Every form: ids are picked, not typed (the workflow `Select` grouped by status; `ConnectorField` for cache and dedup connectors; HTTP methods as a checkbox group), tags are a `TagsInput`, a failed Save renders `FormError` with the server's `details[]`, and a JSON snapshot of the fields drives `useUnsavedChanges` — `markSaved()` before the post-save `navigate`. JSON is authored in the `JsonEditor`, never a `Textarea`: the workflow's steps (with the form's `lint` mapping `lintSteps` findings to ranges, catalogue completion, and the detail page's diagram redrawn below from the last document that passed the lint), the condition's JSON mode, and every config editor's Advanced view, the console's payload and the workflow dry run's payload (both run on ⌘ Enter through `onRun`).
+Forms (`connector-form.tsx`, `model-form.tsx`, until phase 4 removes them) use a wrapper page that waits for the edit query, then mounts an inner form seeded via `useState` initializers (keyed to remount on data load) — avoid `setState`-in-`useEffect` for form hydration. Each has a `buildPayload()` shared by Save and Validate, so Validate checks exactly what Save would send. Every form: ids are picked, not typed (the workflow `Select` grouped by status; `ConnectorField` for cache and dedup connectors; HTTP methods as a checkbox group), tags are a `TagsInput`, a failed Save renders `FormError` with the server's `details[]`, and a JSON snapshot of the fields drives `useUnsavedChanges` — `markSaved()` before the post-save `navigate`. JSON is authored in the `JsonEditor`, never a `Textarea`: the workflow's steps (with the form's `lint` mapping `lintSteps` findings to ranges, catalogue completion, and the detail page's diagram redrawn below from the last document that passed the lint), the condition's JSON mode, and every config editor's Advanced view, the console's payload and the workflow dry run's payload (both run on ⌘ Enter through `onRun`).
 
 ### API Proxy
 
@@ -941,8 +943,9 @@ optional** on both: treat an absent total as "unknown", never zero.
   loads) are built by a `buildColumns(...)` factory inside a `useMemo`, not a module constant.
   An export button is `useExport`.
 - **No index files:** Import directly from the file (`@/components/ui/button`, not `@/components/ui`).
-- **Entity status:** Use `StatusBadge` from `@/components/shared/status-badge` for draft/active/archived display.
-- **Lifecycle operations:** Use `LifecycleActions` from `@/components/shared/lifecycle-actions` for activate/archive/delete/new-version buttons, passing `onPreflight`/`preflight` to surface the `?dry_run=true` activation check.
+- **Entity status:** a deployed entity has none — it serves, or this node quarantined it
+  (`QuarantineBadge`). `StatusBadge` / `LifecycleActions` remain only for the 1.x connector and
+  model pages until phase 4.
 - **Status colours:** add new status/state strings to `src/lib/status.ts` rather than inlining — every map there falls back to neutral, so an unmapped value degrades silently to grey.
 - **Untoasted mutations:** validate/test/dry-run hooks are bare `useMutation({ mutationFn })` with no toast or invalidation — their results render inline, and a "failure" (invalid config, unreachable backend) is information rather than an error.
 - **Failed mutations:** `toastError(title, e)` from `lib/toast-error.tsx`, never `toast.error`

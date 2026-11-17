@@ -1,46 +1,46 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { Link, useNavigate } from "react-router"
-import { usePlugins, useImportPlugins } from "@/hooks/use-plugins"
+import { usePlugins } from "@/hooks/use-plugins"
 import { useHealth } from "@/hooks/use-health"
-import { useExport } from "@/hooks/use-export"
-import { pluginsApi } from "@/api/plugins"
-import type { CreatePluginRequest, EntityStatus, Plugin } from "@/api/types"
-import { ENTITY_STATUSES } from "@/api/types"
+import { useRegistry } from "@/hooks/use-registry"
+import type { Plugin } from "@/api/types"
 import { useTable, createColumnHelper } from "@tanstack/react-table"
 import { listTableFeatures } from "@/lib/table"
 import { useListState } from "@/lib/use-list-state"
+import { hasTag, matchesText, sortRows } from "@/lib/deployed-list"
+import { dependents } from "@/lib/deployment-diff"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
-import { Select } from "@/components/ui/select"
-import { ImportDialog } from "@/components/shared/import-dialog"
 import { PageHeader } from "@/components/shared/page-header"
 import { PaginationFooter } from "@/components/shared/pagination"
-import { StatusBadge } from "@/components/shared/status-badge"
-import { EmptyState, NoMatches } from "@/components/shared/empty-state"
+import { NoMatches } from "@/components/shared/empty-state"
 import { EntityTable } from "@/components/shared/entity-table"
 import { ErrorState } from "@/components/shared/error-state"
-import { FilterBar, FilterTextInput, FILTER_W } from "@/components/shared/filter-bar"
+import { NothingDeployedState } from "@/components/shared/deployed-state"
+import { FilterBar, FilterTextInput } from "@/components/shared/filter-bar"
 import { PAGE_SIZE } from "@/lib/use-pagination"
 import { pluginHealthBadgeClass } from "@/lib/status"
-import { formatDate, formatWhen, downloadJson, plural } from "@/lib/utils"
-import { Blocks, Download, Plus, Upload } from "lucide-react"
+import { plural } from "@/lib/utils"
+import { Blocks } from "lucide-react"
 
 const columnHelper = createColumnHelper<typeof listTableFeatures, Plugin>()
 
 const FUNCTIONS_SHOWN = 3
 
-const FILTER_KEYS = ["status", "tag"] as const
+const FILTER_KEYS = ["tag", "q"] as const
 
-/** What the status dropdown accepts; anything else in the URL reads as unset. */
-const FILTER_VALUES = { status: ENTITY_STATUSES }
+/** Column id → the sort key the URL carries. */
+const SORT_FIELDS: Record<string, string> = { plugin_id: "plugin_id", revision: "revision" }
 
-/** Column id → the server's `sort_by` field. */
-const SORT_FIELDS: Record<string, string> = {
-  plugin_id: "plugin_id",
-  status: "status",
-  updated_at: "updated_at",
+function sortValue(p: Plugin, field: string) {
+  if (field === "plugin_id") return p.plugin_id
+  if (field === "revision") return p.revision
+  return null
 }
+
+/** This node's load of a plugin, keyed as `/health` names it: by component digest, or `id@version`. */
+const loadFor = (loads: ReadonlyMap<string, NodeLoad>, p: Plugin) =>
+  (p.component_digest ? loads.get(p.component_digest) : undefined) ?? loads.get(`${p.plugin_id}@${p.revision}`)
 
 /** What this node did with a plugin version: loaded it, failed, or has no reason to. */
 type NodeLoad = { state: "loaded" | "failed"; detail?: string }
@@ -50,7 +50,7 @@ type NodeLoad = { state: "loaded" | "failed"; detail?: string }
  * active in the database may have failed to compile here — and the row is
  * where that belongs, not only in a banner counting failures.
  */
-function buildColumns(loads: ReadonlyMap<string, NodeLoad>) {
+function buildColumns(loads: ReadonlyMap<string, NodeLoad>, usedBy: ReadonlyMap<string, number>) {
   return columnHelper.columns([
     columnHelper.accessor("plugin_id", {
       header: "Plugin",
@@ -79,22 +79,26 @@ function buildColumns(loads: ReadonlyMap<string, NodeLoad>) {
         )
       },
     }),
-    columnHelper.accessor("status", {
-      header: "Status",
-      cell: (info) => <StatusBadge status={info.getValue()} />,
+    columnHelper.display({
+      id: "used_by",
+      header: "Required by",
+      cell: (info) => {
+        const n = usedBy.get(info.row.original.plugin_id) ?? 0
+        return n === 0 ? (
+          <span className="text-xs text-muted-foreground">nothing</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">{plural(n, "workflow")}</span>
+        )
+      },
     }),
     columnHelper.accessor("digest", {
       id: "node",
       header: "This node",
       cell: (info) => {
-        const row = info.row.original
-        const load = loads.get(row.digest) ?? loads.get(`${row.plugin_id}@${row.version}`)
+        const load = loadFor(loads, info.row.original)
         if (!load) {
           return (
-            <span
-              className="text-xs text-muted-foreground"
-              title={row.status === "active" ? "Not reported by this node's health detail" : "Only an active version is loaded"}
-            >
+            <span className="text-xs text-muted-foreground" title="Not reported by this node's health detail">
               —
             </span>
           )
@@ -106,40 +110,42 @@ function buildColumns(loads: ReadonlyMap<string, NodeLoad>) {
         )
       },
     }),
-    columnHelper.accessor("version", {
-      header: "Version",
-      cell: (info) => <span className="text-muted-foreground">v{info.getValue()}</span>,
-    }),
-    columnHelper.accessor("updated_at", {
-      header: "Updated",
-      cell: (info) => (
-        <span className="whitespace-nowrap text-muted-foreground" title={formatDate(info.getValue())}>
-          {formatWhen(info.getValue())}
-        </span>
-      ),
+    columnHelper.accessor("revision", {
+      header: "Revision",
+      cell: (info) => <span className="font-mono text-xs text-muted-foreground">r{info.getValue()}</span>,
     }),
   ])
 }
 
 /**
- * WebAssembly plugins (Orion 1.6): custom task functions in a sandbox. A
- * plugin is a versioned entity beside channels and workflows, and the page is
- * shaped like theirs — list, filters, import/export, upload.
+ * WebAssembly plugins: custom task functions in a sandbox, deployed as
+ * manifest members beside the workflows that require them.
  */
 export function PluginsPage() {
   const navigate = useNavigate()
-  const { filters, update, clear, hasFilters, sortQuery, sort, offset, prev, next } = useListState(
+  const { filters, update, clear, hasFilters, sort, sortBy, sortOrder, offset, prev, next } = useListState(
     FILTER_KEYS,
     SORT_FIELDS,
-    { values: FILTER_VALUES },
   )
-  const statusFilter = filters.status as EntityStatus | ""
-  const [showImport, setShowImport] = useState(false)
   const { data: health } = useHealth()
-  const importPlugins = useImportPlugins()
-
-  const query = { status: statusFilter || undefined, tag: filters.tag || undefined }
-  const { data, isLoading, error, refetch } = usePlugins({ limit: PAGE_SIZE, offset, ...query, ...sortQuery })
+  const { data: plugins, isLoading, error, empty, refetch } = usePlugins()
+  const registry = useRegistry()
+  const usedBy = useMemo(
+    () => new Map(plugins.map((p) => [p.plugin_id, dependents(registry.members, { kind: "plugin", id: p.plugin_id }).length])),
+    [plugins, registry.members],
+  )
+  const search = filters.q.trim().toLowerCase()
+  const filtered = useMemo(
+    () =>
+      sortRows(
+        plugins.filter((p) => matchesText(search, p.plugin_id, ...p.functions) && hasTag(p.tags, filters.tag)),
+        sortBy,
+        sortOrder,
+        sortValue,
+      ),
+    [plugins, search, filters.tag, sortBy, sortOrder],
+  )
+  const rows = filtered.slice(offset, offset + PAGE_SIZE)
 
   const loads = useMemo(() => {
     const m = new Map<string, NodeLoad>()
@@ -158,71 +164,28 @@ export function PluginsPage() {
     }
     return m
   }, [health?.plugins])
-  const columns = useMemo(() => buildColumns(loads), [loads])
-
-  const table = useTable({
-    features: listTableFeatures,
-    data: data?.data ?? [],
-    columns,
-  })
-
-  // With the artifacts inlined the bundle is self-contained — what a promotion
-  // to another instance needs. Without them each item names a digest only the
-  // exporting instance holds.
-  const exportAll = useExport(async () => {
-    const plugins = await pluginsApi.export({ ...query, include_artifacts: true })
-    downloadJson(plugins, "orion-plugins")
-    return {
-      message: `Exported ${plural(plugins.length, "plugin")}`,
-      description: "Components inlined as base64",
-    }
-  })
+  const columns = useMemo(() => buildColumns(loads, usedBy), [loads, usedBy])
+  const table = useTable({ features: listTableFeatures, data: rows, columns })
 
   const sandbox = health?.components?.plugins
   const failedLoads = health?.plugins?.failed_to_load ?? []
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Plugins"
-        description="Custom task functions as sandboxed WebAssembly components"
-      >
-        <Button variant="outline" onClick={exportAll.run} disabled={exportAll.pending}>
-          <Download className="h-4 w-4" />
-          {exportAll.pending ? "Exporting..." : "Export"}
-        </Button>
-        <Button variant="outline" onClick={() => setShowImport(true)}>
-          <Upload className="h-4 w-4" />
-          Import
-        </Button>
-        <Button onClick={() => navigate("/plugins/new")}>
-          <Plus className="h-4 w-4" />
-          Upload Plugin
-        </Button>
-      </PageHeader>
-
-      {showImport && (
-        <ImportDialog
-          title="Import Plugins"
-          onImport={(items, opts) =>
-            importPlugins.mutateAsync({ items: items as CreatePluginRequest[], ...opts })
-          }
-          onClose={() => setShowImport(false)}
-        />
-      )}
+      <PageHeader title="Plugins" description="Custom task functions as sandboxed WebAssembly components, as the head deploys them" />
 
       {sandbox === "disabled" && (
         <Callout variant="info">
           The plugin sandbox is off on this node (<code className="font-mono">plugins.enabled =
-          false</code>). Uploads answer 400, and a stored active plugin quarantines the workflows
-          that call its functions rather than running them. Every node in a cluster must agree.
+          false</code>). A deployed plugin is a load issue here, and the workflows that require it
+          are quarantined rather than run. Every node in a cluster must agree.
         </Callout>
       )}
       {sandbox === "degraded" && (
         <Callout variant="warning">
           {failedLoads.length > 0
-            ? `${plural(failedLoads.length, "active plugin version")} did not load on this node — the workflows naming ${failedLoads.length === 1 ? "its" : "their"} functions are quarantined.`
-            : "An active plugin did not load on this node; the workflows naming its functions are quarantined."}{" "}
+            ? `${plural(failedLoads.length, "deployed plugin")} did not load on this node — the workflows naming ${failedLoads.length === 1 ? "its" : "their"} functions are quarantined.`
+            : "A deployed plugin did not load on this node; the workflows naming its functions are quarantined."}{" "}
           <Link to="/engine" className="underline underline-offset-2">
             See the health report
           </Link>
@@ -230,17 +193,13 @@ export function PluginsPage() {
       )}
 
       <FilterBar>
-        <Select
-          value={statusFilter}
-          onChange={(e) => update({ status: e.target.value })}
-          className={FILTER_W}
-          aria-label="Filter by status"
-        >
-          <option value="">All statuses</option>
-          <option value="draft">Draft</option>
-          <option value="active">Active</option>
-          <option value="archived">Archived</option>
-        </Select>
+        <FilterTextInput
+          value={filters.q}
+          onChange={(q) => update({ q })}
+          placeholder="Id or function contains…"
+          ariaLabel="Search plugins"
+          className="w-full sm:w-56"
+        />
         <FilterTextInput
           value={filters.tag}
           onChange={(tag) => update({ tag })}
@@ -250,45 +209,30 @@ export function PluginsPage() {
         />
       </FilterBar>
 
-      {error ? (
+      {error && plugins.length === 0 ? (
         <ErrorState title="Failed to load plugins" error={error} onRetry={() => refetch()} />
       ) : (
         <EntityTable
           table={table}
-          isLoading={isLoading}
+          isLoading={isLoading && plugins.length === 0}
           sort={sort}
           onOpen={(plugin) => navigate(`/plugins/${encodeURIComponent(plugin.plugin_id)}`)}
           empty={
             hasFilters ? (
               <NoMatches noun="plugins" onClear={clear} />
             ) : (
-              <EmptyState
+              <NothingDeployedState
                 icon={Blocks}
-                title="No plugins yet"
-                description="A plugin adds task functions a workflow can name — pure JSON → JSON transformations that run in a WebAssembly sandbox with no clock, network, connectors or secrets. Upload a manifest and its component to start."
-                action={
-                  <>
-                    <Button variant="outline" onClick={() => setShowImport(true)}>
-                      <Upload className="h-4 w-4" /> Import
-                    </Button>
-                    <Button onClick={() => navigate("/plugins/new")}>
-                      <Plus className="h-4 w-4" /> Upload Plugin
-                    </Button>
-                  </>
-                }
+                noun="plugins"
+                headEmpty={empty}
+                what="A plugin adds task functions a workflow can name — pure JSON → JSON transformations in a WebAssembly sandbox with no clock, network, connections or secrets."
               />
             )
           }
         />
       )}
 
-      <PaginationFooter
-        offset={offset}
-        count={data?.data.length ?? 0}
-        total={data?.total}
-        onPrev={prev}
-        onNext={next}
-      />
+      <PaginationFooter offset={offset} count={rows.length} total={filtered.length} onPrev={prev} onNext={next} />
     </div>
   )
 }

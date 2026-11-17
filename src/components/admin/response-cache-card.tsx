@@ -6,7 +6,6 @@ import { useCacheHitsByChannel } from "@/hooks/use-ops-metrics"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { InvalidateNamespaceButton } from "@/components/admin/invalidate-namespace"
 import { cacheNamespaces, hitRatio } from "@/lib/cache-namespaces"
-import { REGISTRY_LIMIT } from "@/lib/use-pagination"
 import { formatPct } from "@/lib/traffic-encoding"
 import { plural } from "@/lib/utils"
 import { Fact } from "@/components/shared/fact"
@@ -19,10 +18,10 @@ import { DatabaseZap } from "lucide-react"
  * reaches for after changing what the cached responses are built from.
  */
 export function ResponseCacheCard({ channelName, cache }: { channelName: string; cache: CacheConfig }) {
-  const { data: registry } = useChannels({ limit: REGISTRY_LIMIT })
+  const { data: registry } = useChannels()
   const cacheHits = useCacheHitsByChannel()
   const shared = useMemo(() => {
-    const byNs = new Map(cacheNamespaces(registry?.data ?? []).map((r) => [r.namespace, r]))
+    const byNs = new Map(cacheNamespaces(registry).map((r) => [r.namespace, r]))
     return (cache.namespaces ?? []).map((ns) => ({
       namespace: ns,
       channels: byNs.get(ns)?.channels.map((c) => c.name) ?? [channelName],

@@ -11,7 +11,7 @@ import { TraceSteps } from "./trace-steps"
 import { TRACE_V4 } from "./__fixtures__/trace-v4"
 
 vi.mock("@/hooks/use-workflows", () => ({
-  useActiveWorkflow: () => ({ workflow: WORKFLOW, isLoading: false }),
+  useWorkflow: () => ({ data: WORKFLOW, revisions: [WORKFLOW], isLoading: false }),
 }))
 vi.mock("@/hooks/use-ops-metrics", () => ({
   useWorkflowCost: () => ({ state: "live", tasks: COSTS }),
@@ -27,12 +27,11 @@ vi.mock("@/hooks/use-connectors", () => ({
 afterEach(cleanup)
 
 const trace = { ...TRACE, created_at: TRACE.started_at!, channel_id: "ch-1" } as TraceDetail
-const channel = (tracing: Record<string, unknown>, status = "active") =>
+const channel = (tracing: Record<string, unknown>) =>
   ({
     channel_id: "ch-1",
     name: "soma-clock-pair",
     workflow_id: "soma-clock-pair-run",
-    status,
     config: { tracing },
   }) as unknown as Channel
 
@@ -73,16 +72,16 @@ describe("TraceSteps", () => {
   it("explains a channel that keeps no steps, with a way to change it", () => {
     renderAt("/traces/x", { ...trace, task_trace_json: undefined }, channel({ task_details: false }))
     expect(screen.getByText(/does not keep step data/)).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Open the channel/ })).toHaveAttribute("href", "/channels/ch-1")
+    expect(screen.getByRole("link", { name: /Open the channel's tracing/ })).toHaveAttribute("href", "/channels/ch-1?tab=config")
   })
 
   it("explains errors_only on a run that succeeded", () => {
     renderAt(
       "/traces/x",
       { ...trace, status: "completed", error: undefined, task_trace_json: undefined },
-      channel({ task_details: true, errors_only: true }, "draft"),
+      channel({ task_details: true, errors_only: true }),
     )
     expect(screen.getByText(/keeps step data for failed runs only/)).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Edit the channel's tracing/ })).toHaveAttribute("href", "/channels/ch-1/edit")
+    expect(screen.getByRole("link", { name: /Open the channel's tracing/ })).toHaveAttribute("href", "/channels/ch-1?tab=config")
   })
 })

@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { ErrorState } from "@/components/shared/error-state"
 import { RolloutBar } from "@/components/deployments/rollout-bar"
-import { dependents, memberKey, refLabel, shortDigest, sortMembers } from "@/lib/deployment-diff"
+import { dependents, memberRefKey, refLabel, shortDigest, sortMembers } from "@/lib/deployment-diff"
 import type { ManifestMember } from "@/api/types"
 import { ChevronDown, ChevronRight } from "lucide-react"
 
@@ -14,7 +14,7 @@ import { ChevronDown, ChevronRight } from "lucide-react"
  * A manifest's members, channels first. A row opens to what the member is —
  * its stored definition (content-addressed, so fetched once) or, for a
  * connection, the configuration digest its revision names — and to what it
- * requires and what requires it. `quarantined` marks members the node that
+ * requires and what requires it. `quarantined` (keyed by `memberRefKey`) marks members the node that
  * answered could not serve (only meaningful for the revision it applies).
  */
 export function MembersTable({
@@ -48,7 +48,7 @@ export function MembersTable({
         </TableHeader>
         <TableBody>
           {sortMembers(members).map((m) => {
-            const key = memberKey(m.entity)
+            const key = memberRefKey(m.entity)
             const isOpen = open.has(key)
             const reason = quarantined?.get(key)
             return (

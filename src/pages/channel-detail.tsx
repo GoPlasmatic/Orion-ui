@@ -1,15 +1,9 @@
-import { useParams, Link, useNavigate } from "react-router"
-import {
-  useChannel,
-  useChannelVersions,
-  useChangeChannelStatus,
-  useCreateChannelVersion,
-  useDeleteChannel,
-  useChannelStatusDryRun,
-  useTriggerChannel,
-} from "@/hooks/use-channels"
+import { useParams, Link } from "react-router"
+import { useChannel, useTriggerChannel } from "@/hooks/use-channels"
 import { useCronOccurrences, useRetryOccurrence } from "@/hooks/use-cron"
-import { useHealth } from "@/hooks/use-health"
+import { useDefinition, useDeploymentHead } from "@/hooks/use-deployments"
+import { useQuarantineReason } from "@/hooks/use-registry"
+import { READ_ONLY_REASON, useCanMutate } from "@/hooks/use-admin-auth"
 import { OccurrencesTable } from "@/components/shared/occurrences-table"
 import { ErrorState } from "@/components/shared/error-state"
 import { ChannelRecentTraces, ChannelTrafficCard } from "@/components/shared/channel-traffic"
@@ -19,17 +13,22 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DetailHeader, DetailSkeleton } from "@/components/shared/detail-header"
 import { Callout } from "@/components/ui/callout"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { StatusBadge } from "@/components/shared/status-badge"
-import { LifecycleActions } from "@/components/shared/lifecycle-actions"
-import { VersionHistory } from "@/components/shared/version-history"
-import { VersionCompare } from "@/components/shared/version-compare"
+import { EntityHistoryPanel } from "@/components/shared/entity-history"
+import { NotDeployedState, QuarantineBadge } from "@/components/shared/deployed-state"
+import { RolloutBar } from "@/components/deployments/rollout-bar"
+import { useUrlFilters } from "@/lib/use-url-filters"
+import { refLabel, shortDigest } from "@/lib/deployment-diff"
 import { RetrySafetyWarning } from "@/components/shared/retry-safety-warning"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { NeighbourhoodMap } from "@/components/graph/neighbourhood-map"
 import { ResponseCacheCard } from "@/components/admin/response-cache-card"
-import { formatDate, plural } from "@/lib/utils"
-import { CalendarClock, Network, Pencil, Play, Send } from "lucide-react"
+import { plural } from "@/lib/utils"
+import { CalendarClock, Network, Play, Send } from "lucide-react"
+
+const TABS = ["overview", "occurrences", "config", "relationships", "history", "definition"] as const
+const URL_KEYS = ["tab"] as const
 
 /** One label / value line in a configuration card. */
 function Row({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
@@ -42,28 +41,30 @@ function Row({ label, children, mono }: { label: string; children: React.ReactNo
 }
 
 export function ChannelDetailPage() {
-  const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
-  const { data: channel, isLoading, error, refetch } = useChannel(id ?? "")
-  const { data: health } = useHealth()
-  const statusDryRun = useChannelStatusDryRun()
-  const { data: versions, isLoading: versionsLoading } = useChannelVersions(id ?? "")
-  const changeStatus = useChangeChannelStatus()
-  const createVersion = useCreateChannelVersion()
-  const deleteChannel = useDeleteChannel()
+  const { id = "" } = useParams<{ id: string }>()
+  const { data: channel, isLoading, error, refetch, notDeployed } = useChannel(id)
+  const head = useDeploymentHead()
+  const quarantine = useQuarantineReason(channel?.member.entity)
+  const canMutate = useCanMutate()
   const trigger = useTriggerChannel()
   const retry = useRetryOccurrence()
+  const { values, set } = useUrlFilters(URL_KEYS)
+  const tab = (TABS as readonly string[]).includes(values.tab) ? values.tab : "overview"
 
   // A cron channel's recent occurrences. Keyed by the stable id, and only
   // fetched for a cron channel — the ledger has nothing to say about a route.
   const schedule = cronTransport(channel)
   const { data: occurrences, isLoading: occurrencesLoading } = useCronOccurrences(
-    { channel_id: id ?? "", limit: 10 },
+    { channel_id: id, limit: 10 },
     { enabled: !!schedule, refetchInterval: 15_000 },
   )
 
   if (isLoading) {
     return <DetailSkeleton />
+  }
+
+  if (notDeployed) {
+    return <NotDeployedState kind="channel" id={id} backTo={{ to: "/channels", label: "Back to Channels" }} />
   }
 
   if (error || !channel) {
@@ -77,11 +78,8 @@ export function ChannelDetailPage() {
     )
   }
 
-  const isPending = changeStatus.isPending || createVersion.isPending || deleteChannel.isPending
-  // The engine refused this channel at load. Until now the only place that
-  // said so was the dashboard; the channel's own page looked perfectly normal.
-  const quarantine = health?.channels?.quarantined?.find((q) => q.channel === channel.name)
-
+  const workflowRef = channel.member.requires?.find((r) => r.kind === "workflow")
+  const otherRequires = (channel.member.requires ?? []).filter((r) => r.kind !== "workflow")
   const auth = channel.config.auth
   const request = channel.config.request
   const rateLimit = channel.config.rate_limit
@@ -93,20 +91,28 @@ export function ChannelDetailPage() {
         title={channel.name}
         badges={
           <>
-            <StatusBadge status={channel.status} />
-            <Badge variant="outline">v{channel.version}</Badge>
+            <Badge variant="outline" title="The member's revision">
+              r{channel.revision}
+            </Badge>
+            <QuarantineBadge reason={quarantine} />
           </>
+        }
+        meta={
+          <p className="text-sm text-muted-foreground">
+            <span className="font-mono">{channel.channel_id}</span>
+            {head.data?.head ? (
+              <>
+                {" "}
+                · deployed in{" "}
+                <Link to={`/deployments/${head.data.head}`} className="underline underline-offset-2">
+                  revision {head.data.head}
+                </Link>
+              </>
+            ) : null}
+          </p>
         }
         actions={
           <>
-            {channel.status === "draft" && (
-              <Button variant="outline" size="sm" asChild>
-                <Link to={`/channels/${channel.channel_id}/edit`}>
-                  <Pencil className="h-3.5 w-3.5" />
-                  Edit
-                </Link>
-              </Button>
-            )}
             <Button variant="outline" size="sm" asChild>
               <Link
                 to={`/system-map?select=${encodeURIComponent(channel.name)}`}
@@ -127,31 +133,22 @@ export function ChannelDetailPage() {
                 </Link>
               </Button>
             )}
-            {schedule && channel.status === "active" && (
+            {schedule && (
               <Button
                 variant="outline"
                 size="sm"
-                disabled={trigger.isPending}
+                disabled={trigger.isPending || !canMutate}
                 onClick={() => trigger.mutate(channel.channel_id)}
-                title="Run now, through the same claim and singleton path a scheduled occurrence takes"
+                title={
+                  canMutate
+                    ? "Run now, through the same claim and singleton path a scheduled occurrence takes"
+                    : READ_ONLY_REASON
+                }
               >
                 <Play className="h-3.5 w-3.5" />
                 {trigger.isPending ? "Triggering..." : "Trigger now"}
               </Button>
             )}
-            <LifecycleActions
-              onPreflight={() =>
-                statusDryRun.mutate({ id: channel.channel_id, req: { status: "active" } })
-              }
-              preflight={statusDryRun.data ?? null}
-              preflightPending={statusDryRun.isPending}
-              status={channel.status}
-              isPending={isPending}
-              onActivate={() => changeStatus.mutate({ id: channel.channel_id, req: { status: "active" } })}
-              onArchive={() => changeStatus.mutate({ id: channel.channel_id, req: { status: "archived" } })}
-              onNewVersion={() => createVersion.mutate(channel.channel_id)}
-              onDelete={() => deleteChannel.mutate(channel.channel_id, { onSuccess: () => navigate("/channels") })}
-            />
           </>
         }
       />
@@ -159,23 +156,24 @@ export function ChannelDetailPage() {
       {quarantine && (
         <Callout variant="destructive">
           <p className="font-medium">
-            Quarantined — the engine refused this channel at load, so its route is not being
-            served.
+            Quarantined — this node could not build this channel from the head, so it is not being
+            served here.
           </p>
           <p className="mt-1 text-xs">
-            {quarantine.reason || "No reason was reported."} Fix the definition, then Validate; the
-            next reload clears the quarantine.
+            {quarantine || "No reason was reported."} The rest of the deployment serves; a deployment
+            that fixes the definition clears it.
           </p>
         </Callout>
       )}
 
-      <Tabs defaultValue="overview">
+      <Tabs defaultValue="overview" value={tab} onValueChange={(v) => set({ tab: v === "overview" ? "" : v })}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           {schedule && <TabsTrigger value="occurrences">Occurrences</TabsTrigger>}
           <TabsTrigger value="config">Configuration</TabsTrigger>
           <TabsTrigger value="relationships">Relationships</TabsTrigger>
-          <TabsTrigger value="versions">Versions</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
+          <TabsTrigger value="definition">Definition</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
@@ -290,24 +288,40 @@ export function ChannelDetailPage() {
                   </>
                 )}
                 <div>
-                  <dt className="text-muted-foreground">Linked Workflow</dt>
+                  <dt className="text-muted-foreground">Workflow</dt>
                   <dd className="mt-0.5">
                     {channel.workflow_id ? (
-                      <Link to={`/workflows/${channel.workflow_id}`} className="text-primary hover:underline font-mono text-xs">
+                      <Link
+                        to={`/workflows/${encodeURIComponent(channel.workflow_id)}`}
+                        className="font-mono text-xs text-primary hover:underline"
+                      >
                         {channel.workflow_id}
+                        {workflowRef && !channel.rollouts ? ` r${workflowRef.revision}` : ""}
                       </Link>
-                    ) : "--"}
+                    ) : (
+                      "--"
+                    )}
                   </dd>
                 </div>
+                {otherRequires.length > 0 && (
+                  <div>
+                    <dt className="text-muted-foreground">Also requires</dt>
+                    <dd className="mt-0.5 text-xs">{otherRequires.map(refLabel).join(", ")}</dd>
+                  </div>
+                )}
                 <div>
-                  <dt className="text-muted-foreground">Created</dt>
-                  <dd className="mt-0.5">{formatDate(channel.created_at)}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Updated</dt>
-                  <dd className="mt-0.5">{formatDate(channel.updated_at)}</dd>
+                  <dt className="text-muted-foreground">Definition</dt>
+                  <dd className="mt-0.5 font-mono text-xs" title={channel.digest}>
+                    {shortDigest(channel.digest)}
+                  </dd>
                 </div>
               </dl>
+              {channel.rollouts && channel.workflow_id && (
+                <div className="mt-4 space-y-1.5">
+                  <p className="text-sm text-muted-foreground">Rollout — the share of buckets each workflow revision serves</p>
+                  <RolloutBar rollouts={channel.rollouts} workflow={channel.workflow_id} />
+                </div>
+              )}
             </CardContent>
           </Card>
           </div>
@@ -335,11 +349,7 @@ export function ChannelDetailPage() {
                 showChannel={false}
                 onRetry={(occId) => retry.mutate(occId)}
                 retryPending={retry.isPending}
-                emptyDescription={
-                  channel.status === "active"
-                    ? "Nothing has been due yet. The first occurrence is materialised within a poll interval of the schedule's next instant."
-                    : "Occurrences are materialised only while the channel is active."
-                }
+                emptyDescription="Nothing has been due yet. The first occurrence is materialised within a poll interval of the schedule's next instant."
               />
             </div>
           </TabsContent>
@@ -644,16 +654,30 @@ export function ChannelDetailPage() {
           <NeighbourhoodMap kind="channel" id={channel.channel_id} />
         </TabsContent>
 
-        <TabsContent value="versions">
-          <div className="space-y-6">
-            <VersionHistory versions={versions} isLoading={versionsLoading} />
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold">Compare versions</h3>
-              <VersionCompare versions={versions} isLoading={versionsLoading} />
-            </div>
-          </div>
+        <TabsContent value="history">
+          <EntityHistoryPanel
+            kind="channel"
+            id={channel.channel_id}
+            current={[{ revision: channel.revision, digest: channel.digest }]}
+          />
+        </TabsContent>
+
+        <TabsContent value="definition">
+          <JsonViewer data={channel.member} label="Manifest member" maxHeight="16rem" />
+          <p className="my-3 text-xs text-muted-foreground">
+            Secrets in <code className="font-mono">config</code> come back masked.
+          </p>
+          <ChannelDefinition digest={channel.digest} />
         </TabsContent>
       </Tabs>
     </div>
   )
+}
+
+/** The stored definition, as the server holds it (content-addressed, so cached for the session). */
+function ChannelDefinition({ digest }: { digest: string }) {
+  const { data, isLoading, error } = useDefinition(digest)
+  if (isLoading) return <Skeleton className="h-40 w-full" />
+  if (error || !data) return <ErrorState title="Could not read the channel definition" error={error} />
+  return <JsonViewer data={data.definition} label="Channel definition" maxHeight="40rem" />
 }

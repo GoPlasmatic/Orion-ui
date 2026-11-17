@@ -100,20 +100,20 @@ export function OperationsPage() {
   const firstRun =
     !!engine && !!channelList && !!workflowList && isFirstRun({ activeChannels: engine.channels.length })
   const firstRunState = {
-    workflows: workflowList?.total ?? workflowList?.data.length ?? 0,
+    workflows: workflowList?.length ?? 0,
     activeWorkflows: engine?.active_workflows ?? 0,
-    channels: channelList?.total ?? channelList?.data.length ?? 0,
+    channels: channelList?.length ?? 0,
     activeChannels: engine?.channels.length ?? 0,
     traces: anyTrace?.data.length ?? 0,
   }
 
   // ---- Domains ----
   const activeChannels = useMemo(() => {
-    const rows = (channelList?.data ?? []).filter((c) => c.status === "active")
+    const rows = channelList ?? []
     if (rows.length > 0) return rows.map((c) => ({ name: c.name, tags: c.tags }))
     // Before the registry answers, the engine's own list names what it serves.
     return (engine?.channels ?? []).map((name) => ({ name, tags: [] as string[] }))
-  }, [channelList?.data, engine?.channels])
+  }, [channelList, engine?.channels])
   const domainIndex = useMemo(() => buildDomains(activeChannels), [activeChannels])
   // Labels drop the shared product prefix ("soma-"); the full name is a hover away.
   const prefix = domainIndex.prefix
@@ -152,7 +152,7 @@ export function OperationsPage() {
 
   // Coverage: a channel reached only by channel_call has no ingress series.
   const coverage = useMemo(() => {
-    if ((channelList?.data.length ?? 0) === 0 || !traffic.available) return null
+    if ((channelList?.length ?? 0) === 0 || !traffic.available) return null
     let serving = 0
     let internal = 0
     let idle = 0
@@ -163,9 +163,9 @@ export function OperationsPage() {
       else idle++
     }
     return { serving, internal, idle }
-  }, [channelList?.data.length, systemGraph, traffic.available, traffic.byChannel])
+  }, [channelList?.length, systemGraph, traffic.available, traffic.byChannel])
 
-  const workflowNames = new Map((workflowList?.data ?? []).map((w) => [w.workflow_id, w.name]))
+  const workflowNames = new Map((workflowList ?? []).map((w) => [w.workflow_id, w.name]))
 
   // ---- Schedules due soon ----
   const upcoming = (schedules ?? [])
@@ -175,7 +175,7 @@ export function OperationsPage() {
 
   const resourceName = (type: string, id: string) => {
     if (type === "channel") {
-      const c = channelList?.data.find((x) => x.channel_id === id)
+      const c = channelList?.find((x) => x.channel_id === id)
       if (c) return c.name
     }
     if (type === "workflow") return workflowNames.get(id) ?? id
@@ -187,7 +187,7 @@ export function OperationsPage() {
     setFrozen(null)
     try {
       await Promise.all(
-        ["metrics", "engine", "health", "traces", "connectors", "channels", "cron", "trace-dlq", "audit-logs"].map(
+        ["metrics", "engine", "health", "traces", "connectors", "deployments", "cron", "trace-dlq", "audit-logs"].map(
           (key) => queryClient.invalidateQueries({ queryKey: [key] }),
         ),
       )

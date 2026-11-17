@@ -5,7 +5,10 @@ import type { DeploymentRevision, EntityKind, EntityRef, ManifestMember, Rollout
  * members serve what, and an entity's history across revisions. Pure, so the
  * pages and the map read one answer.
  *
- * A member is keyed by `(kind, id)`. Its entity `revision` is the author's
+ * A member is keyed by `(kind, id)` — except that a **workflow may appear at
+ * several revisions** in one manifest (a channel's canary split names each
+ * revision it routes to; the server refuses only a repeated revision), so a
+ * workflow is one *group* of members. Its entity `revision` is the author's
  * (the CLI reuses it while the digest is unchanged and bumps it otherwise);
  * `definition_digest` is what it *is*. Both are compared: a revision bump with
  * the same digest is a renumbering, and the same revision over a different
@@ -15,7 +18,11 @@ import type { DeploymentRevision, EntityKind, EntityRef, ManifestMember, Rollout
 /** Display and sort order of member kinds: what serves traffic first. */
 export const KIND_ORDER: readonly EntityKind[] = ["channel", "workflow", "connection", "plugin"]
 
+/** The entity a member is: one channel, connection or plugin, or every revision of one workflow. */
 export const memberKey = (e: { kind: string; id: string }) => `${e.kind}:${e.id}`
+
+/** One member exactly — unique within a manifest, even for a workflow deployed at two revisions. */
+export const memberRefKey = (e: EntityRef) => `${e.kind}:${e.id}@${e.revision}`
 
 export const refLabel = (e: EntityRef) => `${e.kind} ${e.id} r${e.revision}`
 
@@ -38,6 +45,8 @@ export function sortBy<T>(list: T[], of: (t: T) => { kind: string; id: string })
 export type ChangedField = "revision" | "definition" | "requires" | "rollouts"
 
 export interface MemberChange {
+  /** Unique among the changes of one diff. */
+  key: string
   kind: EntityKind
   id: string
   change: "added" | "removed" | "updated"
@@ -56,32 +65,73 @@ const rollouts = (list: RolloutInterval[] | undefined) =>
     .map((r) => `${r.start_bucket}-${r.end_bucket}:${r.workflow_revision}`)
     .join(",")
 
+function memberFields(b: ManifestMember, a: ManifestMember): ChangedField[] {
+  const fields: ChangedField[] = []
+  if (b.entity.revision !== a.entity.revision) fields.push("revision")
+  if (b.definition_digest !== a.definition_digest) fields.push("definition")
+  if (refs(b.requires) !== refs(a.requires)) fields.push("requires")
+  if (rollouts(b.rollouts) !== rollouts(a.rollouts)) fields.push("rollouts")
+  return fields
+}
+
+function groupByEntity(list: ManifestMember[]): Map<string, ManifestMember[]> {
+  const out = new Map<string, ManifestMember[]>()
+  for (const m of list) {
+    const key = memberKey(m.entity)
+    const group = out.get(key)
+    if (group) group.push(m)
+    else out.set(key, [m])
+  }
+  return out
+}
+
 /**
  * The members `after` adds, removes and changes against `before` (an absent
  * `before` — the first revision — adds everything). Unchanged members are
  * left out. Sorted by kind, then id.
+ *
+ * An entity present once on each side is one member that changed or did not.
+ * A workflow present at several revisions on either side (a canary) is
+ * matched revision by revision: the revision a split starts routing to is
+ * added, the one it stops routing to removed.
  */
 export function diffManifests(before: ManifestMember[] | undefined, after: ManifestMember[]): MemberChange[] {
-  const prev = new Map((before ?? []).map((m) => [memberKey(m.entity), m]))
-  const next = new Map(after.map((m) => [memberKey(m.entity), m]))
+  const prev = groupByEntity(before ?? [])
+  const next = groupByEntity(after)
   const out: MemberChange[] = []
-  for (const [key, a] of next) {
-    const b = prev.get(key)
-    if (!b) {
-      out.push({ kind: a.entity.kind, id: a.entity.id, change: "added", after: a, fields: [] })
+  const added = (a: ManifestMember) =>
+    out.push({ key: `+${memberRefKey(a.entity)}`, kind: a.entity.kind, id: a.entity.id, change: "added", after: a, fields: [] })
+  const removed = (b: ManifestMember) =>
+    out.push({ key: `-${memberRefKey(b.entity)}`, kind: b.entity.kind, id: b.entity.id, change: "removed", before: b, fields: [] })
+  const compared = (b: ManifestMember, a: ManifestMember) => {
+    const fields = memberFields(b, a)
+    if (fields.length > 0) {
+      out.push({ key: `~${memberRefKey(a.entity)}`, kind: a.entity.kind, id: a.entity.id, change: "updated", before: b, after: a, fields })
+    }
+  }
+
+  for (const key of new Set([...prev.keys(), ...next.keys()])) {
+    const bs = prev.get(key) ?? []
+    const as = next.get(key) ?? []
+    if (bs.length <= 1 && as.length <= 1) {
+      if (bs[0] && as[0]) compared(bs[0], as[0])
+      else if (as[0]) added(as[0])
+      else if (bs[0]) removed(bs[0])
       continue
     }
-    const fields: ChangedField[] = []
-    if (b.entity.revision !== a.entity.revision) fields.push("revision")
-    if (b.definition_digest !== a.definition_digest) fields.push("definition")
-    if (refs(b.requires) !== refs(a.requires)) fields.push("requires")
-    if (rollouts(b.rollouts) !== rollouts(a.rollouts)) fields.push("rollouts")
-    if (fields.length > 0) out.push({ kind: a.entity.kind, id: a.entity.id, change: "updated", before: b, after: a, fields })
+    for (const a of as) {
+      const b = bs.find((x) => x.entity.revision === a.entity.revision)
+      if (b) compared(b, a)
+      else added(a)
+    }
+    for (const b of bs) if (!as.some((x) => x.entity.revision === b.entity.revision)) removed(b)
   }
-  for (const [key, b] of prev) {
-    if (!next.has(key)) out.push({ kind: b.entity.kind, id: b.entity.id, change: "removed", before: b, fields: [] })
-  }
-  return sortBy(out, (c) => c)
+  return sortBy(out, (c) => c).sort(
+    (x, y) =>
+      kindRank(x.kind) - kindRank(y.kind) ||
+      x.id.localeCompare(y.id) ||
+      (x.after ?? x.before)!.entity.revision - (y.after ?? y.before)!.entity.revision,
+  )
 }
 
 export interface DiffSummary {
@@ -124,26 +174,31 @@ export interface EntityHistoryEntry {
 }
 
 /**
- * An entity's states across the given deployment revisions (newest first).
- * Consecutive deployments carrying the same `(revision, digest)` collapse
- * into one entry. A compacted revision says nothing either way, so it is
- * skipped rather than read as "absent".
+ * An entity's states across the given deployment revisions, newest first. A
+ * run of consecutive deployments carrying the same `(revision, digest)` is
+ * one entry, so A → B → A reads as three. A workflow a canary serves at two
+ * revisions at once has an entry for each. A compacted revision says nothing
+ * either way, so it is skipped rather than read as "absent".
  */
 export function entityHistory(
   revisions: DeploymentRevision[],
   target: { kind: string; id: string },
 ): EntityHistoryEntry[] {
   const out: EntityHistoryEntry[] = []
+  // The entries the last deployment read (the next-newer one) carried.
+  let open = new Map<string, EntityHistoryEntry>()
   for (const rev of [...revisions].sort((a, b) => b.revision - a.revision)) {
     if (rev.members_compacted) continue
-    const m = rev.manifest.members.find((x) => x.entity.kind === target.kind && x.entity.id === target.id)
-    if (!m) continue
-    const last = out.at(-1)
-    if (last && last.revision === m.entity.revision && last.digest === m.definition_digest) {
-      last.deployments.push(rev.revision)
-    } else {
-      out.push({ revision: m.entity.revision, digest: m.definition_digest, deployments: [rev.revision] })
+    const now = new Map<string, EntityHistoryEntry>()
+    for (const m of rev.manifest.members) {
+      if (m.entity.kind !== target.kind || m.entity.id !== target.id) continue
+      const key = `${m.entity.revision}:${m.definition_digest}`
+      let entry = open.get(key)
+      if (entry) entry.deployments.push(rev.revision)
+      else out.push((entry = { revision: m.entity.revision, digest: m.definition_digest, deployments: [rev.revision] }))
+      now.set(key, entry)
     }
+    open = now
   }
   return out
 }

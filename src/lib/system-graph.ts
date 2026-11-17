@@ -198,7 +198,8 @@ export function buildSystemGraph(idx: EntityIndex): SystemGraph {
       channelId: channel.channel_id,
       name: channel.name,
       description: channel.description,
-      status: channel.status,
+      // Everything the head deploys serves; lifecycle colouring becomes health in phase 6.
+      status: "active",
       channelType: channel.channel_type,
       protocol: channel.protocol,
       route: channel.route_pattern,
@@ -206,7 +207,7 @@ export function buildSystemGraph(idx: EntityIndex): SystemGraph {
       // A cron channel is an entry point reached by a clock rather than a
       // route; nothing can call it, so it always sits in the entry lane.
       schedule: cronTransport(channel)?.schedule ?? null,
-      topic: channel.topic ?? null,
+      topic: typeof channel.transport_config?.topic === "string" ? channel.transport_config.topic : null,
       tags: channel.tags ?? [],
       workflowId: channel.workflow_id,
       workflowName: workflow?.name ?? null,

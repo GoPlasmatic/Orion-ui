@@ -1,8 +1,5 @@
 import { useMemo } from "react"
-import { useChannels } from "@/hooks/use-channels"
-import { useWorkflows } from "@/hooks/use-workflows"
-import { useConnectors } from "@/hooks/use-connectors"
-import { REGISTRY_LIMIT } from "@/lib/use-pagination"
+import { useRegistry } from "@/hooks/use-registry"
 import { buildIndex } from "@/lib/topology"
 import { buildSystemGraph } from "@/lib/system-graph"
 import type { Channel, Connector, Workflow } from "@/api/types"
@@ -33,28 +30,27 @@ function derive(channels: Channel[], workflows: Workflow[], connectors: Connecto
 }
 
 /**
- * The whole registry — every channel, workflow and connector — indexed and
- * built into the system graph, once. The map, the dashboard, a detail page's
- * neighbourhood and a connector's dependants all ask the same question, and
- * each used to issue the three list calls and build the graph on its own.
- * The query keys are shared, so TanStack dedupes the requests; this shares
- * the derivation.
+ * What the head deploys — every channel and workflow — indexed and built into
+ * the system graph, once. The map, the dashboard, a detail page's
+ * neighbourhood and a connection's dependants all ask the same question.
+ * Connectors are 1.x's: until the connection pages land (phase 4) the index
+ * carries none, so the graph draws no connector hubs.
  */
 export function useEntityIndex() {
-  const channels = useChannels({ limit: REGISTRY_LIMIT })
-  const workflows = useWorkflows({ limit: REGISTRY_LIMIT })
-  const connectors = useConnectors({ limit: REGISTRY_LIMIT })
+  const registry = useRegistry()
+  const loaded = !!registry.revision || registry.empty
   const { index, graph } = useMemo(
-    () => derive(channels.data?.data ?? NONE, workflows.data?.data ?? NONE, connectors.data?.data ?? NONE),
-    [channels.data?.data, workflows.data?.data, connectors.data?.data],
+    () => derive(registry.channels, registry.workflows, NONE),
+    [registry.channels, registry.workflows],
   )
   return {
     index,
     graph,
-    channels: channels.data,
-    workflows: workflows.data,
-    connectors: connectors.data,
-    /** The channel list is the one the graph cannot do without. */
-    isLoading: channels.isLoading,
+    /** Undefined until the head (and its definitions) have answered. */
+    channels: loaded ? registry.channels : undefined,
+    workflows: loaded ? registry.workflows : undefined,
+    connectors: undefined as Connector[] | undefined,
+    /** The channels are the part the graph cannot do without. */
+    isLoading: registry.isLoading,
   }
 }

@@ -61,7 +61,8 @@ export function toVisualizerWorkflow(w: Workflow): DataflowWorkflow {
     priority: w.priority,
     condition: w.condition,
     tasks: (Array.isArray(w.tasks) ? w.tasks : []).map(toVisualizerStep),
-    continue_on_error: w.continue_on_error,
+    // 2.0 spells 1.x's workflow-level `continue_on_error` as `on_failure: continue`.
+    continue_on_error: w.on_failure === "continue" ? true : undefined,
     loop: w.loop
       ? {
           ...w.loop,

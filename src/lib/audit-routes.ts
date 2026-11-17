@@ -1,14 +1,15 @@
 /**
  * Where an audit row's resource id leads. The row names the resource by the id
- * its own page is keyed on — a channel UUID, a workflow slug, a plugin or model id — so
+ * its own page is keyed on — in 2.0 a manifest member's id for a channel,
+ * workflow or plugin, a revision number for a deployment — so
  * the id is a link wherever a page exists for it. A breaker is addressed by its
  * key; a DLQ entry and a package by their list.
  */
 const ROUTES: Record<string, (id: string) => string> = {
   // 2.0: a deployment row's id is the committed revision.
   deployment: (id) => `/deployments/${encodeURIComponent(id)}`,
-  channel: (id) => `/channels/${id}`,
-  workflow: (id) => `/workflows/${id}`,
+  channel: (id) => `/channels/${encodeURIComponent(id)}`,
+  workflow: (id) => `/workflows/${encodeURIComponent(id)}`,
   connector: (id) => `/connectors/${id}`,
   plugin: (id) => `/plugins/${encodeURIComponent(id)}`,
   model: (id) => `/models/${encodeURIComponent(id)}`,

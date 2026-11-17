@@ -1,4 +1,4 @@
-import type { Step, Task, Workflow } from "@/api/types"
+import type { EntityRef, Step, Task, Workflow } from "@/api/types"
 import {
   isRetryRisk,
   isWrite,
@@ -224,29 +224,23 @@ export function resourceColumns(sections: LensSection[]): ResourceColumn[] {
 }
 
 /**
- * Adds what the server's dependency walk found and the rows did not — a
- * connector named under a key this client does not read, say. Such a column
- * has ops but no steps: the server says it is used, not by which step.
+ * Adds what the workflow's manifest member `requires` and the rows did not
+ * show — a connection named under a key this client does not read, or a
+ * plugin reached through a function the catalogue has not mapped. `requires`
+ * is the compiler's own walk (2.0's answer to 1.x's `dependencies`), so a
+ * column it adds has no steps: it is used, not by which step.
  */
-export function mergeServerResources(
-  columns: ResourceColumn[],
-  server:
-    | { connectors?: { connector: string; function: string }[]; plugins?: { id: string; version: number; functions: string[] }[] }
-    | null
-    | undefined,
-  index?: FunctionIndex,
-): ResourceColumn[] {
-  if (!server) return columns
+export function mergeRequiredResources(columns: ResourceColumn[], requires: readonly EntityRef[] | undefined): ResourceColumn[] {
+  if (!requires?.length) return columns
   const out = new Map(columns.map((c) => [c.key, c]))
-  for (const dep of server.connectors ?? []) {
-    const ref: StepResource = { kind: "connector", name: dep.connector, dynamic: false }
-    if (out.has(resourceKey(ref))) continue
-    const e = stepEffect({ function: { name: dep.function, input: { connector: dep.connector } } }, index)
-    addUse(out, ref, e.op, effectTone(e))
-  }
-  for (const p of server.plugins ?? []) {
-    const ref: StepResource = { kind: "plugin", name: p.id, dynamic: false, version: p.version }
-    if (!out.has(resourceKey(ref))) addUse(out, ref, "call", "neutral")
+  for (const r of requires) {
+    if (r.kind === "connection") {
+      const ref: StepResource = { kind: "connector", name: r.id, dynamic: false }
+      if (!out.has(resourceKey(ref))) addUse(out, ref, "use", "neutral")
+    } else if (r.kind === "plugin") {
+      const present = [...out.values()].some((c) => c.ref.kind === "plugin" && c.ref.name === r.id)
+      if (!present) addUse(out, { kind: "plugin", name: r.id, dynamic: false, version: r.revision }, "call", "neutral")
+    }
   }
   return [...out.values()]
 }
@@ -265,6 +259,7 @@ const NOUNS: Record<string, [string, string]> = {
   delete: ["delete", "deletes"],
   incr: ["increment", "increments"],
   call: ["call", "calls"],
+  use: ["use", "uses"],
   publish: ["publish", "publishes"],
   send: ["send", "sends"],
   infer: ["inference", "inferences"],
@@ -408,7 +403,7 @@ export interface DepsContext {
   workflowName: string
   /** Active workflows calling each plugin (`plugins/{id}/dependencies`); absent while unknown. */
   pluginUsers?: ReadonlyMap<string, string[]>
-  /** Channels referencing each connector, from the entity index. */
+  /** Workflows the head deploys that require each connection, by id. */
   connectorUsers?: ReadonlyMap<string, number>
   cost?: CostView | null
 }
@@ -481,7 +476,7 @@ export function depsInsights(ctx: DepsContext): Insight[] {
     if (top && topUsers > 1) {
       const segs: Seg[] = [
         { b: top.ref.name! },
-        ` is shared by ${plural(topUsers, "channel")}; this workflow makes ${opsPhrase(top.ops)} to it.`,
+        ` is shared by ${plural(topUsers, "workflow")}; this workflow makes ${opsPhrase(top.ops)} to it.`,
       ]
       // The step that would feel it first: its heaviest user here.
       let heaviest: string | null = null

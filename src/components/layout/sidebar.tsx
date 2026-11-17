@@ -37,12 +37,14 @@ function useHiddenNavItems(): Set<string> {
   const capabilities = useEngineStatus().data?.capabilities
   const pluginsOff = isOff(capabilities?.plugins)
   const modelsOff = isOff(capabilities?.models)
-  const plugins = usePlugins({ limit: 1 }, pluginsOff)
+  // The head says whether any plugin is deployed; it is read for the map and
+  // the palette anyway.
+  const plugins = usePlugins()
   const models = useModels({ limit: 1 }, modelsOff)
   const hidden = new Set<string>()
   const none = (q: { data?: { data: unknown[] }; isError: boolean }) =>
     q.isError || (q.data != null && q.data.data.length === 0)
-  if (pluginsOff && none(plugins)) hidden.add("plugins")
+  if (pluginsOff && !plugins.isLoading && plugins.data.length === 0) hidden.add("plugins")
   if (modelsOff && none(models)) hidden.add("models")
   return hidden
 }

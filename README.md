@@ -5,8 +5,9 @@
 
   **The operations console for the [Orion](https://github.com/GoPlasmatic/Orion) services runtime.**
 
-  Live dashboards, a system map of your channels and connectors, visual workflow
-  authoring, trace drill-downs, and full channel/workflow/connector management — no CLI required.
+  Live dashboards, a system map of your channels and connectors, what is deployed and what
+  changed, rollbacks, workflow tests, and trace drill-downs. Changes ship as deployments with
+  `orion-cli`; the console operates them.
 
   [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
   [![React](https://img.shields.io/badge/react-19-blue.svg)](https://react.dev)
@@ -104,10 +105,11 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 |---------|-------------|
 | **Operations** | Live KPIs at a glance — requests/min, error rate, average and p95 latency, and a "what needs attention" feed |
 | **System Map** | Every live channel on one canvas, laid out by role — entry channels, then what they call, tier by tier — with live traffic, health and latency drawn on the nodes and edges; click any channel for its blast radius (1 · 2 · all hops). Level of detail by zoom and collapsible clusters keep 60+ channels readable |
-| **Channels** | Full lifecycle management — create, edit, version, activate/archive, bulk import, structured config editor (rate limits with key logic, cache with key logic, dedup, CORS, validation logic, tracing, response cookies, inbound OAuth2 / OIDC sign-in, Kafka transport, cron schedules) |
-| **Schedules** | Cron channels as first-class: a structured schedule editor (six-field expression, IANA zone, payload, misfire and concurrency policy), what is scheduled and when it next fires, the durable occurrence ledger with retry, and "Trigger now" |
-| **Plugins** | Custom task functions as sandboxed WebAssembly components — upload a manifest and component from the browser, validate, activate with pre-flight, see which workflows depend on it, per-function invocation metrics, and this node's load state |
-| **Workflows** | Full authoring — create/edit drafts with a visual JSONLogic condition editor, a steps editor with completion from the function catalogue, lint to the line and a live diagram, server-side validation, dry-run testing, import/export, version compare, and canary rollout controls; visual DAG (tree/flow/graph views) |
+| **Deployments** | The revision history, what each revision changed down to the definition diff, which nodes serve it, and rollback |
+| **Channels** | Every deployed channel — its route or schedule, the workflow it requires and any canary split, its configuration (auth, rate limits, cache, dedup, validation logic, tracing, OAuth2 sign-in) read-only, its traffic and its history across revisions |
+| **Schedules** | Cron channels as first-class: what is scheduled and when it next fires, the durable occurrence ledger with retry and cancel, and "Trigger now" |
+| **Plugins** | Deployed WebAssembly plugins — manifest, component digest and size, signature, what requires them, per-function invocation metrics, and this node's load state |
+| **Workflows** | Deployed workflows as a visual DAG with four lenses (structure, dependencies, cost, last run), the channels and canary shares that route to them, their history across revisions, and a live test of the deployed definition — or an edited copy that is never saved |
 | **Connectors** | Create and manage HTTP, database, Kafka, cache, storage, and Elasticsearch connectors — including per-operation gates on db/es (make a connector delete-proof with one toggle) |
 | **Circuit Breakers** | Monitor and reset per-connector circuit breakers |
 | **Traces** | Execution history (sync, async, Kafka and cron runs) with per-task detail and latency/error analytics |
@@ -123,9 +125,10 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 |-------|-------------|
 | `/` | Operations dashboard — live KPIs and attention feed |
 | `/system-map` | Live traffic map of the channel call graph |
-| `/channels`, `/channels/new`, `/channels/:id`, `/channels/:id/edit` | Channel list, creation, detail, editing |
-| `/workflows`, `/workflows/new`, `/workflows/:id`, `/workflows/:id/edit` | Workflow list, authoring, visual DAG detail with dry-run and rollout |
-| `/plugins`, `/plugins/new`, `/plugins/:id`, `/plugins/:id/edit` | WebAssembly plugin list, upload, detail (manifest, dependants, invocations, load state), editing |
+| `/deployments`, `/deployments/:revision` | Revision history; one revision's members, changes, convergence and manifest, with rollback and download |
+| `/channels`, `/channels/:id` | Deployed channels and one channel in full |
+| `/workflows`, `/workflows/:id` | Deployed workflows; the DAG with its lenses, test and history |
+| `/plugins`, `/plugins/:id` | Deployed WebAssembly plugins (manifest, dependants, invocations, load state, history) |
 | `/packages` | Promotion receipts (read-only) |
 | `/connectors`, `/connectors/new`, `/connectors/:id`, `/connectors/:id/edit` | Connector management |
 | `/circuit-breakers` | Circuit breaker status and reset |
@@ -134,7 +137,7 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 | `/trace-dlq` | Async dead-letter queue — inspect, requeue, purge |
 | `/audit` | Audit log |
 | `/console` | Data console for test requests (channel or REST method + path) |
-| `/engine` | Health report, engine reload, backups, and API docs (`/settings` redirects here) |
+| `/engine` | Health report, this node's deployment state, backups, and API docs (`/settings` redirects here) |
 
 ## How It Works
 

@@ -38,7 +38,7 @@ import { EmptyState, NoMatches } from "@/components/shared/empty-state"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { FilterBar, FilterTextInput } from "@/components/shared/filter-bar"
 import { RetrySafetyWarning } from "@/components/shared/retry-safety-warning"
-import { PAGE_SIZE, REGISTRY_LIMIT } from "@/lib/use-pagination"
+import { PAGE_SIZE } from "@/lib/use-pagination"
 import { useListState } from "@/lib/use-list-state"
 import { formatDate } from "@/lib/utils"
 import { Inbox, RotateCcw, Trash2 } from "lucide-react"
@@ -72,11 +72,8 @@ export function TraceDlqPage() {
   })
   // The channel each entry belongs to: its page, and the workflow a requeue
   // would re-run. An entry names its channel by name.
-  const { data: channelList } = useChannels({ limit: REGISTRY_LIMIT })
-  const channelsByName = useMemo(
-    () => new Map((channelList?.data ?? []).map((c) => [c.name, c])),
-    [channelList?.data],
-  )
+  const { data: channelList } = useChannels()
+  const channelsByName = useMemo(() => new Map(channelList.map((c) => [c.name, c])), [channelList])
 
   const requeue = useRequeueTraceDlq()
   const rows = list.rows

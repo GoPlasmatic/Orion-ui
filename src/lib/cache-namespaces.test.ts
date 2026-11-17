@@ -1,13 +1,8 @@
 import { describe, expect, it } from "vitest"
-import type { ChannelConfig, EntityStatus } from "@/api/types"
+import type { ChannelConfig } from "@/api/types"
 import { cacheNamespaces, hitRatio, lintNamespace, lintNamespaces } from "@/lib/cache-namespaces"
 
-const ch = (
-  channel_id: string,
-  name: string,
-  status: EntityStatus,
-  config: ChannelConfig = {}
-) => ({ channel_id, name, status, config })
+const ch = (channel_id: string, name: string, config: ChannelConfig = {}) => ({ channel_id, name, config })
 
 describe("lintNamespace", () => {
   it("accepts the server's alphabet up to 64 characters", () => {
@@ -36,24 +31,24 @@ describe("lintNamespace", () => {
 
 describe("cacheNamespaces", () => {
   const channels = [
-    ch("1", "orders-get", "active", {
+    ch("1", "orders-get", {
       cache: { enabled: true, connector: "redis", namespaces: ["orders", "tenant:1"] },
     }),
-    ch("2", "orders-list", "active", { cache: { enabled: true, namespaces: ["orders"] } }),
-    ch("3", "orders-draft", "draft", {
+    ch("2", "orders-list", { cache: { enabled: true, namespaces: ["orders"] } }),
+    ch("3", "orders-replica", {
       cache: { enabled: true, connector: "redis-b", namespaces: ["orders"] },
     }),
-    ch("4", "catalog", "active", { cache: { enabled: false, namespaces: ["catalog"] } }),
-    ch("5", "plain", "active", { cache: { enabled: true } }),
-    ch("6", "no-cache", "active"),
+    ch("4", "catalog", { cache: { enabled: false, namespaces: ["catalog"] } }),
+    ch("5", "plain", { cache: { enabled: true } }),
+    ch("6", "no-cache"),
   ]
 
   it("collects every declared namespace with the channels sharing it", () => {
     const rows = cacheNamespaces(channels)
     expect(rows.map((r) => r.namespace)).toEqual(["orders", "tenant:1", "catalog"])
     const orders = rows[0]
-    expect(orders.channels.map((c) => c.name)).toEqual(["orders-get", "orders-list", "orders-draft"])
-    expect(orders.live).toBe(2)
+    expect(orders.channels.map((c) => c.name)).toEqual(["orders-get", "orders-list", "orders-replica"])
+    expect(orders.live).toBe(3)
     expect(orders.connectors).toEqual(["redis", "redis-b"])
   })
 
@@ -63,14 +58,10 @@ describe("cacheNamespaces", () => {
     expect(catalog.channels[0].cacheEnabled).toBe(false)
   })
 
-  it("counts a channel the registry returns twice once, at its most live version", () => {
-    const rows = cacheNamespaces([
-      ch("1", "a", "archived", { cache: { enabled: true, namespaces: ["x", "x"] } }),
-      ch("1", "a", "active", { cache: { enabled: true, namespaces: ["x"] } }),
-    ])
+  it("counts a namespace a channel declares twice once", () => {
+    const rows = cacheNamespaces([ch("1", "a", { cache: { enabled: true, namespaces: ["x", "x"] } })])
     expect(rows).toHaveLength(1)
     expect(rows[0].channels).toHaveLength(1)
-    expect(rows[0].channels[0].status).toBe("active")
   })
 })
 

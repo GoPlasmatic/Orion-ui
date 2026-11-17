@@ -29,7 +29,7 @@ export function CircuitBreakersPage() {
   const scrolled = useRef(false)
   const { data, isLoading } = useCircuitBreakers({ refetchInterval: 15_000 })
   const { data: connectors } = useConnectors({ limit: REGISTRY_LIMIT })
-  const { data: channels } = useChannels({ limit: REGISTRY_LIMIT })
+  const { data: channels } = useChannels()
   const reset = useResetCircuitBreaker()
   const resetMany = useResetCircuitBreakers()
   const [confirmAll, setConfirmAll] = useState(false)
@@ -42,9 +42,9 @@ export function CircuitBreakersPage() {
   // A breaker key names the channel by *name*; the page needs its id.
   const channelIdByName = useMemo(() => {
     const m = new Map<string, string>()
-    for (const c of channels?.data ?? []) m.set(c.name, c.channel_id)
+    for (const c of channels) m.set(c.name, c.channel_id)
     return m
-  }, [channels?.data])
+  }, [channels])
 
   const rows: BreakerRow[] = useMemo(() => breakerRows(data), [data])
 

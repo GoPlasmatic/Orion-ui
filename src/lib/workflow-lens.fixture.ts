@@ -1,4 +1,4 @@
-import type { ExecutionStep, FunctionSchema, TraceDetail, Workflow, WorkflowDependencies } from "@/api/types"
+import type { EntityRef, ExecutionStep, FunctionSchema, TraceDetail, Workflow } from "@/api/types"
 import type { CostInput } from "@/lib/workflow-lens"
 
 /**
@@ -12,18 +12,26 @@ import type { CostInput } from "@/lib/workflow-lens"
 const soma = (fn: string, sql: string, output: string) => ({ name: fn, input: { connector: "soma-db", sql, output } })
 const gate = { name: "filter", input: { condition: { "!!": [{ var: "temp_data.x" }] } } }
 
+/** What the compiler records the workflow member as requiring (1.12's dependency answer, as 2.0 spells it). */
+export const clockPairRequires: EntityRef[] = [
+  { kind: "connection", id: "soma-db", revision: 1 },
+  { kind: "connection", id: "soma-cache", revision: 1 },
+  { kind: "plugin", id: "tb.pairing", revision: 2 },
+]
+
 export const clockPair: Workflow = {
   workflow_id: "soma-clock-pair-run",
   name: "Clock: pair",
   description: null,
   priority: 0,
   tags: ["soma"],
-  status: "active",
-  version: 2,
-  rollout_percentage: 100,
-  content_hash: "sha256:00",
-  created_at: "2026-10-01T00:00:00",
-  updated_at: "2026-10-01T00:00:00",
+  revision: 2,
+  digest: "sha256:00",
+  member: {
+    entity: { kind: "workflow", id: "soma-clock-pair-run", revision: 2 },
+    definition_digest: "sha256:00",
+    requires: clockPairRequires,
+  },
   loop: {
     over: { var: "temp_data.plan" },
     as: "it",
@@ -83,19 +91,6 @@ export const clockPairCatalogue: FunctionSchema[] = [
   }),
 ]
 
-export const clockPairDeps: WorkflowDependencies = {
-  workflow_id: "soma-clock-pair-run",
-  version: 2,
-  connectors: [
-    { connector: "soma-db", function: "db_read" },
-    { connector: "soma-db", function: "db_write" },
-    { connector: "soma-cache", function: "cache_incr" },
-  ],
-  channels: [],
-  has_dynamic_channel_calls: false,
-  plugins: [{ id: "tb.pairing", version: 2, digest: "sha256:ab12", functions: ["tb.pairing.pair"] }],
-  unresolved_functions: [],
-}
 
 const RUNS = 235
 const ITER = 185

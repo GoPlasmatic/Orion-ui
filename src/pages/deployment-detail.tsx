@@ -18,10 +18,13 @@ import { MembersTable } from "@/components/deployments/members-table"
 import { RevisionChanges } from "@/components/deployments/revision-changes"
 import { ConvergencePanel } from "@/components/deployments/convergence-panel"
 import { RollbackDialog } from "@/components/deployments/rollback-dialog"
-import { memberKey, shortDigest } from "@/lib/deployment-diff"
+import { memberRefKey, shortDigest } from "@/lib/deployment-diff"
 import { useUrlFilters } from "@/lib/use-url-filters"
-import { formatDate, formatRelative, plural } from "@/lib/utils"
-import { History } from "lucide-react"
+import { useExport } from "@/hooks/use-export"
+import { definitionsApi } from "@/api/definitions"
+import { revisionBundle } from "@/lib/deployed-registry"
+import { downloadJson, formatDate, formatRelative, plural } from "@/lib/utils"
+import { Download, History } from "lucide-react"
 
 const TABS = ["members", "changes", "convergence", "manifest"] as const
 type Tab = (typeof TABS)[number]
@@ -46,6 +49,13 @@ export function DeploymentDetailPage() {
   const canMutate = useCanMutate()
   const queryClient = useQueryClient()
   const [rollingBack, setRollingBack] = useState(false)
+  // The manifest and every definition it names, raw (plugin components included), as one file.
+  const download = useExport(async () => {
+    if (!rev) throw new Error("The revision has not loaded")
+    const bundle = await revisionBundle(rev, (d) => definitionsApi.get(d))
+    downloadJson(bundle, `orion-revision-${rev.revision}`)
+    return `Downloaded revision ${rev.revision} with ${plural(Object.keys(bundle.definitions).length, "definition")}`
+  })
 
   const compareParam = Number(values.compare)
   const compareTo =
@@ -60,7 +70,7 @@ export function DeploymentDetailPage() {
   const node = runtime.data?.node_status
   const quarantined = useMemo(() => {
     if (!node || node.applied_revision !== revision) return undefined
-    return new Map(node.quarantined_entities.map((q) => [memberKey(q.entity), q.reason]))
+    return new Map(node.quarantined_entities.map((q) => [memberRefKey(q.entity), q.reason]))
   }, [node, revision])
 
   if (!valid) {
@@ -103,16 +113,28 @@ export function DeploymentDetailPage() {
           </p>
         }
         actions={
-          canRollBack && (
-            <Button
-              variant="outline"
-              onClick={() => setRollingBack(true)}
-              disabled={!!rollbackBlocked}
-              title={rollbackBlocked ?? `Commit revision ${revision}'s manifest again as the next revision`}
-            >
-              <History className="h-4 w-4" /> Roll back to this revision
-            </Button>
-          )
+          <>
+            {!rev.members_compacted && (
+              <Button
+                variant="outline"
+                onClick={download.run}
+                disabled={download.pending}
+                title="The manifest and every definition it names, as one JSON file"
+              >
+                <Download className="h-4 w-4" /> {download.pending ? "Downloading…" : "Download"}
+              </Button>
+            )}
+            {canRollBack && (
+              <Button
+                variant="outline"
+                onClick={() => setRollingBack(true)}
+                disabled={!!rollbackBlocked}
+                title={rollbackBlocked ?? `Commit revision ${revision}'s manifest again as the next revision`}
+              >
+                <History className="h-4 w-4" /> Roll back to this revision
+              </Button>
+            )}
+          </>
         }
       />
 

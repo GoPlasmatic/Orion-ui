@@ -8,10 +8,12 @@
  * server). Each case asserts the headers render and that real row data reaches
  * the cells.
  *
- * The API modules are mocked at `list`; the query hooks, column definitions and
+ * The API modules are mocked at `list` (the deployed entities at the head
+ * manifest and its definitions); the query hooks, column definitions and
  * render path all run for real.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { deployedChannel, deployedWorkflow, setDeployed } from "@/test/deployed-api"
 import type { ReactElement } from "react"
 import { render, screen, cleanup } from "@testing-library/react"
 import { MemoryRouter } from "react-router"
@@ -20,12 +22,10 @@ import { ThemeProvider } from "@/lib/theme-provider"
 import { TimeZoneProvider } from "@/lib/time-zone-provider"
 import type {
   AuditLog,
-  Channel,
   ConnectorListItem,
   Model,
   PaginatedResponse,
   Trace,
-  Workflow,
 } from "@/api/types"
 
 const page = <T,>(rows: T[]): PaginatedResponse<T> => ({
@@ -46,28 +46,15 @@ const auditRows: AuditLog[] = [
   },
 ]
 
-const channelRows: Channel[] = [
-  {
+const channelRows = [
+  deployedChannel({
     channel_id: "ch-1",
     name: "payments-intake",
-    description: null,
-    channel_type: "sync",
-    protocol: "rest",
     route_pattern: "/payments",
     methods: ["POST"],
-    topic: null,
-    consumer_group: null,
-    transport_config: {},
     workflow_id: "wf-1",
-    config: {},
-    status: "active",
-    version: 7,
-    priority: 0,
-    tags: [],
-    content_hash: "sha256:aaa",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-02T00:00:00Z",
-  },
+    revision: 7,
+  }),
 ]
 
 const connectorRows: ConnectorListItem[] = [
@@ -101,20 +88,14 @@ const traceRows: Trace[] = [
   },
 ]
 
-const workflowRows: Workflow[] = [
-  {
+const workflowRows = [
+  deployedWorkflow({
     workflow_id: "wf-1",
     name: "settle-payment",
-    description: null,
-    priority: 0,
     tags: ["billing"],
-    status: "active",
-    version: 3,
+    revision: 3,
     tasks: [{ id: "t1", name: "validate", function: { name: "validation" } }],
-    content_hash: "sha256:ccc",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-02T00:00:00Z",
-  },
+  }),
 ]
 
 const modelRows: Model[] = [
@@ -143,10 +124,8 @@ vi.mock("@/api/audit", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/audit")>()
   return { ...mod, auditApi: { ...mod.auditApi, list: async () => page(auditRows) } }
 })
-vi.mock("@/api/channels", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/channels")>()
-  return { ...mod, channelsApi: { ...mod.channelsApi, list: async () => page(channelRows) } }
-})
+vi.mock("@/api/deployments", async () => (await import("@/test/deployed-api")).deploymentsModule())
+vi.mock("@/api/definitions", async () => (await import("@/test/deployed-api")).definitionsModule())
 vi.mock("@/api/connectors", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/connectors")>()
   return {
@@ -157,10 +136,6 @@ vi.mock("@/api/connectors", async (importOriginal) => {
 vi.mock("@/api/traces", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/traces")>()
   return { ...mod, tracesApi: { ...mod.tracesApi, list: async () => page(traceRows) } }
-})
-vi.mock("@/api/workflows", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/workflows")>()
-  return { ...mod, workflowsApi: { ...mod.workflowsApi, list: async () => page(workflowRows) } }
 })
 vi.mock("@/api/models", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/models")>()
@@ -196,7 +171,10 @@ function expectHeaders(headers: string[]) {
   for (const h of headers) expect(rendered).toContain(h)
 }
 
-beforeEach(cleanup)
+beforeEach(() => {
+  cleanup()
+  setDeployed({ channels: channelRows, workflows: workflowRows })
+})
 
 describe("list page tables", () => {
   it("audit renders headers and row cells", async () => {
@@ -210,8 +188,9 @@ describe("list page tables", () => {
   it("channels renders headers and row cells", async () => {
     renderPage(<ChannelsPage />)
     expect(await screen.findByText("payments-intake")).toBeInTheDocument()
-    expectHeaders(["Name", "Type", "Protocol", "Route", "Status", "Version", "Updated"])
+    expectHeaders(["Name", "Type", "Protocol", "Route", "Workflow", "Revision"])
     expect(screen.getByText("/payments")).toBeInTheDocument()
+    expect(screen.getByText("r7")).toBeInTheDocument()
   })
 
   it("connectors renders headers and row cells", async () => {
@@ -231,8 +210,11 @@ describe("list page tables", () => {
   it("workflows renders headers and row cells", async () => {
     renderPage(<WorkflowsPage />)
     expect(await screen.findByText("settle-payment")).toBeInTheDocument()
-    expectHeaders(["Name", "Tags", "Status", "Version", "Tasks", "Updated"])
+    expectHeaders(["Name", "Tags", "Revision", "Runs on", "Tasks"])
     expect(screen.getByText("billing")).toBeInTheDocument()
+    expect(screen.getByText("r3")).toBeInTheDocument()
+    // The channel requires it, so the list says what runs it.
+    expect(screen.getByText("payments-intake")).toBeInTheDocument()
   })
 
   it("models renders headers and row cells", async () => {

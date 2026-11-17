@@ -1,31 +1,25 @@
-import { Link, useNavigate, useParams } from "react-router"
-import {
-  usePlugin,
-  usePluginVersions,
-  usePluginDependencies,
-  useChangePluginStatus,
-  usePluginStatusDryRun,
-  useCreatePluginVersion,
-  useDeletePlugin,
-} from "@/hooks/use-plugins"
+import { useMemo } from "react"
+import { Link, useParams } from "react-router"
+import { usePlugin } from "@/hooks/use-plugins"
+import { useHealth } from "@/hooks/use-health"
+import { useDeploymentHead } from "@/hooks/use-deployments"
+import { useQuarantineReason, useRegistry } from "@/hooks/use-registry"
 import { usePluginMetrics } from "@/hooks/use-metrics"
+import { dependents } from "@/lib/deployment-diff"
 import type { PluginManifestFunction } from "@/api/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
 import { DetailHeader, DetailSkeleton } from "@/components/shared/detail-header"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
-import { StatusBadge } from "@/components/shared/status-badge"
-import { LifecycleActions } from "@/components/shared/lifecycle-actions"
-import { VersionHistory } from "@/components/shared/version-history"
-import { VersionCompare } from "@/components/shared/version-compare"
+import { EntityHistoryPanel } from "@/components/shared/entity-history"
+import { NotDeployedState, QuarantineBadge } from "@/components/shared/deployed-state"
 import { JsonViewer } from "@/components/shared/json-viewer"
 import { ErrorState } from "@/components/shared/error-state"
 import { pluginHealthBadgeClass } from "@/lib/status"
-import { formatDate, formatDuration, shortDigest } from "@/lib/utils"
-import { GitBranch, Pencil, ShieldCheck } from "lucide-react"
+import { formatBytes, formatDuration, shortDigest } from "@/lib/utils"
+import { GitBranch, ShieldCheck } from "lucide-react"
 
 /** One manifest function's field table, in the manifest's own vocabulary. */
 function ManifestFunction({ fn }: { fn: PluginManifestFunction }) {
@@ -85,20 +79,38 @@ function ManifestFunction({ fn }: { fn: PluginManifestFunction }) {
 }
 
 export function PluginDetailPage() {
-  const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
-  const pluginId = id ?? ""
-  const { data: plugin, isLoading, error, refetch } = usePlugin(pluginId)
-  const { data: versions, isLoading: versionsLoading } = usePluginVersions(pluginId)
-  const { data: dependencies } = usePluginDependencies(pluginId)
-  const statusDryRun = usePluginStatusDryRun()
-  const changeStatus = useChangePluginStatus()
-  const createVersion = useCreatePluginVersion()
-  const deletePlugin = useDeletePlugin()
+  const { id: pluginId = "" } = useParams<{ id: string }>()
+  const { data: plugin, isLoading, error, refetch, notDeployed } = usePlugin(pluginId)
+  const registry = useRegistry()
+  const head = useDeploymentHead()
+  const quarantine = useQuarantineReason(plugin?.member.entity)
   const metrics = usePluginMetrics(pluginId)
+  // Who requires it in the head — the reverse of `requires`.
+  const dependants = useMemo(
+    () => dependents(registry.members, { kind: "plugin", id: pluginId }),
+    [registry.members, pluginId],
+  )
+  // This node's load of the component, from `/health`'s admin detail.
+  const { data: healthReport } = useHealth()
+  const health = useMemo(() => {
+    if (!plugin) return null
+    const match = (p: { plugin: string; version: number; digest: string }) =>
+      (plugin.component_digest && p.digest === plugin.component_digest) ||
+      (p.plugin === plugin.plugin_id && p.version === plugin.revision)
+    const loaded = healthReport?.plugins?.loaded?.find(match)
+    if (loaded) return { state: "loaded" as const, compile_ms: loaded.compile_ms, reason: null }
+    const failed = healthReport?.plugins?.failed_to_load?.find(match)
+    if (failed) return { state: "failed" as const, reason: `${failed.stage}: ${failed.reason}`, compile_ms: null }
+    if (healthReport?.components?.plugins === "disabled") return { state: "disabled" as const, reason: null, compile_ms: null }
+    return null
+  }, [plugin, healthReport])
 
   if (isLoading) {
     return <DetailSkeleton />
+  }
+
+  if (notDeployed) {
+    return <NotDeployedState kind="plugin" id={pluginId} backTo={{ to: "/plugins", label: "Back to Plugins" }} />
   }
 
   if (error || !plugin) {
@@ -112,10 +124,7 @@ export function PluginDetailPage() {
     )
   }
 
-  const isPending = changeStatus.isPending || createVersion.isPending || deletePlugin.isPending
-  const health = plugin.health ?? null
   const manifestFunctions = plugin.manifest?.functions ?? []
-  const dependants = dependencies?.workflows ?? []
 
   return (
     <div className="space-y-6">
@@ -125,8 +134,10 @@ export function PluginDetailPage() {
         titleClassName="font-mono"
         badges={
           <>
-            <StatusBadge status={plugin.status} />
-            <Badge variant="outline">v{plugin.version}</Badge>
+            <Badge variant="outline" title="The member's revision">
+              r{plugin.revision}
+            </Badge>
+            <QuarantineBadge reason={quarantine} />
           </>
         }
         meta={
@@ -146,9 +157,13 @@ export function PluginDetailPage() {
                 {health.state === "loaded" ? "loaded on this node" : health.state}
               </Badge>
             )}
-            {plugin.signature && (
-              <Badge variant="outline" className="text-xs" title="A detached Ed25519 signature over the digest was uploaded">
+            {plugin.signature ? (
+              <Badge variant="outline" className="text-xs" title="A detached Ed25519 signature over the component digest">
                 <ShieldCheck className="h-3 w-3" /> signed
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-xs text-muted-foreground" title="No signature: accepted only where [plugins.trust] names no keys">
+                unsigned
               </Badge>
             )}
             {plugin.tags?.map((tag) => (
@@ -156,37 +171,11 @@ export function PluginDetailPage() {
             ))}
           </div>
         }
-        actions={
-          <>
-            {plugin.status === "draft" && (
-              <Button variant="outline" size="sm" asChild>
-                <Link to={`/plugins/${encodeURIComponent(plugin.plugin_id)}/edit`}>
-                  <Pencil className="h-3.5 w-3.5" /> Edit
-                </Link>
-              </Button>
-            )}
-            <LifecycleActions
-              onPreflight={() =>
-                statusDryRun.mutate({ id: plugin.plugin_id, req: { status: "active" } })
-              }
-              preflight={statusDryRun.data ?? null}
-              preflightPending={statusDryRun.isPending}
-              status={plugin.status}
-              isPending={isPending}
-              onActivate={() => changeStatus.mutate({ id: plugin.plugin_id, req: { status: "active" } })}
-              onArchive={() => changeStatus.mutate({ id: plugin.plugin_id, req: { status: "archived" } })}
-              onNewVersion={() => createVersion.mutate(plugin.plugin_id)}
-              onDelete={() =>
-                deletePlugin.mutate(plugin.plugin_id, { onSuccess: () => navigate("/plugins") })
-              }
-            />
-          </>
-        }
       />
 
       {health?.state === "failed" && (
         <Callout variant="destructive">
-          This version did not load on the answering node
+          This revision did not load on the answering node
           {health.reason ? `: ${health.reason}` : "."} Every workflow naming its functions is
           quarantined there.
         </Callout>
@@ -194,17 +183,12 @@ export function PluginDetailPage() {
       {health?.state === "disabled" && (
         <Callout variant="info">
           The plugin sandbox is off on this node (<code className="font-mono">plugins.enabled =
-          false</code>). The definition can be authored and promoted here, but an active version
-          quarantines the workflows that call it until a node with the sandbox on serves them.
+          false</code>). The plugin is deployed, but the workflows that require it are quarantined
+          until a node with the sandbox on serves them.
         </Callout>
       )}
-      {plugin.status === "active" && dependants.length > 0 && (
-        <Callout variant="muted">
-          {dependants.length} active workflow{dependants.length === 1 ? "" : "s"} call{dependants.length === 1 ? "s" : ""} this
-          plugin's functions, so archiving or deleting it is refused (409) until they stop. Activating
-          a new version is checked against their inputs: a field renamed or newly required between
-          versions is refused naming the workflow, and this version keeps serving.
-        </Callout>
+      {quarantine && (
+        <Callout variant="destructive">Quarantined on this node: {quarantine}</Callout>
       )}
 
       <Tabs defaultValue="overview">
@@ -212,7 +196,7 @@ export function PluginDetailPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="manifest">Manifest</TabsTrigger>
           <TabsTrigger value="dependencies">Dependencies</TabsTrigger>
-          <TabsTrigger value="versions">Versions</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
@@ -224,14 +208,16 @@ export function PluginDetailPage() {
               <CardContent>
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
                   <div className="col-span-2">
-                    <dt className="text-muted-foreground">Component digest</dt>
-                    <dd className="mt-0.5 font-mono text-xs" title={plugin.digest}>
-                      {shortDigest(plugin.digest)}
+                    <dt className="text-muted-foreground">Component</dt>
+                    <dd className="mt-0.5 font-mono text-xs" title={plugin.component_digest}>
+                      {plugin.component_digest ? shortDigest(plugin.component_digest) : "digest not computed in this browser"}
+                      {plugin.component_bytes != null && (
+                        <span className="text-muted-foreground"> · {formatBytes(plugin.component_bytes)}</span>
+                      )}
                     </dd>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      The identity a generation, a trace, a package and the catalogue all name the
-                      artifact by. The signature attests to it; the content hash is over the
-                      manifest, digest and tags.
+                      What the catalogue, a trace and <code className="font-mono">/health</code> name it by; the
+                      signature attests to it. The definition digest covers the manifest and the component together.
                     </p>
                   </div>
                   <div className="col-span-2">
@@ -245,9 +231,9 @@ export function PluginDetailPage() {
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Content hash</dt>
-                    <dd className="mt-0.5 font-mono text-xs" title={plugin.content_hash}>
-                      {shortDigest(plugin.content_hash)}
+                    <dt className="text-muted-foreground">Definition</dt>
+                    <dd className="mt-0.5 font-mono text-xs" title={plugin.digest}>
+                      {shortDigest(plugin.digest)}
                     </dd>
                   </div>
                   <div>
@@ -257,12 +243,16 @@ export function PluginDetailPage() {
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Created</dt>
-                    <dd className="mt-0.5">{formatDate(plugin.created_at)}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Updated</dt>
-                    <dd className="mt-0.5">{formatDate(plugin.updated_at)}</dd>
+                    <dt className="text-muted-foreground">Deployed in</dt>
+                    <dd className="mt-0.5">
+                      {head.data?.head ? (
+                        <Link to={`/deployments/${head.data.head}`} className="underline underline-offset-2">
+                          revision {head.data.head}
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
+                    </dd>
                   </div>
                 </dl>
               </CardContent>
@@ -335,25 +325,33 @@ export function PluginDetailPage() {
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <GitBranch className="h-4 w-4 text-muted-foreground" />
-                Active workflows calling this plugin ({dependants.length})
+                Members requiring this plugin ({dependants.length})
               </CardTitle>
             </CardHeader>
             <CardContent>
               {dependants.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No active workflow calls{" "}
-                  {dependencies?.functions?.length
-                    ? dependencies.functions.map((f) => <code key={f} className="mr-1 font-mono">{f}</code>)
-                    : "its functions"}
-                  .
+                  Nothing in the head requires it, so none of{" "}
+                  {plugin.functions.map((f) => (
+                    <code key={f} className="mr-1 font-mono">
+                      {f}
+                    </code>
+                  ))}
+                  is called.
                 </p>
               ) : (
                 <ul className="space-y-2">
-                  {dependants.map((wf) => (
-                    <li key={wf}>
-                      <Link to={`/workflows/${wf}`} className="text-sm font-medium underline">
-                        {wf}
-                      </Link>
+                  {dependants.map((m) => (
+                    <li key={`${m.entity.kind}:${m.entity.id}@${m.entity.revision}`}>
+                      <Link
+                        to={`/${m.entity.kind}s/${encodeURIComponent(m.entity.id)}`}
+                        className="text-sm font-medium underline"
+                      >
+                        {m.entity.id}
+                      </Link>{" "}
+                      <span className="text-xs text-muted-foreground">
+                        {m.entity.kind} r{m.entity.revision}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -362,14 +360,12 @@ export function PluginDetailPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="versions">
-          <div className="space-y-6">
-            <VersionHistory versions={versions} isLoading={versionsLoading} />
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold">Compare versions</h3>
-              <VersionCompare versions={versions} isLoading={versionsLoading} />
-            </div>
-          </div>
+        <TabsContent value="history">
+          <EntityHistoryPanel
+            kind="plugin"
+            id={plugin.plugin_id}
+            current={[{ revision: plugin.revision, digest: plugin.digest }]}
+          />
         </TabsContent>
       </Tabs>
     </div>

@@ -2,7 +2,8 @@
  * What a list page says when it has no rows to show.
  *
  * Two different facts share one slot. An empty registry wants the first-run
- * state — what the primitive is, and a button that creates one. A list the
+ * state — what the primitive is, and how one comes to exist (in 2.0, for a
+ * deployed entity, a deployment applied from the CLI). A list the
  * filters narrowed to nothing wants the opposite: the registry is not empty,
  * these filters select none of it, and here is the way back. Showing the
  * first-run pitch over a filtered list told an operator the system was empty
@@ -23,10 +24,9 @@ vi.mock("@/api/audit", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/audit")>()
   return { ...mod, auditApi: { ...mod.auditApi, list: async () => empty() } }
 })
-vi.mock("@/api/channels", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/channels")>()
-  return { ...mod, channelsApi: { ...mod.channelsApi, list: async () => empty() } }
-})
+// The deployed entities: a head that deploys nothing.
+vi.mock("@/api/deployments", async () => (await import("@/test/deployed-api")).deploymentsModule())
+vi.mock("@/api/definitions", async () => (await import("@/test/deployed-api")).definitionsModule())
 vi.mock("@/api/connectors", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/connectors")>()
   return { ...mod, connectorsApi: { ...mod.connectorsApi, list: async () => empty() } }
@@ -35,17 +35,9 @@ vi.mock("@/api/traces", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/traces")>()
   return { ...mod, tracesApi: { ...mod.tracesApi, list: async () => empty() } }
 })
-vi.mock("@/api/workflows", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/workflows")>()
-  return { ...mod, workflowsApi: { ...mod.workflowsApi, list: async () => empty() } }
-})
 vi.mock("@/api/models", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/models")>()
   return { ...mod, modelsApi: { ...mod.modelsApi, list: async () => empty() } }
-})
-vi.mock("@/api/plugins", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/plugins")>()
-  return { ...mod, pluginsApi: { ...mod.pluginsApi, list: async () => empty() } }
 })
 vi.mock("@/api/trace-dlq", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/trace-dlq")>()
@@ -87,10 +79,10 @@ interface Case {
 }
 
 const PAGES: Case[] = [
-  { name: "channels", ui: <ChannelsPage />, route: "/channels", filter: "tag=nothing-carries-this", noun: "channels", firstRun: "No channels yet" },
-  { name: "workflows", ui: <WorkflowsPage />, route: "/workflows", filter: "tag=nothing-carries-this", noun: "workflows", firstRun: "No workflows yet" },
+  { name: "channels", ui: <ChannelsPage />, route: "/channels", filter: "tag=nothing-carries-this", noun: "channels", firstRun: "Nothing is deployed yet" },
+  { name: "workflows", ui: <WorkflowsPage />, route: "/workflows", filter: "tag=nothing-carries-this", noun: "workflows", firstRun: "Nothing is deployed yet" },
   { name: "connectors", ui: <ConnectorsPage />, route: "/connectors", filter: "tag=nothing-carries-this", noun: "connectors", firstRun: "No connectors yet" },
-  { name: "plugins", ui: <PluginsPage />, route: "/plugins", filter: "tag=nothing-carries-this", noun: "plugins", firstRun: "No plugins yet" },
+  { name: "plugins", ui: <PluginsPage />, route: "/plugins", filter: "tag=nothing-carries-this", noun: "plugins", firstRun: "Nothing is deployed yet" },
   { name: "models", ui: <ModelsPage />, route: "/models", filter: "admission=failed", noun: "models", firstRun: "No models yet" },
   { name: "traces", ui: <TracesPage />, route: "/traces", filter: "channel=nothing-is-called-this", noun: "traces", firstRun: "No traces found" },
   { name: "audit", ui: <AuditPage />, route: "/audit", filter: "principal=nobody", noun: "audit rows", firstRun: "No audit rows yet" },

@@ -40,11 +40,8 @@ export function WorkflowLenses({ workflow, runsOn }: { workflow: Workflow; runsO
   const sections = useMemo(() => lensSections(workflow, fnIndex), [workflow, fnIndex])
   const cost = useWorkflowCost(workflow.workflow_id)
   const measured = useMemo(() => (cost.runs > 0 ? costView(sections, cost) : null), [sections, cost])
-  // Active channels first: the one whose traces and schedule the lenses read.
-  const channels = useMemo(
-    () => [...runsOn].sort((a, b) => Number(b.status === "active") - Number(a.status === "active")),
-    [runsOn],
-  )
+  // Every channel in `runsOn` is deployed; the first is the one whose traces and schedule the lenses read.
+  const channels = runsOn
 
   const toggle = () => {
     const next = !hidden

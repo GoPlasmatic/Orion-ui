@@ -7,15 +7,24 @@ const FILLS = ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart
  * A channel's rollout: which workflow revision serves each slice of its 100
  * routing buckets. Drawn to scale, one colour per workflow revision, with the
  * shares written out beside it so the bar is never the only carrier.
+ * `compact` (a list cell) writes the shares without the workflow's name.
  */
-export function RolloutBar({ rollouts, workflow }: { rollouts: RolloutInterval[]; workflow: string }) {
+export function RolloutBar({
+  rollouts,
+  workflow,
+  compact = false,
+}: {
+  rollouts: RolloutInterval[]
+  workflow: string
+  compact?: boolean
+}) {
   const sorted = [...rollouts].sort((a, b) => a.start_bucket - b.start_bucket)
   const revisions = [...new Set(sorted.map((r) => r.workflow_revision))].sort((a, b) => a - b)
   const fill = (rev: number) => FILLS[revisions.indexOf(rev) % FILLS.length]
   const share = new Map<number, number>()
   for (const r of sorted) share.set(r.workflow_revision, (share.get(r.workflow_revision) ?? 0) + r.end_bucket - r.start_bucket)
   return (
-    <div className="space-y-1.5">
+    <div className={cn("space-y-1.5", compact && "w-40 space-y-1")}>
       <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted" role="img" aria-label={`Rollout of ${workflow}`}>
         {sorted.map((r) => (
           <div
@@ -30,7 +39,7 @@ export function RolloutBar({ rollouts, workflow }: { rollouts: RolloutInterval[]
         {revisions.map((rev) => (
           <span key={rev} className="inline-flex items-center gap-1.5">
             <span className={cn("h-2 w-2 rounded-full", fill(rev))} aria-hidden />
-            {workflow} r{rev}: {share.get(rev)}%
+            {compact ? "" : `${workflow} `}r{rev}: {share.get(rev)}%
           </span>
         ))}
       </p>

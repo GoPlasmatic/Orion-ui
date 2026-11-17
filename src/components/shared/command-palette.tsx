@@ -23,7 +23,7 @@ import {
   Network,
   Send,
   Activity,
-  Pencil,
+  Play,
   type LucideIcon,
 } from "lucide-react"
 
@@ -89,10 +89,10 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
 
   // The entity lists are fetched only while the palette is mounted, under the
   // same key every other registry read uses, so nothing is fetched twice.
-  const { data: channels } = useChannels({ limit: REGISTRY_LIMIT })
-  const { data: workflows } = useWorkflows({ limit: REGISTRY_LIMIT })
+  const { data: channels } = useChannels()
+  const { data: workflows } = useWorkflows()
   const { data: connectors } = useConnectors({ limit: REGISTRY_LIMIT })
-  const { data: plugins } = usePlugins({ limit: REGISTRY_LIMIT })
+  const { data: plugins } = usePlugins()
   // The page's own entity, from the cache the detail page already filled.
   const { data: channel } = useChannel(entityIdAt(pathname, "/channels/:id/*"))
   const { data: workflow } = useWorkflow(entityIdAt(pathname, "/workflows/:id/*"))
@@ -165,46 +165,36 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
         keywords: "runs history failed",
         run: () => go(`/traces?channel=${encodeURIComponent(channel.name)}`),
       })
-      if (channel.status === "draft") {
-        contextual.push({
-          id: `ctx-edit-${channel.channel_id}`,
-          label: `Edit ${channel.name}`,
-          group: "This page",
-          icon: Pencil,
-          keywords: "draft change",
-          run: () => go(`/channels/${channel.channel_id}/edit`),
-        })
-      }
     }
-    if (workflow?.status === "draft") {
+    if (workflow) {
       contextual.push({
-        id: `ctx-edit-wf-${workflow.workflow_id}`,
-        label: `Edit ${workflow.name}`,
+        id: `ctx-test-wf-${workflow.workflow_id}`,
+        label: `Test ${workflow.name}`,
         group: "This page",
-        icon: Pencil,
-        keywords: "draft change steps",
-        run: () => go(`/workflows/${workflow.workflow_id}/edit`),
+        icon: Play,
+        keywords: "dry run test definition",
+        run: () => go(`/workflows/${encodeURIComponent(workflow.workflow_id)}?tab=test`),
       })
     }
 
     const entities: Command[] = [
-      ...(channels?.data ?? []).map((c) => ({
+      ...channels.map((c) => ({
         id: `ch-${c.channel_id}`,
         label: c.name,
         hint: "channel",
         group: "Channels",
         icon: Radio,
         keywords: c.route_pattern ?? "",
-        run: () => go(`/channels/${c.channel_id}`),
+        run: () => go(`/channels/${encodeURIComponent(c.channel_id)}`),
       })),
-      ...(workflows?.data ?? []).map((w) => ({
+      ...workflows.map((w) => ({
         id: `wf-${w.workflow_id}`,
         label: w.name,
         hint: "workflow",
         group: "Workflows",
         icon: GitBranch,
         keywords: (w.tags ?? []).join(" "),
-        run: () => go(`/workflows/${w.workflow_id}`),
+        run: () => go(`/workflows/${encodeURIComponent(w.workflow_id)}`),
       })),
       ...(connectors?.data ?? []).map((c) => ({
         id: `co-${c.id}`,
@@ -214,7 +204,7 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
         icon: Plug,
         run: () => go(`/connectors/${c.id}`),
       })),
-      ...(plugins?.data ?? []).map((p) => ({
+      ...plugins.map((p) => ({
         id: `pl-${p.plugin_id}`,
         label: p.plugin_id,
         hint: "plugin",

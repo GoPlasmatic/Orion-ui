@@ -1,6 +1,6 @@
 # Orion-ui 2.0: implementation plan
 
-Status: Phases 0–2 done on branch `v2` (2026-11-16); Phase 5 deferred to 2.1 (D1 = A). Target: Orion `v2.0.0` (Orion `main` @ `1e58099f`, not yet tagged).
+Status: Phases 0–2 done on branch `v2` (2026-11-16), Phase 3 done (2026-11-17); Phase 5 deferred to 2.1 (D1 = A). Target: Orion `v2.0.0` (Orion `main` @ `1e58099f`, not yet tagged).
 
 ## Goal and definition of done
 
@@ -254,6 +254,38 @@ Rework rather than rewrite: keep the detail and lens components and replace thei
   - Entity ids (manifest `id`) are the one key for workflows, channels, plugins and connections.
   - Traces carry `channel` (name) and `channel_id`. Confirm against a live server which one equals the entity id, then update CLAUDE.md's "three ID spaces" section and `change-pins.ts` accordingly.
 - **Delete:** `workflow-form`, `channel-form`, `plugin-form`, `lifecycle-actions`, `import-dialog`, `workflow-import-wizard`, `version-history` (replaced by entity history), `useActiveWorkflow`, all `*/status`, `*/versions`, `*/import`, `*/export` and `*/validate` API functions. Export becomes "download this revision's manifest + definitions" (a zip built client-side) on the revision page.
+
+**Phase 3 outcome (2026-11-17).** Done:
+- **The registry.** `lib/deployed-registry.ts` + `hooks/use-registry.ts` project the head's members over their definitions exactly as the server's `channel_row` / `workflow_row` / `plugin_row` do. `Channel`, `Workflow` and `Plugin` are now deployed entities (`revision`, `digest`, `member`; no status, version or timestamps). `useChannels` / `useWorkflows` / `usePlugins` and their single-entity hooks read it. So do the palette, console, caches, breakers, DLQ, attention list, entity index (map, dashboard) and retry safety.
+- **Lists** (Workflows, Channels, Plugins): filter, sort and page in the browser. Each shows the revision and a quarantine badge from `node_status`. Workflows show what runs them (or "no channel") and a canary's per-revision shares. Channels draw a split's `RolloutBar`. Plugins show what requires them and this node's load.
+- **Workflow detail:**
+  - The lenses are kept. The deps lens reads the member's `requires` instead of 1.x's `dependencies`.
+  - Runs on, plus each channel's split. `?revision=` picks a revision under a canary.
+  - **Test** runs `POST /definitions/test` with the deployed definition or an edited, never-saved copy (with its diff against the deployed one). A read-only key sees the reason.
+  - History tab (`EntityHistoryPanel`: states across revisions, any two diffed); Definition tab.
+- **Channel detail:** the workflow and revision it requires, other requirements, the rollout bar, and the definition digest. Cron trigger is gated on `useCanMutate`. History and Definition tabs. The quarantine comes from `node_status`.
+- **Plugin detail:** the component's size and `sha256:` (computed in the browser; `useDefinition` drops the base64, so nothing caches it), the definition digest, signed or unsigned, this node's load from `/health`, the members requiring it, and history.
+- **IDs:** an unknown id renders `NotDeployedState`, naming the last recent revision that carried it. 1.x `/new` and `/:id/edit` links redirect.
+- **Revision download** (in place of 1.x export): the revision page downloads `{manifest, definitions}` as one JSON file, plugin components included.
+- **ID spaces confirmed** on a 2.0 server: a trace's `channel_id` is the member id and `channel` the definition `name` (CLAUDE.md updated).
+- **Deleted:**
+  - the three forms, the four channel config editors, the workflow import wizard, and the lints that only served them (`channel-auth`, `oauth2-login`, `tensor-keys`, which the server now reports as the `logic.escaped_template_key` advisory) and the `Slider`. The catalogue completions moved to the Test tab's edited copy;
+  - `api/workflows.ts` and `api/plugins.ts`; `api/channels.ts` keeps only `trigger`;
+  - `useActiveWorkflow`, `WorkflowDependencies` and the 1.x request types.
+  - `PENDING_V2` is down from 66 to 26 entries (connectors, packages and models: Phase 4).
+- **Fixed from Phase 2:** a workflow may appear at several revisions in one manifest (a canary; the server refuses only a repeated revision). `diffManifests` now matches such a workflow revision by revision, `entityHistory` keeps one entry per concurrent revision, and every table keys members by `memberRefKey` (kind, id and revision).
+- **Departures:**
+  - `StatusBadge`, `LifecycleActions`, `VersionHistory`/`VersionCompare`, `ImportDialog` and `EntityStatus` survive for the connector and model pages; Phase 4 deletes them with those pages.
+  - Entity history reads a fixed window, the newest 25 revisions (`HISTORY_DEPTH`), and says when older history exists. It does not walk cursors to a depth of 50.
+  - The plugin page lists its manifest functions, not catalogue entries by provenance (the deployed manifest is the same list).
+  - `change-pins.ts` still pins nothing; Phase 6 reads revision diffs.
+- **E2E** (`e2e/entities.spec.ts`, 6 tests):
+  - the workflow list and lenses;
+  - a definition test that matches;
+  - a channel's required workflow and history;
+  - the authoring redirects and the not-deployed state;
+  - a read-only key told why the test is off.
+- Unit coverage: registry projection, canary shares, plugin byte stripping (SHA-256 vector), the bundle, canary diffs and history.
 
 ### Phase 4: Connections and provider packages (M)
 

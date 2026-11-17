@@ -44,6 +44,16 @@ describe("diffManifests", () => {
     expect(diffManifests(b, moved)[0].fields).toEqual(["rollouts"])
   })
 
+  it("matches a workflow deployed at several revisions (a canary) revision by revision", () => {
+    const before = [wf("orders", 1, "sha256:a")]
+    const canary = [wf("orders", 1, "sha256:a"), wf("orders", 2, "sha256:b")]
+    const promoted = [wf("orders", 2, "sha256:b")]
+    expect(diffManifests(before, canary).map((c) => [c.change, c.after?.entity.revision])).toEqual([["added", 2]])
+    expect(diffManifests(canary, promoted).map((c) => [c.change, c.before?.entity.revision])).toEqual([["removed", 1]])
+    const keys = diffManifests(undefined, canary).map((c) => c.key)
+    expect(new Set(keys).size).toBe(2)
+  })
+
   it("reads the first revision as adding everything", () => {
     expect(summarizeDiff(diffManifests(undefined, [wf("a", 1, "x"), ch("a", 1, "y")]))).toEqual({
       added: 2,
@@ -87,6 +97,17 @@ describe("entityHistory", () => {
     expect(history).toEqual([
       { revision: 1, digest: "a", deployments: [6] },
       { revision: 2, digest: "b", deployments: [4] },
+      { revision: 1, digest: "a", deployments: [2, 1] },
+    ])
+  })
+
+  it("keeps one entry per revision a canary serves at once", () => {
+    const history = entityHistory(
+      [rev(1, [wf("orders", 1, "a")]), rev(2, [wf("orders", 1, "a"), wf("orders", 2, "b")]), rev(3, [wf("orders", 2, "b")])],
+      { kind: "workflow", id: "orders" },
+    )
+    expect(history).toEqual([
+      { revision: 2, digest: "b", deployments: [3, 2] },
       { revision: 1, digest: "a", deployments: [2, 1] },
     ])
   })

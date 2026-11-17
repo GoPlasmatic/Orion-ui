@@ -81,8 +81,8 @@ export function CostLens({
       )}
       {state !== "off" && state !== "error" && !cost && (
         <Callout variant="muted">
-          No run of this workflow has been recorded since the server started
-          {workflow.status !== "active" ? " — it is not active" : ""}. Its cost appears here after the first run.
+          No run of this workflow has been recorded since the server started. Its cost appears here
+          after the first run.
         </Callout>
       )}
 

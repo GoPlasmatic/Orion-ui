@@ -5,6 +5,7 @@ import {
   createBrowserRouter,
   createRoutesFromElements,
   useLocation,
+  useParams,
 } from "react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { isAuthError } from "@/api/client"
@@ -17,10 +18,8 @@ import { OperationsPage } from "@/pages/operations"
 import { SystemMapPage } from "@/pages/system-map"
 import { ChannelsPage } from "@/pages/channels"
 import { ChannelDetailPage } from "@/pages/channel-detail"
-import { ChannelFormPage } from "@/pages/channel-form"
 import { WorkflowsPage } from "@/pages/workflows"
 import { WorkflowDetailPage } from "@/pages/workflow-detail"
-import { WorkflowFormPage } from "@/pages/workflow-form"
 import { ConnectorsPage } from "@/pages/connectors"
 import { ConnectorDetailPage } from "@/pages/connector-detail"
 import { ConnectorFormPage } from "@/pages/connector-form"
@@ -33,7 +32,6 @@ import { ConsolePage } from "@/pages/console"
 import { PackagesPage } from "@/pages/packages"
 import { PluginsPage } from "@/pages/plugins"
 import { PluginDetailPage } from "@/pages/plugin-detail"
-import { PluginFormPage } from "@/pages/plugin-form"
 import { ModelsPage } from "@/pages/models"
 import { ModelDetailPage } from "@/pages/model-detail"
 import { ModelFormPage } from "@/pages/model-form"
@@ -69,6 +67,17 @@ function SettingsRedirect() {
   return <Navigate to={`/engine${search}${hash}`} replace />
 }
 
+/**
+ * 1.x's authoring routes (`/workflows/new`, `/channels/:id/edit`, …). In 2.0
+ * a change is a deployment — compiled and applied with `orion-cli` — so the
+ * forms are gone; an old link lands on what it was about instead of a 404.
+ */
+function AuthoringRedirect({ to }: { to: string }) {
+  const { id } = useParams<{ id: string }>()
+  const target = id ? `${to}/${encodeURIComponent(id)}` : to
+  return <Navigate to={target} replace state={{ retiredAuthoring: true }} />
+}
+
 // A data router rather than <BrowserRouter>: `useBlocker` — the unsaved-changes
 // guard on every form — exists only on this kind of router.
 const router = createBrowserRouter(
@@ -79,17 +88,17 @@ const router = createBrowserRouter(
       <Route path="deployments" element={<DeploymentsPage />} />
       <Route path="deployments/:revision" element={<DeploymentDetailPage />} />
       <Route path="channels" element={<ChannelsPage />} />
-      <Route path="channels/new" element={<ChannelFormPage />} />
+      <Route path="channels/new" element={<AuthoringRedirect to="/channels" />} />
       <Route path="channels/:id" element={<ChannelDetailPage />} />
-      <Route path="channels/:id/edit" element={<ChannelFormPage />} />
+      <Route path="channels/:id/edit" element={<AuthoringRedirect to="/channels" />} />
       <Route path="workflows" element={<WorkflowsPage />} />
-      <Route path="workflows/new" element={<WorkflowFormPage />} />
+      <Route path="workflows/new" element={<AuthoringRedirect to="/workflows" />} />
       <Route path="workflows/:id" element={<WorkflowDetailPage />} />
-      <Route path="workflows/:id/edit" element={<WorkflowFormPage />} />
+      <Route path="workflows/:id/edit" element={<AuthoringRedirect to="/workflows" />} />
       <Route path="plugins" element={<PluginsPage />} />
-      <Route path="plugins/new" element={<PluginFormPage />} />
+      <Route path="plugins/new" element={<AuthoringRedirect to="/plugins" />} />
       <Route path="plugins/:id" element={<PluginDetailPage />} />
-      <Route path="plugins/:id/edit" element={<PluginFormPage />} />
+      <Route path="plugins/:id/edit" element={<AuthoringRedirect to="/plugins" />} />
       <Route path="models" element={<ModelsPage />} />
       <Route path="models/new" element={<ModelFormPage />} />
       <Route path="models/:id" element={<ModelDetailPage />} />
