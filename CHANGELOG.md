@@ -3,7 +3,9 @@
 All notable changes to Orion UI. The version follows the Orion server release the
 console targets.
 
-## [2.0.0] — unreleased
+## [Unreleased]
+
+## [2.0.0] - 2026-11-17
 
 The console now speaks **Orion 2.0 (`/api/v2`)** and its deployment model. A node
 serves exactly one numbered deployment manifest; definitions are content-addressed
