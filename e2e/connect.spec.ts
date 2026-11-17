@@ -64,12 +64,6 @@ test("a read-only key is refused a probe and told why", async ({ page }) => {
 
 test("the studio scaffolds, lints and packs with a read-only key, and still cannot upload", async ({ page }) => {
   await holdKey(page, readOnlyKey!)
-  // Learn read-only from a refused mutation, so the studio's success can be
-  // held to "did not widen the session".
-  await page.goto(`/connections/${E2E_CONNECTION}`)
-  await page.getByRole("button", { name: /^Probe r\d+$/ }).click()
-  await expect(page.getByText(/refuses it to a read-only key/)).toBeVisible()
-
   // The authoring tools store nothing, so a read-only key may use them.
   await page.goto("/provider-packages?tab=studio")
   await page.getByLabel("Publisher").fill("e2e")
@@ -80,7 +74,19 @@ test("the studio scaffolds, lints and packs with a read-only key, and still cann
   await expect(page.getByText(new RegExp(`Lint passed — ${PROVIDER.replace(".", "\\.")}`))).toBeVisible()
   await page.getByRole("button", { name: "Pack" }).click()
   await expect(page.getByText(/Packs to sha256:[0-9a-f]{64}/)).toBeVisible()
-  // Their success is no proof of full access: uploading stays a full key's.
+
+  // Nothing announces a read-only key in advance. Their success is no proof
+  // of full access either, so try the one verb that stores: the server's 403
+  // teaches the session, and uploading then stays disabled.
+  await page.getByRole("button", { name: "Upload…" }).click()
+  const dialog = page.getByRole("dialog", { name: "Upload a provider package" })
+  const upload = dialog.getByRole("button", { name: "Upload", exact: true })
+  await upload.click()
+  // The server's refusal is what teaches the session — wait for it, not just
+  // for the pending state to disable the button.
+  await expect(dialog.getByText(/read-only/)).toBeVisible()
+  await expect(upload).toBeDisabled()
+  await dialog.getByRole("button", { name: "Cancel" }).click()
   await expect(page.getByRole("button", { name: "Upload…" })).toBeDisabled()
 })
 
