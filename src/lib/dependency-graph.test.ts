@@ -57,7 +57,6 @@ function channel(name: string, over: Partial<Channel> = {}): Channel {
 
 const db = (connector: string) => ({ id: `q-${connector}`, function: { name: "db_read", input: { connector } } })
 const callTo = (target: string) => ({ id: `call-${target}`, function: { name: "channel_call", input: { channel: target } } })
-const infer = (model: string) => ({ id: `infer-${model}`, function: { name: "model_infer", input: { model } } })
 const pluginFn = (fn: string) => ({ id: `p-${fn}`, function: { name: fn, input: {} } })
 
 function workflow(id: string, tasks: unknown[]): Workflow {
@@ -117,7 +116,7 @@ function qa() {
       const name = `soma-${domain}-${thing}`
       channels.push(channel(name))
       const tasks: unknown[] = conns.map(db)
-      if (name === "soma-clock-pair") tasks.push(infer("ranker"), pluginFn("pair_score"))
+      if (name === "soma-clock-pair") tasks.push(pluginFn("pair_score"))
       workflows.push(workflow(name, tasks))
     }
   }
@@ -180,13 +179,13 @@ describe("buildDependencyGraph", () => {
     expect(dg.hubById.has("connector:soma-unused")).toBe(false)
   })
 
-  it("adds models by literal id and plugins through the catalogue", () => {
+  it("adds plugins through the catalogue", () => {
     const { graph, index } = qa()
     const without = buildDependencyGraph(graph, index)
     expect(without.hubById.has("plugin:pairing")).toBe(false)
     const dg = buildDependencyGraph(graph, index, { functions: catalogue })
-    expect(dg.refsOf.get("soma-clock-pair")).toEqual(["model:ranker", "plugin:pairing"])
-    expect(dg.hubById.get("model:ranker")!.kind).toBe("model")
+    expect(dg.refsOf.get("soma-clock-pair")).toEqual(["plugin:pairing"])
+    expect(dg.hubById.get("plugin:pairing")!.kind).toBe("plugin")
   })
 
   it("folds in a measured pair a static walk cannot see", () => {
@@ -296,8 +295,8 @@ describe("edgeLoad", () => {
     expect(l.errorPct).toBeNull()
   })
 
-  it("never meters a plugin or model edge", () => {
-    expect(edgeLoad(["soma-user-profile-get"], { kind: "model", name: "soma-db" }, byEdge, true).measured).toBe(false)
+  it("never meters a plugin edge", () => {
+    expect(edgeLoad(["soma-user-profile-get"], { kind: "plugin", name: "pairing" }, byEdge, true).measured).toBe(false)
   })
 })
 
@@ -407,7 +406,7 @@ describe("focus and aggregation", () => {
     expect(hubLevel("health", hub, { windowed: 100, total: 100, errorPct: 0.2, p95Ms: 5 })).toBe("healthy")
     expect(hubLevel("health", hub, { windowed: 100, total: 100, errorPct: 12, p95Ms: 5 })).toBe("critical")
     expect(hubLevel("health", hub, undefined, true)).toBe("critical")
-    expect(hubLevel("lifecycle", { known: true, enabled: false }, undefined)).toBe("idle")
+    expect(hubLevel("serving", { known: true, enabled: false }, undefined)).toBe("idle")
   })
 })
 

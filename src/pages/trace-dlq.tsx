@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { READ_ONLY_REASON, useCanMutate } from "@/hooks/use-admin-auth"
 import { Link } from "react-router"
 import {
   useTraceDlqList,
@@ -76,6 +77,7 @@ export function TraceDlqPage() {
   const channelsByName = useMemo(() => new Map(channelList.map((c) => [c.name, c])), [channelList])
 
   const requeue = useRequeueTraceDlq()
+  const canMutate = useCanMutate()
   const rows = list.rows
   const isLoading = list.isLoading
 
@@ -85,11 +87,21 @@ export function TraceDlqPage() {
         title="Trace DLQ"
         description="Async submissions that failed and are waiting on a retry"
       >
-        <Button variant="outline" onClick={() => setShowBulk(true)} disabled={rows.length === 0}>
+        <Button
+          variant="outline"
+          onClick={() => setShowBulk(true)}
+          disabled={rows.length === 0 || !canMutate}
+          title={canMutate ? undefined : READ_ONLY_REASON}
+        >
           <RotateCcw className="h-4 w-4" />
           Requeue all shown
         </Button>
-        <Button variant="outline" onClick={() => setShowPurge(true)}>
+        <Button
+          variant="outline"
+          onClick={() => setShowPurge(true)}
+          disabled={!canMutate}
+          title={canMutate ? undefined : READ_ONLY_REASON}
+        >
           <Trash2 className="h-4 w-4" />
           Purge exhausted
         </Button>
@@ -189,7 +201,8 @@ export function TraceDlqPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        disabled={requeue.isPending}
+                        disabled={requeue.isPending || !canMutate}
+                        title={canMutate ? undefined : READ_ONLY_REASON}
                         onClick={(e) => {
                           e.stopPropagation()
                           requeue.mutate(row.id)

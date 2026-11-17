@@ -70,7 +70,7 @@ describe("TraceTimeline", () => {
     expect(screen.getByText("97%")).toBeInTheDocument()
     expect(screen.getByText("bump_work.bump · 8.12 s")).toBeInTheDocument()
     expect(screen.getByText("Other 10 steps")).toBeInTheDocument()
-    expect(screen.getByText("10 hand-offs")).toBeInTheDocument()
+    expect(screen.getByText("not measured")).toBeInTheDocument()
     expect(screen.getByText("trace + occurrence write", { selector: "p" })).toBeInTheDocument()
   })
 
@@ -78,7 +78,6 @@ describe("TraceTimeline", () => {
     renderTimeline()
     expect(screen.getByText("loop.setup", { selector: "span" })).toBeInTheDocument()
     expect(screen.getByText(/it = temp_data\.plan\[0\]/)).toBeInTheDocument()
-    expect(screen.getByText("admission", { selector: "span" })).toBeInTheDocument()
   })
 
   it("opens on the split axis and switches to linear", () => {
@@ -102,7 +101,10 @@ describe("TraceTimeline", () => {
         ...TRACE,
         status: "running",
         completed_at: "2026-10-02T05:41:15.936000",
-        task_trace_json: { steps: (TRACE.task_trace_json as { steps: unknown[] }).steps.slice(0, 10) },
+        task_trace_json: {
+          ...(TRACE.task_trace_json as { initial: unknown; steps: unknown[] }),
+          steps: (TRACE.task_trace_json as { steps: unknown[] }).steps.slice(0, 10),
+        },
       },
       WORKFLOW,
     )!
@@ -151,7 +153,6 @@ describe("StepDetail", () => {
     expect(screen.getByText("dropped · trace truncated")).toBeInTheDocument()
     expect(screen.getByText("Before this step")).toBeInTheDocument()
     expect(screen.getByText("insert")).toBeInTheDocument()
-    expect(screen.getByText(/finished 793 µs earlier/)).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /Show on workflow/ })).toHaveAttribute(
       "href",
       `/workflows/soma-clock-pair-run?lens=run&trace=${TRACE.id}`,

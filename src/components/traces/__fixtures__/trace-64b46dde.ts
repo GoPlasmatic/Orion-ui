@@ -1,25 +1,17 @@
 import type { FunctionSchema, TraceDetail, Workflow } from "@/api/types"
 import type { TaskCost } from "@/hooks/use-ops-metrics"
-import { parseInstantUs } from "@/lib/trace-timeline"
 
-// Trace 64b46dde on QA (soma-clock-pair, 2 Oct 2026): a Redis outage at boot.
-// Copied from lib/trace-timeline.test.ts — offsets and durations are the real
-// ones, snapshots are elided — with the authored tasks' connectors and the
-// per-task baselines from the 235 runs since boot added.
+// Trace 64b46dde on QA (soma-clock-pair, 2 Oct 2026): a Redis outage at boot,
+// as Orion 2 stores it — a dataflow-rs 4 replay trace. Durations are the real
+// ones; the changes are kept to the paths the page reads; the authored tasks'
+// connectors and the per-task baselines from the 235 runs since boot are below.
 const T0 = "2026-10-02T05:41:15.836289"
-const at = (offsetUs: number) => {
-  const base = parseInstantUs(T0)! + offsetUs
-  const sec = Math.floor(base / 1e6)
-  const frac = String(base % 1e6).padStart(6, "0")
-  return `${new Date(sec * 1000).toISOString().slice(0, 19)}.${frac}000Z`
-}
-const step = (task_id: string, start: number, dur: number, extra: Record<string, unknown> = {}) => ({
+const step = (task_id: string, dur: number, extra: Record<string, unknown> = {}) => ({
   workflow_id: "soma-clock-pair-run",
   task_id,
   result: "executed",
-  started_at: at(start),
-  duration_us: dur,
-  message: {},
+  elapsed_us: dur,
+  changes: [],
   ...extra,
 })
 
@@ -35,19 +27,22 @@ export const TRACE: Pick<
   started_at: T0,
   completed_at: "2026-10-02T05:41:24.198158",
   task_trace_json: {
+    initial: { data: { qty: 3 }, metadata: {}, temp_data: { s: {} } },
     truncated: true,
     steps: [
-      step("pick", 1596, 1502, { changes: [{ path: "temp_data.pick" }] }),
-      step("picked", 3146, 9),
-      step("demand", 3197, 74350),
-      step("boards", 78425, 10),
-      step("trials", 78759, 5716),
-      step("pair", 85063, 4969),
-      step("plan", 90513, 414),
-      step("pairing", 91426, 396, { loop_counter: 0 }),
-      step("insert", 92171, 5485, { loop_counter: 0, changes: [{ path: "temp_data.s.inserted", new_value: 1 }] }),
-      step("held", 98116, 8, { loop_counter: 0 }),
-      step("bump_work.bump", 98449, 8115055, { loop_counter: 0, message: undefined }),
+      step("pick", 1502, { changes: [{ path: "temp_data.pick", new_value: "s-1" }] }),
+      step("picked", 9),
+      step("demand", 74350),
+      step("boards", 10),
+      step("trials", 5716),
+      step("pair", 4969),
+      step("plan", 414),
+      step("pairing", 396, { loop_counter: 0 }),
+      step("insert", 5485, { loop_counter: 0, changes: [{ path: "temp_data.s.inserted", new_value: 1 }] }),
+      // The last recorded change, so the replay keeps snapshots through here
+      // and drops the failing step's, as a truncated trace does.
+      step("held", 8, { loop_counter: 0, changes: [{ path: "temp_data.held", new_value: true }] }),
+      step("bump_work.bump", 8115055, { loop_counter: 0, result: "failed" }),
     ],
   },
 }
@@ -89,7 +84,7 @@ const fn = (
 ): FunctionSchema => ({ name, description: "", category, source: "orion", retry_safety, ...extra })
 
 export const CATALOGUE: FunctionSchema[] = [
-  // As 1.12 serves them: `db_write` and `http_call` depend on their input.
+  // As the catalogue serves them: `db_write` and `http_call` depend on their input.
   fn("db_read", "connector", { kind: "read" }),
   fn("db_write", "connector", { kind: "depends_on", input: "sql" }),
   fn("http_call", "connector", { kind: "depends_on", input: "method" }),

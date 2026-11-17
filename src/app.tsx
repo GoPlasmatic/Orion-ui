@@ -1,12 +1,4 @@
-import {
-  Navigate,
-  Route,
-  RouterProvider,
-  createBrowserRouter,
-  createRoutesFromElements,
-  useLocation,
-  useParams,
-} from "react-router"
+import { Route, RouterProvider, createBrowserRouter, createRoutesFromElements } from "react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { isAuthError } from "@/api/client"
 import { Toaster } from "sonner"
@@ -58,25 +50,8 @@ const queryClient = new QueryClient({
   },
 })
 
-/** Preserves `#component-<name>` and any query on the way to the renamed page. */
-function SettingsRedirect() {
-  const { search, hash } = useLocation()
-  return <Navigate to={`/engine${search}${hash}`} replace />
-}
-
-/**
- * 1.x's authoring routes (`/workflows/new`, `/channels/:id/edit`, …). In 2.0
- * a change is a deployment — compiled and applied with `orion-cli` — so the
- * forms are gone; an old link lands on what it was about instead of a 404.
- */
-function AuthoringRedirect({ to }: { to: string }) {
-  const { id } = useParams<{ id: string }>()
-  const target = id ? `${to}/${encodeURIComponent(id)}` : to
-  return <Navigate to={target} replace state={{ retiredAuthoring: true }} />
-}
-
-// A data router rather than <BrowserRouter>: `useBlocker` — the unsaved-changes
-// guard on every form — exists only on this kind of router.
+// A data router: routes, the shell's error boundary and the page tree are
+// declared here rather than as nested JSX.
 const router = createBrowserRouter(
   createRoutesFromElements(
     <Route element={<AppLayout />}>
@@ -85,29 +60,15 @@ const router = createBrowserRouter(
       <Route path="deployments" element={<DeploymentsPage />} />
       <Route path="deployments/:revision" element={<DeploymentDetailPage />} />
       <Route path="channels" element={<ChannelsPage />} />
-      <Route path="channels/new" element={<AuthoringRedirect to="/channels" />} />
       <Route path="channels/:id" element={<ChannelDetailPage />} />
-      <Route path="channels/:id/edit" element={<AuthoringRedirect to="/channels" />} />
       <Route path="workflows" element={<WorkflowsPage />} />
-      <Route path="workflows/new" element={<AuthoringRedirect to="/workflows" />} />
       <Route path="workflows/:id" element={<WorkflowDetailPage />} />
-      <Route path="workflows/:id/edit" element={<AuthoringRedirect to="/workflows" />} />
       <Route path="plugins" element={<PluginsPage />} />
-      <Route path="plugins/new" element={<AuthoringRedirect to="/plugins" />} />
       <Route path="plugins/:id" element={<PluginDetailPage />} />
-      <Route path="plugins/:id/edit" element={<AuthoringRedirect to="/plugins" />} />
       <Route path="connections" element={<ConnectionsPage />} />
       <Route path="connections/:id" element={<ConnectionDetailPage />} />
       <Route path="provider-packages" element={<ProviderPackagesPage />} />
       <Route path="provider-packages/:digest" element={<ProviderPackageDetailPage />} />
-      {/* 1.x surfaces 2.0 replaced: connectors became connections (their ids
-          were UUIDs, which name nothing now), models a provider behind a
-          connection, and package receipts the deployment history. */}
-      <Route path="connectors/*" element={<Navigate to="/connections" replace />} />
-      <Route path="connectors" element={<Navigate to="/connections" replace />} />
-      <Route path="models/*" element={<Navigate to="/connections" replace />} />
-      <Route path="models" element={<Navigate to="/connections" replace />} />
-      <Route path="packages" element={<Navigate to="/deployments" replace />} />
       <Route path="caches" element={<CachesPage />} />
       <Route path="circuit-breakers" element={<CircuitBreakersPage />} />
       <Route path="traces" element={<TracesPage />} />
@@ -118,8 +79,6 @@ const router = createBrowserRouter(
       <Route path="audit" element={<AuditPage />} />
       <Route path="console" element={<ConsolePage />} />
       <Route path="engine" element={<EnginePage />} />
-      {/* "Settings" until 2026-09-05: old links and bookmarks still land. */}
-      <Route path="settings" element={<SettingsRedirect />} />
       <Route path="*" element={<NotFoundPage />} />
     </Route>
   )

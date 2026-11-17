@@ -37,7 +37,6 @@ describe("step completions", () => {
     expect(labels(complete('[{"function": {"name": "cache_incr", "input": {"|"}}}]'))).toEqual(
       expect.arrayContaining(["connector", "key", "by", "ttl_secs"])
     )
-    expect(labels(complete('[{"function": {"name": "model_infer", "input": {"|"}}}]'))).toContain("select")
     expect(labels(complete('[{"function": {"name": "storage_presign", "input": {"|"}}}]'))).toContain(
       "content_length"
     )

@@ -2,10 +2,10 @@ import { test, expect, type Page } from "@playwright/test"
 import { seedEcho, sendUntilServed } from "./seed"
 
 /**
- * The surfaces 2.0 kept (PLAN-2.0.md, phase 1), against a live server seeded
- * with one deployment and some traffic: the trace list pages by cursor, the
- * Engine page reads the node's reconciler, the audit log speaks 2.0's
- * vocabulary, and the DLQ and Schedules ledgers load.
+ * The surfaces 2.0 kept, against a live server seeded with one deployment and
+ * some traffic: the trace list pages by cursor, the Engine page reads the
+ * node's reconciler, the audit log speaks 2.0's vocabulary, and the DLQ and
+ * Schedules ledgers load.
  */
 
 const fullKey = process.env.ORION_ADMIN_KEY
@@ -67,4 +67,20 @@ test("the DLQ and the schedule ledger load", async ({ page }) => {
   await expect(page.getByText(/Could not|Failed to load/)).toHaveCount(0)
   await page.goto("/schedules")
   await expect(page.getByRole("heading", { name: "Schedules" })).toBeVisible()
+})
+
+test("the Data Console sends to a channel and opens its trace", async ({ page }) => {
+  await page.goto("/console?channel=e2e-echo")
+  await expect(page.getByLabel("Channel")).toHaveValue("e2e-echo")
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  // A sync run answers { id, status, data, errors }.
+  await expect(page.getByText('"status": "ok"').first()).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole("link", { name: /Open as trace/i })).toBeVisible()
+})
+
+test("a backup can be created and listed", async ({ page }) => {
+  await page.goto("/engine?tab=maintenance")
+  await page.getByRole("button", { name: "Create backup" }).click()
+  // POST answers 201 and the list carries `created_at` in 2.0.
+  await expect(page.getByText(/orion_backup_/).first()).toBeVisible({ timeout: 10_000 })
 })

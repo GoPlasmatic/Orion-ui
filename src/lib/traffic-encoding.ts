@@ -20,8 +20,8 @@ import type { SystemGraph, SystemNode } from "@/lib/system-graph"
  * misconfigured, and the map cannot tell which. Painting it red claims a
  * failure that did not happen; folding it into "healthy" hides a channel that
  * is serving no real traffic. So it gets its own colour, and the legend says
- * "rejected". The same slot is "100–500 ms" in latency mode and "draft" in
- * lifecycle mode — a middle band that is neither good news nor bad.
+ * "rejected". The same slot is "100–500 ms" in latency mode — a middle band
+ * that is neither good news nor bad.
  */
 export type HealthLevel = "idle" | "healthy" | "notice" | "warning" | "critical"
 
@@ -199,7 +199,14 @@ export function deriveLoad(
 }
 
 export type SizeMetric = "rate" | "latency" | "steps" | "uniform"
-export type ColorMetric = "health" | "latency" | "lifecycle"
+/**
+ * `health` is the traffic's (error and rejection share), `latency` its p95,
+ * `serving` this node's own verdict on each channel: quarantined, serving
+ * with a load issue (a connection that did not load, a breaker open), or
+ * serving cleanly. 1.x's `lifecycle` mode had nothing left to say in 2.0 —
+ * everything the head deploys is active — and an old link reads as `serving`.
+ */
+export type ColorMetric = "health" | "latency" | "serving"
 
 export const SIZE_METRICS: { value: SizeMetric; label: string }[] = [
   { value: "rate", label: "Requests / min" },
@@ -211,7 +218,7 @@ export const SIZE_METRICS: { value: SizeMetric; label: string }[] = [
 export const COLOR_METRICS: { value: ColorMetric; label: string }[] = [
   { value: "health", label: "Health" },
   { value: "latency", label: "Latency" },
-  { value: "lifecycle", label: "Lifecycle" },
+  { value: "serving", label: "Serving" },
 ]
 
 export interface LegendEntry {
@@ -222,8 +229,7 @@ export interface LegendEntry {
 /**
  * What each colour means under the current colour metric, in the order the
  * legend draws them. The legend used to be hard-wired to the health labels, so
- * "Colour: Latency" painted a slow channel amber and captioned it "errors",
- * and "Colour: Lifecycle" painted a draft blue and captioned it "rejected".
+ * "Colour: Latency" painted a slow channel amber and captioned it "errors".
  */
 export function legendFor(metric: ColorMetric): LegendEntry[] {
   switch (metric) {
@@ -235,12 +241,12 @@ export function legendFor(metric: ColorMetric): LegendEntry[] {
         { level: "critical", label: `≥ ${LATENCY_SLOW / 1000} s` },
         { level: "idle", label: "no traffic" },
       ]
-    case "lifecycle":
+    case "serving":
       return [
-        { level: "healthy", label: "active" },
-        { level: "notice", label: "draft" },
-        { level: "idle", label: "archived" },
-        { level: "critical", label: "named by a call, not registered" },
+        { level: "healthy", label: "serving" },
+        { level: "warning", label: "load issue" },
+        { level: "critical", label: "quarantined, or named by a call" },
+        { level: "idle", label: "stored, not deployed" },
       ]
     default:
       return [
@@ -296,17 +302,28 @@ export function sqrtScale(value: number, max: number, min: number, top: number):
   return Math.round(min + (top - min) * scaled)
 }
 
+/**
+ * A node's colour slot. `faults` (from `faultsFor`) is what the serving mode
+ * reads: a quarantine is critical, any other fault a load issue.
+ */
 export function levelFor(
   metric: ColorMetric,
   node: SystemNode,
   traffic: ChannelTraffic | undefined,
+  faults: readonly { kind: string }[] = [],
 ): HealthLevel {
   if (metric === "latency") return latencyLevel(traffic?.p95Ms)
-  if (metric === "lifecycle") {
-    if (node.unresolved) return "critical"
-    return node.status === "active" ? "healthy" : node.status === "draft" ? "notice" : "idle"
+  if (metric === "serving") {
+    if (node.unresolved || faults.some((f) => f.kind === "quarantined")) return "critical"
+    return faults.length > 0 ? "warning" : "healthy"
   }
   return healthOf(traffic)
+}
+
+/** A colour metric from the URL; 1.x's `lifecycle` reads as `serving`. */
+export function parseColorMetric(value: string): ColorMetric {
+  if (value === "lifecycle") return "serving"
+  return COLOR_METRICS.some((m) => m.value === value) ? (value as ColorMetric) : "health"
 }
 
 /** Compact number for a node label: 1.2k, 340, 8.5 */

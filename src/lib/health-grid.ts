@@ -62,6 +62,8 @@ export interface HealthGridInput {
   load?: ReadonlyMap<string, EffectiveLoad>
   colorMetric: ColorMetric
   sizeMetric: SizeMetric
+  /** Each channel's faults (`faultsFor`), which the serving colour reads. */
+  faultsOf?: (node: SystemNode) => readonly { kind: string }[]
 }
 
 /** Characters of label a tile of this width holds. */
@@ -76,6 +78,7 @@ export function buildHealthGrid({
   load,
   colorMetric,
   sizeMetric,
+  faultsOf,
 }: HealthGridInput): GridSection[] {
   const byId = new Map(nodes.map((n) => [n.id, n]))
   let max = 0
@@ -101,7 +104,7 @@ export function buildHealthGrid({
           id,
           label: middleTruncate(shortName(id, domains), tileChars(width)),
           width,
-          level: levelFor(colorMetric, node, byChannel.get(id)),
+          level: levelFor(colorMetric, node, byChannel.get(id), faultsOf?.(node)),
           value,
         }
       })

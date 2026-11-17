@@ -1,10 +1,10 @@
 import { test, expect, type Page } from "@playwright/test"
 
 /**
- * The 2.0 port's foundations against a live Orion 2.0 server with admin auth
- * on (PLAN-2.0.md, phase 0): the console asks for a key with one probe rather
- * than a burst of refused requests, takes a valid key, speaks only `/api/v2`,
- * and learns a read-only key from the first change it is refused.
+ * The 2.0 foundations against a live Orion 2.0 server with admin auth on: the
+ * console asks for a key with one probe rather than a burst of refused
+ * requests, takes a valid key, speaks only `/api/v2`, and learns a read-only
+ * key from the first change it is refused.
  *
  * Needs `ORION_ADMIN_KEY` (full access) and `ORION_READ_ONLY_KEY` — the keys
  * the server under test was started with. CI provides both.

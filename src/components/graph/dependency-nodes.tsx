@@ -231,9 +231,9 @@ function hubLine(hub: Hub, traffic: ConnectorTraffic | undefined, windowed: bool
 }
 
 /**
- * A shared dependency: a connector, a plugin or a model, with its type, how
- * many channels in view lean on it and — for a connector — its own live
- * figures. Selecting one lights its blast radius.
+ * A shared dependency: a connection or a plugin, with its type, how many
+ * channels in view lean on it and — for a connection — its own live figures.
+ * Selecting one lights its blast radius.
  */
 export function HubNode({ data, selected }: NodeProps) {
   const { hub, traffic, level, failedToLoad, windowed, dimmed, focused } = data as HubNodeData

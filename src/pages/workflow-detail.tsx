@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { Link, useParams } from "react-router"
-import { executionTrace } from "@/lib/trace-timeline"
+import { executionTrace, formatMicros } from "@/lib/trace-timeline"
 import { useWorkflow, useTestDefinition } from "@/hooks/use-workflows"
 import { useDefinition, useDeploymentHead } from "@/hooks/use-deployments"
 import { useQuarantineReason, useRegistry } from "@/hooks/use-registry"
@@ -432,11 +432,10 @@ function TestPanel({ workflow, sampleChannel }: { workflow: Workflow; sampleChan
                               {r}
                             </Badge>
                           )}
-                          <span className="text-sm font-medium">{step.task_name ?? step.task_id}</span>
-                          {step.function && <span className="font-mono text-xs text-muted-foreground">{step.function}</span>}
+                          <span className="text-sm font-medium">{step.task_id ?? `step ${i + 1}`}</span>
                         </div>
-                        {step.duration_ms !== undefined && (
-                          <span className="text-xs text-muted-foreground">{step.duration_ms}ms</span>
+                        {step.duration_us !== undefined && (
+                          <span className="text-xs text-muted-foreground">{formatMicros(step.duration_us)}</span>
                         )}
                       </div>
                     )

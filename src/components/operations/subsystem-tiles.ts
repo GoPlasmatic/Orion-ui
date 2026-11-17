@@ -44,7 +44,7 @@ export function cronTile({
   label = (name) => name,
 }: {
   hasCron: boolean
-  /** `engine/status.capabilities.cron`; undefined from a pre-1.9 server. */
+  /** `engine/status.capabilities.cron`; undefined until the engine status answers. */
   cronEnabled: boolean | undefined
   schedules: CronScheduleStatus[] | undefined
   /** `/health`'s `cron.oldest_pending_age_secs`. */

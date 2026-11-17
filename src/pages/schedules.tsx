@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { READ_ONLY_REASON, useCanMutate } from "@/hooks/use-admin-auth"
 import { Link, useNavigate } from "react-router"
 import { useCronStatus, useCronOccurrenceList, useRetryOccurrence } from "@/hooks/use-cron"
 import { useTriggerChannel } from "@/hooks/use-channels"
@@ -30,7 +31,7 @@ import { occurrenceStatusBadgeClass, statusChartColor } from "@/lib/status"
 import { occurrenceStatusLabel, slotUsage } from "@/lib/cron"
 import { formatDate, formatRelative, serverTime, toRfc3339, cn, plural } from "@/lib/utils"
 import { useTimeZone } from "@/lib/use-time-zone"
-import { CalendarClock, Play, Plus, History } from "lucide-react"
+import { CalendarClock, Play, History } from "lucide-react"
 
 
 /** The ledger's filters, in the URL: a channel page or the map lands here filtered. */
@@ -52,6 +53,7 @@ export function SchedulesPage() {
   const { data: health } = useHealth()
   const metrics = useCronMetrics()
   const trigger = useTriggerChannel()
+  const canMutate = useCanMutate()
   const retry = useRetryOccurrence()
   const { label: zoneLabel } = useTimeZone()
 
@@ -111,10 +113,6 @@ export function SchedulesPage() {
         title="Schedules"
         description="Cron channels — what is scheduled, when it next fires, and every occurrence that was due"
       >
-        <Button onClick={() => navigate("/channels/new?protocol=cron")}>
-          <Plus className="h-4 w-4" />
-          Create Cron Channel
-        </Button>
       </PageHeader>
 
       {cronComponent === "degraded" && (
@@ -189,11 +187,11 @@ export function SchedulesPage() {
           ) : schedules.length === 0 ? (
             <EmptyState
               icon={CalendarClock}
-              title="No active schedules"
-              description="A cron channel binds a six-field expression and a fixed payload to a workflow, in transport_config — versioned, content-hashed and promoted like any other definition. Activate one and it appears here within a poll interval."
+              title="No schedules deployed"
+              description="A cron channel binds a six-field expression and a fixed payload to a workflow, in transport_config. Deploy one with orion-cli and it appears here within a poll interval."
               action={
-                <Button onClick={() => navigate("/channels/new?protocol=cron")}>
-                  <Plus className="h-4 w-4" /> Create Cron Channel
+                <Button variant="outline" onClick={() => navigate("/deployments")}>
+                  Deployments
                 </Button>
               }
             />
@@ -277,9 +275,13 @@ export function SchedulesPage() {
                         <Button
                           variant="outline"
                           size="xs"
-                          disabled={trigger.isPending}
+                          disabled={trigger.isPending || !canMutate}
                           onClick={() => trigger.mutate(s.channel_id)}
-                          title="Run now, through the same claim and singleton path a scheduled occurrence takes"
+                          title={
+                            canMutate
+                              ? "Run now, through the same claim and singleton path a scheduled occurrence takes"
+                              : READ_ONLY_REASON
+                          }
                         >
                           <Play /> Trigger now
                         </Button>
@@ -356,6 +358,7 @@ export function SchedulesPage() {
           isLoading={ledger.isLoading}
           onRetry={(id) => retry.mutate(id)}
           retryPending={retry.isPending}
+          retryBlocked={canMutate ? undefined : READ_ONLY_REASON}
           empty={hasFilters ? <NoMatches noun="occurrences" onClear={clear} /> : undefined}
         />
 
@@ -380,7 +383,7 @@ export function SchedulesPage() {
  * more, or just after `slots` was lowered while a run still holds a higher
  * slot. That reading is expected, not a fault, so it is noted rather than
  * coloured as an error. A channel under `allow` takes no lock at all and shows
- * a dash; a pre-1.9 server sends no policy and shows the same.
+ * a dash; a channel without a policy shows the same.
  */
 function SlotsCell({ row }: { row: CronScheduleStatus }) {
   const usage = slotUsage(row)

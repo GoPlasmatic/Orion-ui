@@ -1,4 +1,5 @@
 import { ConfirmButton } from "@/components/shared/confirm-button"
+import { READ_ONLY_REASON, useCanMutate } from "@/hooks/use-admin-auth"
 import { useInvalidateCacheNamespace } from "@/hooks/use-cache"
 import { plural } from "@/lib/utils"
 import { Eraser } from "lucide-react"
@@ -21,6 +22,7 @@ export function InvalidateNamespaceButton({
   size?: "xs" | "sm"
 }) {
   const invalidate = useInvalidateCacheNamespace()
+  const canMutate = useCanMutate()
 
   return (
     <ConfirmButton
@@ -29,7 +31,8 @@ export function InvalidateNamespaceButton({
       pendingLabel="Invalidating..."
       pending={invalidate.isPending}
       size={size}
-      title={`Drop every cached response stored under "${namespace}"`}
+      disabled={!canMutate}
+      title={canMutate ? `Drop every cached response stored under "${namespace}"` : READ_ONLY_REASON}
       dialog={{
         title: `Invalidate "${namespace}"?`,
         description: (

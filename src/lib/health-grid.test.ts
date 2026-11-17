@@ -11,7 +11,6 @@ function node(name: string, over: Partial<SystemNode> = {}): SystemNode {
     channelId: `uuid-${name}`,
     name,
     description: null,
-    status: "active",
     channelType: "sync",
     protocol: "rest",
     route: `/${name}`,

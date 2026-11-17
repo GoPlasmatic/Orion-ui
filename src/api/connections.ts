@@ -1,5 +1,12 @@
 import { api, buildQuery } from "./client"
-import type { ConnectionProbe, ConnectionRevision, Page, PageParams } from "./types"
+import type {
+  ConnectionProbe,
+  ConnectionRevision,
+  CreateConnectionRevisionRequest,
+  CreateConnectionRevisionResponse,
+  Page,
+  PageParams,
+} from "./types"
 
 /**
  * Connections (2.0): what 1.x called connectors, as immutable numbered
@@ -17,6 +24,18 @@ export const connectionsApi = {
   revisions: (id: string, params: PageParams = {}) =>
     api.get<Page<ConnectionRevision>>(
       `admin/connections/${encodeURIComponent(id)}/revisions${buildQuery({ ...params })}`,
+    ),
+
+  /**
+   * Create an immutable revision (201). The same content answers the stored
+   * revision again; different content at a stored number is 409
+   * `IMMUTABLE_CONNECTION_CONFLICT`. The CLI performs this before a plan; the
+   * console adds it for a change set.
+   */
+  createRevision: (id: string, req: CreateConnectionRevisionRequest) =>
+    api.post<CreateConnectionRevisionResponse>(
+      `admin/connections/${encodeURIComponent(id)}/revisions`,
+      req,
     ),
 
   get: (id: string, revision: number) =>

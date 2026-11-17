@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    # `v2` carries the Orion 2.0 port (PLAN-2.0.md) until it merges to main.
+    # `v2` carries the Orion 2.0 port until it merges to main.
     branches: [main, v2]
   pull_request:
 
@@ -93,8 +93,8 @@ jobs:
       # The Orion 2.0 commit this UI is built against. No 2.0 image is
       # published until Orion is tagged, so the job builds the server from
       # source at this commit; switch to `ghcr.io/goplasmatic/orion:2.0.0`
-      # once the tag exists (PLAN-2.0.md, phase 7).
-      ORION_REV: 1e58099f0b032c60b64f5b6d6e2af4c330dde0d1
+      # once the tag exists.
+      ORION_REV: 9cfc5326a155b59b414bc12788bed4eef1f0a491
       # Throwaway keys for the server under test: the e2e suite exercises the
       # console's admin-key handling against a guarded server.
       ORION_ADMIN_KEY: ci-only-full-access-key-padded-past-32

@@ -442,8 +442,9 @@ function TrafficMapInner({
         rate += rateOf(m)
         const node = graph.byId.get(m)
         if (!node) continue
-        levels.push(levelFor(colorMetric, node, traffic.byChannel.get(m)))
-        if (faultsFor(node, faults).length > 0) faulted++
+        const nodeFaults = faultsFor(node, faults)
+        levels.push(levelFor(colorMetric, node, traffic.byChannel.get(m), nodeFaults))
+        if (nodeFaults.length > 0) faulted++
       }
       const level = worstLevel(levels)
       const data: ClusterNodeData = {
@@ -473,7 +474,7 @@ function TrafficMapInner({
       if (!pos) return []
       const compact = isCompact(node.id)
       const channelTraffic: ChannelTraffic | undefined = traffic.byChannel.get(node.id)
-      const level = levelFor(colorMetric, node, channelTraffic)
+      const level = levelFor(colorMetric, node, channelTraffic, faultsFor(node, faults))
       const healthLabel = legendLabel.get(level) ?? level
       const chars = lod === "dot" ? (compact ? LABEL_CHARS.dotCompact : LABEL_CHARS.dot) : LABEL_CHARS.full
       const data: TrafficNodeData = {

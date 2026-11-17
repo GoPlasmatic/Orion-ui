@@ -13,10 +13,10 @@ const engine = (over: Partial<EngineStatus> = {}): EngineStatus => ({
   active_workflows: 60,
   channels: ["soma-gate-start"],
   uptime_seconds: 41 * 60,
-  version: "1.12.0",
+  version: "2.0.0",
   generation: 1,
-  load_issues: { channels: [], plugins: [], models: [], connectors: [] },
-  capabilities: { cron: true, plugins: true, models: false },
+  load_issues: { channels: [], plugins: [], connectors: [] },
+  capabilities: { cron: true, plugins: true },
   ...over,
 })
 
@@ -59,13 +59,25 @@ describe("instance strip", () => {
   it("says what the node runs", () => {
     const text = strip({})
     expect(text).toContain("soma-qa-1")
-    expect(text).toContain("1.12.0")
+    expect(text).toContain("2.0.0")
     expect(text).toContain("gen 1")
     expect(text).toContain("load issues 0")
-    expect(text).toContain("models off")
+    expect(text).toContain("cron on")
+    expect(text).toContain("plugins on")
+    expect(text).not.toContain("models")
   })
 
-  it("an absent load-issue report is unknown, not zero", () => {
-    expect(strip({ engine: engine({ load_issues: undefined }) })).toContain("load issues unknown")
+  it("counts the quarantined entities the generation reported", () => {
+    expect(
+      strip({
+        engine: engine({
+          load_issues: {
+            channels: [{ channel: "orders", channel_id: "uuid-orders", reason: "no secret" }],
+            connectors: [],
+            plugins: [],
+          },
+        }),
+      }),
+    ).toContain("load issues 1")
   })
 })

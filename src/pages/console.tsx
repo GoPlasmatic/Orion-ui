@@ -186,9 +186,8 @@ function ProfilePanel({ profile }: { profile: ProfileResult }) {
  *
  * The token travels in router state, not the URL: a URL is not a private
  * place — it reaches browser history, the `Referer` of whatever the page loads
- * next, and every chat window a link is pasted into. That is the reason the
- * server deprecated its own `?token=` query parameter in 1.6; the console's
- * link used to carry the token the same way.
+ * next, and every chat window a link is pasted into. The trace page sends it
+ * as `x-trace-token`.
  */
 function traceLink(traceId: string, token?: string) {
   return {

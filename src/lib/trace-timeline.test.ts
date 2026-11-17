@@ -8,22 +8,15 @@ import {
   parseInstantUs,
 } from "@/lib/trace-timeline"
 
-// Trace 64b46dde on QA (soma-clock-pair, 2 Oct 2026): a Redis outage at boot.
-// Offsets and durations are the real ones; snapshots are elided.
+// Trace 64b46dde on QA (soma-clock-pair, 2 Oct 2026): a Redis outage at boot,
+// as Orion 2 stores it (a dataflow-rs 4 replay trace). Durations are real.
 const T0 = "2026-10-02T05:41:15.836289"
-const at = (offsetUs: number) => {
-  const base = parseInstantUs(T0)! + offsetUs
-  const sec = Math.floor(base / 1e6)
-  const frac = String(base % 1e6).padStart(6, "0")
-  return `${new Date(sec * 1000).toISOString().slice(0, 19)}.${frac}000Z`
-}
-const step = (task_id: string, start: number, dur: number, extra: Record<string, unknown> = {}) => ({
+const step = (task_id: string, dur: number, extra: Record<string, unknown> = {}) => ({
   workflow_id: "soma-clock-pair-run",
   task_id,
   result: "executed",
-  started_at: at(start),
-  duration_us: dur,
-  message: {},
+  elapsed_us: dur,
+  changes: [],
   ...extra,
 })
 
@@ -33,19 +26,20 @@ const TRACE: Pick<TraceDetail, "status" | "error" | "started_at" | "completed_at
   started_at: T0,
   completed_at: "2026-10-02T05:41:24.198158",
   task_trace_json: {
+    initial: { data: { qty: 3 }, metadata: {}, temp_data: { s: {} } },
     truncated: true,
     steps: [
-      step("pick", 1596, 1502, { changes: [{ path: "temp_data.pick" }] }),
-      step("picked", 3146, 9),
-      step("demand", 3197, 74350),
-      step("boards", 78425, 10),
-      step("trials", 78759, 5716),
-      step("pair", 85063, 4969),
-      step("plan", 90513, 414),
-      step("pairing", 91426, 396, { loop_counter: 0 }),
-      step("insert", 92171, 5485, { loop_counter: 0 }),
-      step("held", 98116, 8, { loop_counter: 0 }),
-      step("bump_work.bump", 98449, 8115055, { loop_counter: 0, message: undefined }),
+      step("pick", 1502, { changes: [{ path: "temp_data.pick", new_value: "s-1" }] }),
+      step("picked", 9),
+      step("demand", 74350),
+      step("boards", 10),
+      step("trials", 5716),
+      step("pair", 4969),
+      step("plan", 414),
+      step("pairing", 396, { loop_counter: 0 }),
+      step("insert", 5485, { loop_counter: 0, changes: [{ path: "temp_data.s.inserted", new_value: 1 }] }),
+      step("held", 8, { loop_counter: 0, changes: [{ path: "temp_data.held", new_value: true }] }),
+      step("bump_work.bump", 8115055, { loop_counter: 0, result: "failed" }),
     ],
   },
 }
@@ -84,12 +78,15 @@ describe("buildTimeline", () => {
     expect(tl.steps.find((s) => s.taskId === "insert")?.outcome).toBe("ok")
   })
 
-  it("measures admission, engine gaps and settle", () => {
-    expect(tl.admissionUs).toBe(1596)
-    expect(tl.engineEndUs).toBe(98449 + 8115055)
-    expect(tl.settleUs).toBe(8361869 - (98449 + 8115055))
-    expect(tl.gaps).toBe(10)
-    expect(Math.round(tl.gapUs / 100) * 100).toBe(4000)
+  it("lays the steps end to end and measures settle", () => {
+    const ran = 1502 + 9 + 74350 + 10 + 5716 + 4969 + 414 + 396 + 5485 + 8 + 8115055
+    expect(tl.admissionUs).toBe(0)
+    expect(tl.engineStartUs).toBe(0)
+    expect(tl.engineEndUs).toBe(ran)
+    expect(tl.settleUs).toBe(8361869 - ran)
+    // A v4 step carries no start instant, so the hand-offs are not measurable.
+    expect(tl.gaps).toBe(0)
+    expect(tl.gapUs).toBe(0)
   })
 
   it("groups setup and each iteration", () => {
@@ -147,17 +144,5 @@ describe("trace helpers", () => {
     const { loopBinding } = await import("@/lib/workflow-steps")
     expect(loopBinding({ loop: { as: "it", over: { "??": [{ var: "temp_data.plan" }, []] } } })).toEqual({ as: "it", over: "temp_data.plan" })
     expect(loopBinding({ loop: { max: 3 } })).toBeNull()
-  })
-})
-
-describe("a sync trace stamped at persist time", () => {
-  it("measures from the first step when the row's start comes after it", () => {
-    // Sync rows on 1.12: started_at == completed_at, both after the steps ran.
-    const persisted = "2026-10-02T05:41:24.300000"
-    const t = buildTimeline({ ...TRACE, status: "completed", error: undefined, started_at: persisted, completed_at: persisted })!
-    expect(t.steps[0].startUs).toBe(0)
-    expect(t.steps.every((s) => (s.startUs ?? 0) >= 0)).toBe(true)
-    expect(t.totalUs).toBeGreaterThanOrEqual(t.engineEndUs)
-    expect(t.admissionUs).toBe(0)
   })
 })

@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react"
+import { READ_ONLY_REASON, useCanMutate } from "@/hooks/use-admin-auth"
 import { Link, useSearchParams } from "react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { useCircuitBreakers, useResetCircuitBreaker, useResetCircuitBreakers } from "@/hooks/use-circuit-breakers"
@@ -25,6 +26,7 @@ export function CircuitBreakersPage() {
   const { data: channels } = useChannels()
   const reset = useResetCircuitBreaker()
   const resetMany = useResetCircuitBreakers()
+  const canMutate = useCanMutate()
   const [confirmAll, setConfirmAll] = useState(false)
 
   // A breaker key names the channel by *name*; the page needs its id.
@@ -56,8 +58,8 @@ export function CircuitBreakersPage() {
           variant="outline"
           size="sm"
           onClick={() => setConfirmAll(true)}
-          disabled={notClosed.length === 0 || resetMany.isPending}
-          title="Reset every breaker that is open or half-open on this node"
+          disabled={notClosed.length === 0 || resetMany.isPending || !canMutate}
+          title={canMutate ? "Reset every breaker that is open or half-open on this node" : READ_ONLY_REASON}
         >
           <RotateCcw className="h-4 w-4" />
           {resetMany.isPending ? "Resetting..." : `Reset all open${notClosed.length > 0 ? ` (${notClosed.length})` : ""}`}
@@ -152,7 +154,8 @@ export function CircuitBreakersPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          disabled={reset.isPending || resetMany.isPending || !isBreakerOpen(row.state)}
+                          disabled={reset.isPending || resetMany.isPending || !isBreakerOpen(row.state) || !canMutate}
+                          title={canMutate ? undefined : READ_ONLY_REASON}
                           onClick={() => reset.mutate(row.key)}
                         >
                           <RefreshCw className="h-3.5 w-3.5" />

@@ -16,8 +16,7 @@ export function useMapFaults(): MapFaults {
  * Everything a canvas draws that is not a counter: the fault overlay and, for
  * a cron channel, its next fire. One hook for both hosts — the System Map and
  * a detail page's neighbourhood — so a cron channel reads the same on either.
- * The ledger is asked only while the graph holds a schedule; a pre-1.6 server
- * has no cron routes.
+ * The ledger is asked only while the graph holds a schedule.
  */
 export function useMapTelemetry(graph: SystemGraph): {
   faults: MapFaults

@@ -1,5 +1,6 @@
 import { api, buildQuery, type RequestOptions } from "./client"
 import type {
+  ApplyDeploymentRequest,
   ConvergenceStatus,
   ConvergenceTarget,
   CreateDeploymentResponse,
@@ -31,6 +32,14 @@ export const deploymentsApi = {
   /** What a candidate changes against a base. Commits nothing; a read-only key may call it. */
   plan: (baseRevision: number, manifest: DeploymentManifest) =>
     api.post<DeploymentPlan>("admin/deployment-plans", { base_revision: baseRevision, manifest }),
+
+  /**
+   * Commit a reviewed candidate (202). The server re-checks it as of now and
+   * refuses a `reviewed_manifest_digest` that plans to anything else. A replay
+   * of the same `idempotency_key` answers the first receipt.
+   */
+  apply: (req: ApplyDeploymentRequest, opts?: RequestOptions) =>
+    api.post<CreateDeploymentResponse>("admin/deployments", req, opts),
 
   /**
    * Commit an earlier revision's manifest again as the next revision (202).

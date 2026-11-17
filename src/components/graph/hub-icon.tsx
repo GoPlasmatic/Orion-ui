@@ -1,4 +1,4 @@
-import { Blocks, Boxes, Plug, Unplug } from "lucide-react"
+import { Blocks, Plug, Unplug } from "lucide-react"
 import type { HubKind } from "@/lib/dependency-graph"
 
 /**
@@ -6,6 +6,6 @@ import type { HubKind } from "@/lib/dependency-graph"
  * plug for a connector the engine could not load.
  */
 export function HubIcon({ kind, failed = false, className }: { kind: HubKind; failed?: boolean; className?: string }) {
-  const Icon = failed ? Unplug : kind === "plugin" ? Blocks : kind === "model" ? Boxes : Plug
+  const Icon = failed ? Unplug : kind === "plugin" ? Blocks : Plug
   return <Icon className={className} aria-hidden />
 }

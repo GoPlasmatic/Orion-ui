@@ -32,6 +32,7 @@ export function OccurrencesTable({
   showChannel = true,
   onRetry,
   retryPending,
+  retryBlocked,
   emptyDescription,
   empty,
 }: {
@@ -40,6 +41,8 @@ export function OccurrencesTable({
   showChannel?: boolean
   onRetry?: (id: string) => void
   retryPending?: boolean
+  /** Why a retry is not offered to this session (a read-only key); disables the button. */
+  retryBlocked?: string
   emptyDescription?: string
   /** Replaces the whole empty state — a filtered ledger is empty for a different reason. */
   empty?: ReactNode
@@ -145,12 +148,12 @@ export function OccurrencesTable({
                           <Button
                             variant="outline"
                             size="xs"
-                            disabled={retryPending}
+                            disabled={retryPending || !!retryBlocked}
                             onClick={(e) => {
                               e.stopPropagation()
                               onRetry(o.id)
                             }}
-                            title="Another attempt at this occurrence — same id, same scheduled_for"
+                            title={retryBlocked ?? "Another attempt at this occurrence — same id, same scheduled_for"}
                           >
                             <RotateCcw /> Retry
                           </Button>

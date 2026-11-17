@@ -11,9 +11,8 @@ export function useCronStatus(options?: { refetchInterval?: number | false; enab
     queryKey: ["cron", "status"],
     queryFn: () => cronApi.status(),
     refetchInterval: options?.refetchInterval ?? 15_000,
-    // A pre-1.6 server has no scheduler routes; callers outside the Schedules
-    // page gate on `health.components.cron` so an old server is not polled
-    // for a 404 every fifteen seconds.
+    // Callers outside the Schedules page gate on `health.components.cron` so a
+    // node with the scheduler off is not polled every fifteen seconds.
     enabled: options?.enabled ?? true,
   })
 }

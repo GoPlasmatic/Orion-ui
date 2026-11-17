@@ -39,7 +39,7 @@ function normalText(state: MetricsState, cost: TaskCost | undefined): string {
 function priorLine(w: PriorWrite): string {
   const r = w.effect.resource
   const parts = [`(${w.effect.fn}${r ? ` → ${resourceLabel(r)}` : ""})`, retryLabel(w.effect)]
-  if (w.gapUs != null) parts.push(`finished ${formatMicros(w.gapUs)} earlier`)
+  if (w.gapUs != null && w.gapUs > 0) parts.push(`finished ${formatMicros(w.gapUs)} earlier`)
   if (w.step.changes.length > 0) parts.push(`wrote ${w.step.changes.map((c) => c.path).join(", ")}`)
   return parts.join(" · ")
 }

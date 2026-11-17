@@ -21,8 +21,8 @@ const BADGE_NAME: Record<NonNullable<NavItem["badge"]>, string> = {
   schedules: "pending occurrences",
 }
 
-/** A capability reads off as `false` (the 1.9 wire) or `"off"`; absent is unknown, not off. */
-const isOff = (v: unknown) => v === false || v === "off"
+/** A capability is a boolean; absent is unknown, not off. */
+const isOff = (v: unknown) => v === false
 
 /**
  * The nav items to leave out: Plugins while the sandbox is off on this node

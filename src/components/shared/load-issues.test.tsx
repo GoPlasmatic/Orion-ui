@@ -1,7 +1,7 @@
 /**
- * What a generation could not load (Orion 1.9).
+ * What a generation could not load.
  *
- * Two things are worth pinning. The four lists come from one collector on the
+ * Two things are worth pinning. The three lists come from one collector on the
  * server, so `/health` and `GET admin/engine/status` answer identically — the
  * report renders whichever the page has. And the admin plane is the one that
  * always answers: `/health`'s copy is withheld from a caller the server does
@@ -38,7 +38,6 @@ const issues: EngineLoadIssues = {
     },
   ],
   plugins: [],
-  models: [],
 }
 
 describe("load issues", () => {
@@ -64,35 +63,34 @@ describe("load issues", () => {
 
   it("renders nothing when the generation refused nothing", () => {
     const { container } = renderIn(
-      <LoadIssuesReport issues={{ channels: [], connectors: [], plugins: [], models: [] }} />
+      <LoadIssuesReport issues={{ channels: [], connectors: [], plugins: [] }} />
     )
     expect(container).toBeEmptyDOMElement()
   })
 
-  it("falls back to a pre-1.9 channel issue that carries no id", () => {
+  it("links a quarantined channel by its member id", () => {
     renderIn(
       <LoadIssuesReport
         issues={{
-          channels: [{ channel: "orders", reason: "env://ORDERS_KEY is unset" }],
+          channels: [{ channel: "orders", channel_id: "uuid-orders", reason: "env://ORDERS_KEY is unset" }],
           connectors: [],
           plugins: [],
-          models: [],
         }}
       />
     )
-    expect(screen.getByRole("link", { name: "orders" })).toHaveAttribute("href", "/channels")
+    expect(screen.getByRole("link", { name: "orders" })).toHaveAttribute("href", "/channels/uuid-orders")
   })
 })
 
 describe("the health report's load issues", () => {
-  /** Coarse components, no admin detail — what an unauthenticated /health gives. */
+  /** Coarse components, no admin detail — what `/health` gives a caller that may not read the admin plane. */
   const withheld: HealthResponse = {
     status: "degraded",
     components: { database: "ok", engine: "ok", channels: "degraded" },
     connectors: {},
     workflows_loaded: 0,
     uptime_seconds: 1,
-    version: "1.9.0",
+    version: "2.0.0",
   }
 
   it("uses the admin plane's answer when /health withheld its detail", () => {
@@ -109,7 +107,7 @@ describe("the health report's load issues", () => {
     expect(screen.getByText(/1 channel quarantined on this node/)).toBeInTheDocument()
   })
 
-  it("says nothing when a pre-1.9 server cannot tell us", () => {
+  it("says nothing when neither answer carries load issues", () => {
     renderIn(<HealthComponents health={withheld} loadIssues={null} />)
     expect(screen.queryByText(/quarantined on this node/)).not.toBeInTheDocument()
   })

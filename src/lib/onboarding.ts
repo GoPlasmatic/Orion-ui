@@ -1,14 +1,17 @@
 /**
- * The first-run path, as data: what a fresh instance needs before it does
- * anything, in the order the smoke flow does it, each step knowing whether it
- * is done. The dashboard shows it while nothing is live; the list pages'
- * empty states teach one primitive at a time, this is the whole route.
+ * The first-run path, as data: what a fresh 2.0 instance needs before it does
+ * anything, each step knowing whether it is done. In 2.0 a service arrives as
+ * a deployment — definitions compiled from a directory and applied with
+ * `orion-cli` — so the first two steps are commands, not pages. The dashboard
+ * shows the path while nothing is served.
  */
 export interface FirstRunState {
-  workflows: number
-  activeWorkflows: number
+  /** The deployment head; 0 before the first apply. */
+  headRevision: number
+  /** The revision this node serves; 0 before it served any. */
+  appliedRevision: number
+  /** Channels the head deploys. */
   channels: number
-  activeChannels: number
   traces: number
 }
 
@@ -16,54 +19,48 @@ export interface FirstRunStep {
   key: string
   title: string
   detail: string
+  /** The command that does it, when the step happens outside the console. */
+  command?: string
   to: string
   done: boolean
 }
 
 export function firstRunSteps(s: FirstRunState): FirstRunStep[] {
+  const applied = s.headRevision > 0
   return [
     {
-      key: "workflow",
-      title: "Create a workflow",
-      detail:
-        "A pipeline of tasks, saved as a draft. Start from the one-task sample, or import a bundle.",
-      to: "/workflows/new",
-      done: s.workflows > 0,
+      key: "compile",
+      title: "Compile a definition set",
+      detail: "Workflows, channels and connections as files in a directory, checked and compiled into a deployment.",
+      command: "orion-cli compile ./definitions -o dist/deployment",
+      to: "/deployments",
+      done: applied,
     },
     {
-      key: "activate-workflow",
-      title: "Activate it",
-      detail:
-        "Pre-flight checks the functions and connectors it names; activation loads it into the engine.",
-      to: "/workflows",
-      done: s.activeWorkflows > 0,
+      key: "apply",
+      title: "Apply it",
+      detail: "Plans the deployment against the head, then commits it as the next revision.",
+      command: "orion-cli deployments apply -d dist/deployment",
+      to: "/deployments",
+      done: applied,
     },
     {
-      key: "channel",
-      title: "Bind a channel to it",
-      detail: "A REST route, a Kafka topic or a cron schedule that runs the workflow.",
-      to: "/channels/new",
-      done: s.channels > 0,
-    },
-    {
-      key: "activate-channel",
-      title: "Activate the channel",
-      detail:
-        "Needs an active workflow. Once live, the route is served and the System Map shows it.",
-      to: "/channels",
-      done: s.activeChannels > 0,
+      key: "converge",
+      title: "Watch it converge",
+      detail: "This node rebuilds onto the new head by itself; the revision page shows which nodes serve it.",
+      to: applied ? `/deployments/${s.headRevision}?tab=convergence` : "/deployments",
+      done: applied && s.appliedRevision === s.headRevision && s.channels > 0,
     },
     {
       key: "request",
       title: "Send a request and read its trace",
-      detail:
-        "The Data Console sends a test payload; the trace shows every task's input and output.",
+      detail: "The Data Console sends a test payload; the trace shows every task's input and output.",
       to: "/console",
       done: s.traces > 0,
     },
   ]
 }
 
-/** Nothing is live yet: the checklist is the dashboard's most useful content. */
-export const isFirstRun = (s: Pick<FirstRunState, "activeChannels">): boolean =>
-  s.activeChannels === 0
+/** Nothing is served yet: the checklist is the dashboard's most useful content. */
+export const isFirstRun = (s: Pick<FirstRunState, "headRevision" | "channels">): boolean =>
+  s.headRevision === 0 || s.channels === 0

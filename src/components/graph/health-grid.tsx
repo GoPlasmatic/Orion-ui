@@ -106,8 +106,17 @@ export function HealthGrid({
 }: HealthGridProps) {
   const load = useMemo(() => deriveLoad(graph, traffic.byChannel), [graph, traffic.byChannel])
   const sections = useMemo(
-    () => buildHealthGrid({ nodes, domains, byChannel: traffic.byChannel, load, colorMetric, sizeMetric }),
-    [nodes, domains, traffic.byChannel, load, colorMetric, sizeMetric],
+    () =>
+      buildHealthGrid({
+        nodes,
+        domains,
+        byChannel: traffic.byChannel,
+        load,
+        colorMetric,
+        sizeMetric,
+        faultsOf: (node) => faultsFor(node, faults),
+      }),
+    [nodes, domains, traffic.byChannel, load, colorMetric, sizeMetric, faults],
   )
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes])
 

@@ -100,14 +100,6 @@ export function DepsLens({
         href: entityRoute("plugin", name) ?? undefined,
       }
     }
-    if (kind === "model") {
-      return {
-        ...base,
-        title: name,
-        subtitle: "model",
-        href: entityRoute("model", name) ?? undefined,
-      }
-    }
     const ch = registry.channels.find((x) => x.name === name)
     if (registryLoaded && !ch) return { ...base, title: name, subtitle: "channel_call · not in the registry", state: "bad" }
     return { ...base, title: name, subtitle: "channel_call", href: entityRoute("channel", ch?.channel_id) ?? undefined }

@@ -83,7 +83,6 @@ const VERB: Record<string, StepOp> = {
   storage_presign: "presign",
   storage_head: "read",
   channel_call: "call",
-  model_infer: "infer",
   cache_invalidate: "invalidate",
   filter: "gate",
 }
@@ -97,17 +96,16 @@ export type StepOp =
   | "send"
   | "publish"
   | "presign"
-  | "infer"
   | "invalidate"
   | "gate"
   | "compute"
   | (string & {})
 
-export type ResourceKind = "connector" | "channel" | "model" | "plugin"
+export type ResourceKind = "connector" | "channel" | "plugin"
 
 export interface StepResource {
   kind: ResourceKind
-  /** Connector / channel / model name, or the plugin id. Null when computed per message. */
+  /** Connector / channel name, or the plugin id. Null when computed per message. */
   name: string | null
   /** The target is JSONLogic evaluated per message, not a literal. */
   dynamic: boolean
@@ -207,9 +205,6 @@ export function stepEffect(task: Pick<Task, "function">, index: FunctionIndex = 
   } else if (canonical === "channel_call") {
     const target = input?.channel
     resource = { kind: "channel", name: typeof target === "string" ? target : null, dynamic: target != null && typeof target !== "string" }
-  } else if (canonical === "model_infer") {
-    const model = input?.model
-    resource = { kind: "model", name: typeof model === "string" ? model : null, dynamic: model != null && typeof model !== "string" }
   } else if (entry?.source === "plugin" && entry.plugin) {
     resource = { kind: "plugin", name: entry.plugin.id, dynamic: false, version: entry.plugin.version }
   }
@@ -250,7 +245,7 @@ export function isWrite(effect: Pick<StepEffect, "retry">): boolean {
   return effect.retry === "unsafe_write" || effect.retry === "idempotent_write" || effect.retry === "unknown"
 }
 
-/** The words for a retry effect, shared with `RetrySafetyBadge`. */
+/** The words for a retry effect, shared with the retry guard. */
 export const RETRY_EFFECT_LABEL: Record<RetryEffect, string> = {
   pure: "pure",
   read: "read only",

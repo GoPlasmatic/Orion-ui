@@ -1,5 +1,5 @@
 /**
- * Shared chrome for the text-entry primitives (Input, Textarea, Select) so their
+ * Shared chrome for the text-entry primitives (Input, Select) so their
  * border, focus ring and invalid state stay identical. Imported by those three
  * only — compose a field from them rather than re-deriving these classes.
  */

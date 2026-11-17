@@ -213,7 +213,12 @@ describe("last run", () => {
   })
 
   it("marks the tasks a failure left unreached", () => {
-    const short = { ...failedRun, task_trace_json: { steps: (failedRun.task_trace_json as { steps: unknown[] }).steps.slice(0, 9) }, error: "FUNCTION_ERROR: Task insert error: boom" }
+    const base = failedRun.task_trace_json as { initial: unknown; steps: unknown[] }
+    const short = {
+      ...failedRun,
+      task_trace_json: { ...base, steps: base.steps.slice(0, 9) },
+      error: "FUNCTION_ERROR: Task insert error: boom",
+    }
     const tl = buildTimeline(short, clockPair)!
     const ov = runOverlay(sections, tl)
     expect(ov.get("insert")?.status).toBe("failed")

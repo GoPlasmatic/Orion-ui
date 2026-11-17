@@ -2,10 +2,10 @@ import { test, expect, type Page } from "@playwright/test"
 import { seedEcho, sendUntilServed } from "./seed"
 
 /**
- * Deployments (PLAN-2.0.md, phase 2) against a live server: two revisions of
- * the echo workflow, then the history, a revision's changes with the
- * definition diff, a rollback through the UI with its convergence, and a
- * read-only key refused the rollback.
+ * Deployments against a live server: two revisions of the echo workflow, then
+ * the history, a revision's changes with the definition diff, a rollback
+ * through the UI with its convergence, and a read-only key refused the
+ * rollback.
  */
 
 const fullKey = process.env.ORION_ADMIN_KEY

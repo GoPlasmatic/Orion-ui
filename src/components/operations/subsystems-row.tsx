@@ -38,7 +38,7 @@ export function SubsystemsRow({
 }: {
   subsystems: SubsystemMetrics
   hasCron: boolean
-  /** `engine/status.capabilities.cron`; undefined from a pre-1.9 server. */
+  /** `engine/status.capabilities.cron`; undefined until the engine status answers. */
   cronEnabled: boolean | undefined
   schedules: CronScheduleStatus[] | undefined
   oldestPendingSec: number | null | undefined

@@ -19,7 +19,7 @@ const STATUSES = ["draft", "active", "archived"] as const
 const SORT_FIELDS = { name: "name" }
 
 function Probe() {
-  const { filters, hasFilters, offset, sortQuery, update, clear } = useListState(
+  const { filters, hasFilters, offset, sortBy, update, clear } = useListState(
     KEYS,
     SORT_FIELDS,
     { values: { status: STATUSES } },
@@ -32,7 +32,7 @@ function Probe() {
       <span data-testid="tag">{filters.tag}</span>
       <span data-testid="has-filters">{String(hasFilters)}</span>
       <span data-testid="offset">{offset}</span>
-      <span data-testid="sort-by">{sortQuery.sort_by ?? ""}</span>
+      <span data-testid="sort-by">{sortBy}</span>
       <button onClick={() => update({ status: "draft" })}>set status</button>
       <button onClick={clear}>clear</button>
     </div>
@@ -91,7 +91,7 @@ describe("useListState", () => {
     expect(read("search")).toBe("?sort=name&order=asc")
   })
 
-  it("ignores a sort field the server does not serve", () => {
+  it("ignores a sort field the list does not offer", () => {
     mount("/channels?sort=nonsense&order=asc")
     expect(read("sort-by")).toBe("")
   })

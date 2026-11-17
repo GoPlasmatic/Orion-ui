@@ -1,14 +1,13 @@
 /**
- * Render guard for the `/health` report's resident-model rows.
+ * Render guard for the 2.0 `/health` report.
  *
- * A row is a loaded *session*, not a model version. Orion 1.8.1 fixed the
- * session cache to key on the manifest's binding as well as the digest — a
- * load is a function of the bytes, the manifest and the device — and added
- * `binding` to these rows so two sessions over one artifact are
- * distinguishable. Registering one artifact under several manifests is
- * expressly representable and has ordinary uses, so the digest is not a key.
+ * The component keys changed with the deployment model: `engine_reload` now
+ * means the last build of the desired revision failed, `cron` is the scheduler,
+ * and 1.x's `models`, `packages`, `kafka`, `config_propagation` and
+ * `cluster_redis` are gone. The load issues are the same three lists the engine
+ * reports, rendered once through `LoadIssuesReport`.
  */
-import { describe, it, expect, afterEach, vi } from "vitest"
+import { describe, it, expect, afterEach } from "vitest"
 import { render, screen, cleanup } from "@testing-library/react"
 import { MemoryRouter } from "react-router"
 import type { HealthResponse } from "@/api/types"
@@ -16,82 +15,58 @@ import { HealthComponents } from "./health-components"
 
 afterEach(cleanup)
 
-/** One digest, two manifests: two plans over one graph, so two sessions. */
-const twoSessionsOneDigest: HealthResponse = {
-  status: "ok",
-  components: { database: "ok", engine: "ok", models: "ok" },
-  models: {
-    node: "node-a1b2c3d4",
-    loaded_bytes: 2048,
-    cache_bytes: 4096,
-    admission_queue_capacity: 1024,
-    loaded: [
-      {
-        digest: `sha256:${"a".repeat(64)}`,
-        binding: "b1a9f00d",
-        runtime: "tract",
-        device: "cpu",
-        resident_bytes: 1024,
-      },
-      {
-        digest: `sha256:${"a".repeat(64)}`,
-        binding: "c0ffee42",
-        runtime: "tract",
-        device: "cpu",
-        resident_bytes: 1024,
-      },
+const health: HealthResponse = {
+  status: "degraded",
+  components: {
+    database: "ok",
+    engine: "ok",
+    connectors: "degraded",
+    channels: "ok",
+    background_tasks: "ok",
+    engine_reload: "degraded",
+    plugins: "disabled",
+    cron: "ok",
+  },
+  connectors: {
+    failed_to_load: [
+      { connector: "orders-db", connector_id: "orders-db", stage: "secret_resolution", reason: "no secret" },
     ],
   },
-} as unknown as HealthResponse
+  cron: { scheduled_channels: 2, oldest_pending_age_secs: 12, reconcile_age_secs: 5 },
+  workflows_loaded: 3,
+  uptime_seconds: 60,
+  version: "2.0.0",
+}
 
-const renderReport = (health: HealthResponse) =>
+const renderReport = () =>
   render(
     <MemoryRouter>
       <HealthComponents health={health} />
     </MemoryRouter>
   )
 
-describe("resident model sessions", () => {
-  it("renders one row per session when two share a digest", () => {
-    renderReport(twoSessionsOneDigest)
-    // Both bindings are shown, so the two rows are told apart.
-    expect(screen.getByText("b1a9f00d")).toBeInTheDocument()
-    expect(screen.getByText("c0ffee42")).toBeInTheDocument()
-    // And the count reflects sessions, not distinct digests.
-    expect(screen.getByText(/^2 ·/)).toBeInTheDocument()
+describe("the 2.0 health report", () => {
+  it("names the components this server serves", () => {
+    renderReport()
+    for (const name of ["engine_reload", "background_tasks", "plugins", "cron"]) {
+      expect(screen.getByText(name)).toBeInTheDocument()
+    }
+    // 1.x's components are not on a 2.0 node.
+    expect(screen.queryByText("models")).not.toBeInTheDocument()
+    expect(screen.queryByText("packages")).not.toBeInTheDocument()
   })
 
-  /**
-   * The list key has to carry the binding. Keyed on the digest alone the two
-   * rows above collide, which React reports only as a console error — so that
-   * is what this asserts, since the rendered output looks correct either way.
-   */
-  it("gives each session a distinct list key", () => {
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {})
-    renderReport(twoSessionsOneDigest)
-    const duplicateKey = errors.mock.calls.filter((args) =>
-      args.some((a) => typeof a === "string" && a.includes("same key"))
-    )
-    errors.mockRestore()
-    expect(duplicateKey).toEqual([])
+  it("renders a failed connection load as a link to its connection", () => {
+    renderReport()
+    const link = screen.getByRole("link", { name: "orders-db" })
+    expect(link).toHaveAttribute("href", "/connections/orders-db")
+    expect(screen.getByText(/secret_resolution/)).toBeInTheDocument()
   })
 
-  it("renders a pre-1.8.1 row that carries no binding", () => {
-    const health = {
-      ...twoSessionsOneDigest,
-      models: {
-        ...twoSessionsOneDigest.models,
-        loaded: [
-          {
-            digest: `sha256:${"b".repeat(64)}`,
-            runtime: "tract",
-            device: "cpu",
-            resident_bytes: 512,
-          },
-        ],
-      },
-    } as unknown as HealthResponse
-    renderReport(health)
-    expect(screen.getByText(/^1 ·/)).toBeInTheDocument()
+  it("reads the scheduler's own numbers", () => {
+    renderReport()
+    expect(screen.getByText("Scheduler")).toBeInTheDocument()
+    expect(screen.getByText("Scheduled channels")).toBeInTheDocument()
+    expect(screen.getByText(/5s ago/)).toBeInTheDocument()
   })
 })

@@ -1,4 +1,5 @@
 import type { CronOccurrenceSummary } from "@/api/types"
+import { READ_ONLY_REASON, useCanMutate } from "@/hooks/use-admin-auth"
 import { ConfirmButton } from "@/components/shared/confirm-button"
 import { useCancelOccurrence } from "@/hooks/use-cron"
 import { isCancellable } from "@/lib/cron"
@@ -20,6 +21,7 @@ export function CancelOccurrenceButton({
   size?: "xs" | "sm"
 }) {
   const cancel = useCancelOccurrence()
+  const canMutate = useCanMutate()
   if (!isCancellable(occurrence.status)) return null
 
   return (
@@ -29,7 +31,8 @@ export function CancelOccurrenceButton({
       pendingLabel="Cancelling..."
       pending={cancel.isPending}
       size={size}
-      title="Stop this attempt and settle it as failed"
+      disabled={!canMutate}
+      title={canMutate ? "Stop this attempt and settle it as failed" : READ_ONLY_REASON}
       dialog={{
         title: "Cancel occurrence",
         confirmLabel: "Cancel occurrence",

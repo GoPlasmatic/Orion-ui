@@ -173,6 +173,15 @@ describe("buildSystemGraph", () => {
     expect(graph.byId.get("c")!.workflowShared).toBe(false)
   })
 
+  it("keeps a canary's rollout split on the node", () => {
+    const rollouts = [
+      { start_bucket: 0, end_bucket: 70, workflow_revision: 3 },
+      { start_bucket: 70, end_bucket: 100, workflow_revision: 4 },
+    ]
+    const graph = graphOf([channel("a", { rollouts })], [workflow("a", [])])
+    expect(graph.byId.get("a")!.rollouts).toEqual(rollouts)
+  })
+
   it("walks both directions for the blast radius", () => {
     const graph = graphOf(
       [channel("caller"), channel("hub"), channel("downstream")],

@@ -13,35 +13,28 @@ import { parseEngineError } from "@/lib/trace-error"
  * A trace's steps as a timeline: where the time went, in what structure, and
  * which step failed.
  *
- * Under `tracing.task_details` the server stores the run's trace. Orion 2
- * (dataflow-rs 4) writes `{initial, steps, truncated}`: the context the run
- * started from, then each step with the changes it made and its `elapsed_us`.
- * [`executionTrace`] replays that into one `ExecutionStep` per step, each with
- * the snapshot after it, so everything below reads one model. Orion 1.12
- * (dataflow-rs 3.15) stored the snapshots themselves, each executed step with
- * `started_at` (RFC 3339, nanoseconds, `Z`) and `duration_us`; that shape is
- * still read. The trace row itself carries `started_at` / `completed_at` as
- * zoneless UTC microseconds. Everything here is in **microseconds from the
- * trace's `started_at`**, so the stretch before the first step is admission
- * (claim, lease, backpressure) and the stretch after the last is settle (trace
- * and occurrence writes). A dataflow-rs 4 step carries no start instant, so
- * its steps are laid end to end from the first: the admission and the gaps
- * between steps are not measured.
+ * Under `tracing.task_details` Orion 2 stores a dataflow-rs 4 trace:
+ * `{initial, steps, truncated}` — the context the run started from, then each
+ * step with the changes it made and its `elapsed_us`. [`executionTrace`]
+ * replays that into one `ExecutionStep` per step, each with the snapshot after
+ * it, so everything below reads one model. The trace row carries `started_at`
+ * and `completed_at`; everything here is in **microseconds from the trace's
+ * `started_at`**, so the stretch after the last step is settle (trace and
+ * occurrence writes).
  *
- * Three things the wire does not say directly, and this module works out:
+ * A dataflow-rs 4 step carries no start instant, so its steps are laid end to
+ * end from the trace's start: admission and the gaps between steps are not
+ * measured. Two things the wire does not say directly, and this module works
+ * out:
  *
- * - **Which step failed.** dataflow-rs 4 says so: a step whose failure went
- *   to the workflow's policy or stopped the run is `failed`. On 1.12 `result`
- *   is only `executed` or `skipped`, and the error is on the trace, worded
- *   `"<CODE>: Task <id> error: …"` — `failingTaskId` reads it. With neither, a
- *   failed trace's last executed step is taken as the failure.
+ * - **Which step failed.** A step whose failure went to the workflow's policy
+ *   or stopped the run is `failed`. With none marked — a failure recorded only
+ *   on the trace, worded `"<CODE>: Task <id> error: …"` — `failingTaskId`
+ *   reads the task it names, else the last executed step is the failure.
  * - **Structure.** A step in a loop's `setup` carries no `loop_counter`; a
  *   body step carries the iteration. With the workflow at hand the setup ids
  *   come from `loop.setup`; without it, steps without a counter that precede
  *   the first counted one are read as setup.
- * - **Engine time.** The gaps between one step's end and the next one's start
- *   are the engine's own work — conditions, loop bookkeeping, audit — summed
- *   as `gapUs`.
  */
 
 export type StepOutcome = "ok" | "failed" | "skipped"
@@ -87,16 +80,16 @@ export interface Timeline {
   groups: TimelineGroup[]
   /** Whole trace, `started_at` → `completed_at` (or the last step's end). */
   totalUs: number
-  /** Before the first step: claim, lease, backpressure. */
+  /** Before the first step. Always 0: a v4 step records no start instant. */
   admissionUs: number
-  /** First step start → last step end. */
+  /** First step start → last step end, laid out end to end. */
   engineStartUs: number
   engineEndUs: number
   /** After the last step: persisting the trace, settling an occurrence. */
   settleUs: number
-  /** Sum of the gaps between consecutive steps — the engine's own work. */
+  /** Always 0: a v4 step records no start instant, so hand-offs are not measurable. */
   gapUs: number
-  /** Number of hand-offs the gaps were measured across. */
+  /** Number of hand-offs the gaps were measured across (0). */
   gaps: number
   failed: TimelineStep | null
   /** The step with the largest share of the trace. */
@@ -108,8 +101,8 @@ export interface Timeline {
 
 /**
  * Microseconds since the epoch for a server instant, keeping the sub-millisecond
- * digits `Date` would drop. Accepts the trace row's zoneless UTC
- * (`2026-10-02T05:41:15.836289`) and a step's `Z`-suffixed nanoseconds
+ * digits `Date` would drop. Accepts the admin plane's zoneless UTC
+ * (`2026-10-02T05:41:15.836289`) and an RFC 3339 instant
  * (`2026-10-02T05:41:15.837885170Z`). Null when it does not parse.
  */
 export function parseInstantUs(value: string | null | undefined): number | null {
@@ -139,7 +132,7 @@ interface ReplayTrace {
 interface ReplayStep {
   workflow_id?: string
   task_id?: string | null
-  result?: string
+  result?: ExecutionStep["result"]
   status?: number | null
   changes?: ExecutionStepChange[]
   mapping_ends?: number[]
@@ -211,9 +204,9 @@ function applyChange(root: Record<string, unknown>, change: ExecutionStepChange)
  * A dataflow-rs 4 trace in the step model the timeline reads: each task step
  * with the snapshot its changes replay to, its `elapsed_us` as `duration_us`
  * and its per-mapping contexts. The engine's own steps (a loop sweep's
- * counter, with no task) are applied and not listed, as 1.12 never listed
- * them; a workflow's skip is. Past the step a truncated trace stopped
- * recording changes at, no snapshot is offered, since it would be stale.
+ * counter, with no task) are applied and not listed; a workflow's skip is.
+ * Past the step a truncated trace stopped recording changes at, no snapshot is
+ * offered, since it would be stale.
  */
 function replay(trace: ReplayTrace): ExecutionTrace {
   const root = structuredClone(trace.initial)
@@ -253,28 +246,13 @@ function replay(trace: ReplayTrace): ExecutionTrace {
 
 /**
  * The parsed `task_trace_json`, or null when the trace has none or it is not a
- * trace. Accepts the object the API returns, a JSON string, or a bare steps
- * array (what older rows hold); a dataflow-rs 4 trace is replayed into
- * per-step snapshots. Parsed once per trace object.
+ * dataflow-rs 4 trace. The API answers an object, so it is replayed straight
+ * into per-step snapshots. Parsed once per trace object.
  */
 export function executionTrace(trace: Pick<TraceDetail, "task_trace_json"> | null | undefined): ExecutionTrace | null {
   if (!trace) return null
   if (parsedCache.has(trace)) return parsedCache.get(trace) ?? null
-  let v: unknown = trace.task_trace_json
-  if (typeof v === "string") {
-    try {
-      v = JSON.parse(v)
-    } catch {
-      v = null
-    }
-  }
-  const out: ExecutionTrace | null = Array.isArray(v)
-    ? { steps: v as ExecutionTrace["steps"] }
-    : isReplayTrace(v)
-      ? replay(v)
-      : v && typeof v === "object" && Array.isArray((v as ExecutionTrace).steps)
-        ? (v as ExecutionTrace)
-        : null
+  const out = isReplayTrace(trace.task_trace_json) ? replay(trace.task_trace_json) : null
   parsedCache.set(trace, out)
   return out
 }
@@ -300,9 +278,8 @@ export function traceWorkflowId(
  * Why a trace has no steps to show, as a reason a page can word: the run has
  * not settled; the channel is unknown; `tracing.task_details` is off; it keeps
  * failures only and this run did not fail; it failed without a recorded step
- * (before the first one, or — observed on 1.12 for an IO error — the error
- * ended the run before the engine kept its steps); or
- * it ran nothing (a condition or rollout gate skipped it).
+ * (the error ended the run before the engine kept its steps); or it ran nothing
+ * (a condition or rollout gate skipped it).
  */
 export type StepDataGap = "unsettled" | "no_channel" | "details_off" | "errors_only" | "failed_unrecorded" | "ran_nothing"
 
@@ -332,28 +309,16 @@ export function buildTimeline(
   const looped = workflow ? !!workflow.loop : et.steps.some((s) => s.loop_counter != null)
   const firstCounted = et.steps.findIndex((s) => s.loop_counter != null)
 
-  let stepStarts = et.steps.map((s) => parseInstantUs(s.started_at))
-  // A dataflow-rs 4 step carries no start instant, only how long it ran: its
-  // steps are laid end to end from the row's start.
-  const sequential = stepStarts.every((v) => v == null) && et.steps.some((s) => typeof s.duration_us === "number")
-  if (sequential) {
-    const base = parseInstantUs(trace.started_at) ?? 0
-    let at = base
-    stepStarts = et.steps.map((s) => {
-      if (s.result === "skipped" || typeof s.duration_us !== "number") return null
-      const start = at
-      at += s.duration_us
-      return start
-    })
-  }
-  const firstStepUs = stepStarts.find((v): v is number => v != null) ?? null
-  // The trace row's own instants are not always the run's: a sync trace is
-  // stamped when it is persisted, after its steps ran, with started_at equal to
-  // completed_at (observed on 1.12). So the timeline starts at whichever is
-  // earlier, the row's start or its first step, and never runs backwards.
-  const rowStart = parseInstantUs(trace.started_at)
-  const origin =
-    rowStart != null && firstStepUs != null ? Math.min(rowStart, firstStepUs) : (rowStart ?? firstStepUs ?? 0)
+  // A step carries no start instant, only how long it ran: lay the steps end to
+  // end from the row's start.
+  const originUs = parseInstantUs(trace.started_at) ?? 0
+  let at = originUs
+  const stepStarts = et.steps.map((s) => {
+    if (s.result === "skipped" || typeof s.duration_us !== "number") return null
+    const start = at
+    at += s.duration_us
+    return start
+  })
 
   const steps: TimelineStep[] = et.steps.map((s, index) => {
     const taskId = s.task_id ?? `step ${index + 1}`
@@ -370,7 +335,7 @@ export function buildTimeline(
       phase,
       iteration: s.loop_counter ?? null,
       element: s.element_index ?? null,
-      startUs: abs == null ? null : abs - origin,
+      startUs: abs == null ? null : abs - originUs,
       durationUs: typeof s.duration_us === "number" ? s.duration_us : null,
       outcome: s.result === "skipped" ? "skipped" : s.result === "failed" ? "failed" : "ok",
       changes: Array.isArray(s.changes) ? s.changes : [],
@@ -393,22 +358,13 @@ export function buildTimeline(
     if (failed) failed.outcome = "failed"
   }
 
-  // Engine span and the gaps inside it.
+  // Engine span. Steps are laid end to end, so the gaps between them are not
+  // measurable; the span after the last is settle.
   const timed = steps.filter((s) => s.startUs != null && s.durationUs != null)
   const engineStartUs = timed.length ? Math.min(...timed.map((s) => s.startUs!)) : 0
   const engineEndUs = timed.length ? Math.max(...timed.map((s) => s.startUs! + s.durationUs!)) : 0
-  let gapUs = 0
-  let gaps = 0
-  const ordered = [...timed].sort((a, b) => a.startUs! - b.startUs!)
-  for (let i = 1; i < ordered.length; i++) {
-    const prevEnd = ordered[i - 1].startUs! + ordered[i - 1].durationUs!
-    gapUs += Math.max(0, ordered[i].startUs! - prevEnd)
-    gaps++
-  }
   const completed = parseInstantUs(trace.completed_at)
-  // A completion stamped before the last step ended (the sync case above) says
-  // nothing about settle time, so it does not shorten the run.
-  const totalUs = Math.max(engineEndUs, completed != null ? completed - origin : engineEndUs)
+  const totalUs = Math.max(engineEndUs, completed != null ? completed - originUs : engineEndUs)
 
   // Groups, in step order.
   const groups: TimelineGroup[] = []
@@ -446,8 +402,11 @@ export function buildTimeline(
     engineStartUs,
     engineEndUs,
     settleUs: Math.max(0, totalUs - engineEndUs),
-    gapUs,
-    gaps,
+    // A dataflow-rs 4 step records no start instant, so the hand-offs between
+    // steps cannot be measured. Kept at zero rather than inferred from the
+    // trace's total, which would blame the engine for admission and settle.
+    gapUs: 0,
+    gaps: 0,
     failed,
     dominant,
     truncated: et.truncated === true,

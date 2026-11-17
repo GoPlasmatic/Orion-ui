@@ -15,7 +15,6 @@ describe("effectLabel", () => {
     expect(label(t("http_call", { connector: "billing", method: "POST" }))).toBe("post billing")
     expect(label(t("db_write", { connector: { var: "x" } }))).toBe("write (computed connector)")
     expect(label(t("channel_call", { channel: "internal-session-check" }))).toBe("call internal-session-check")
-    expect(label(t("model_infer", { model: "fraud" }))).toBe("infer fraud")
     expect(label(t("tb.pairing.pair"))).toBe("call tb.pairing v2")
   })
 
@@ -51,7 +50,9 @@ describe("writesBefore", () => {
     expect(prior.map((w) => w.step.taskId)).toEqual(["insert"])
     expect(prior[0].effect.resource?.name).toBe("soma-db")
     expect(prior[0].risk).toBe(true)
-    expect(prior[0].gapUs).toBe(98449 - (92171 + 5485))
+    // Laid out end to end, the only thing between the write and the failure
+    // is the 8 µs `held` step.
+    expect(prior[0].gapUs).toBe(8)
     expect(retryLabel(prior[0].effect)).toBe("unsafe to retry")
   })
 

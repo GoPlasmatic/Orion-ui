@@ -86,8 +86,8 @@ function Headline({ timeline, costs, mode }: Pick<TraceTimelineProps, "timeline"
       <KpiCard title={`Other ${plural(others.length, "step")}`} value={formatMicros(othersUs)} hint={baseline} />
       <KpiCard
         title="Engine between steps"
-        value={formatMicros(timeline.gapUs)}
-        hint={plural(timeline.gaps, "hand-off")}
+        value={timeline.gaps > 0 ? formatMicros(timeline.gapUs) : "not measured"}
+        hint={timeline.gaps > 0 ? plural(timeline.gaps, "hand-off") : "steps are laid end to end"}
       />
       <KpiCard title="Settle" value={formatMicros(timeline.settleUs)} hint={settleCaption(mode)} />
     </div>

@@ -6,14 +6,7 @@ import {
   workflowConnectorRefs,
   type EntityIndex,
 } from "@/lib/topology"
-import type { ChannelProtocol, ChannelType } from "@/api/types"
-
-/**
- * 1.x's lifecycle, still drawn by the map's "lifecycle" colour mode. Every
- * channel the head deploys serves, so it is always `active` in 2.0; phase 6
- * replaces the mode with health (ok / load issue / quarantined).
- */
-export type LifecycleStatus = "draft" | "active" | "archived"
+import type { ChannelProtocol, ChannelType, RolloutInterval } from "@/api/types"
 
 /**
  * The whole system as one graph, rather than one rooted walk per channel.
@@ -50,7 +43,6 @@ export interface SystemNode {
   channelId: string
   name: string
   description: string | null
-  status: LifecycleStatus
   channelType: ChannelType
   protocol: ChannelProtocol
   route: string | null
@@ -66,6 +58,11 @@ export interface SystemNode {
   workflowName: string | null
   /** True when more than one channel runs this workflow. */
   workflowShared: boolean
+  /**
+   * A Standard+ canary split: the workflow revision serving each slice of the
+   * channel's 100 buckets. Absent when one revision serves all traffic.
+   */
+  rollouts?: RolloutInterval[]
   /** Leaf task count, descending task groups. */
   steps: number
   groups: number
@@ -114,7 +111,6 @@ function placeholder(name: string): SystemNode {
     channelId: name,
     name,
     description: null,
-    status: "draft",
     channelType: "sync",
     protocol: "rest",
     route: null,
@@ -205,8 +201,6 @@ export function buildSystemGraph(idx: EntityIndex): SystemGraph {
       channelId: channel.channel_id,
       name: channel.name,
       description: channel.description,
-      // Everything the head deploys serves; lifecycle colouring becomes health in phase 6.
-      status: "active",
       channelType: channel.channel_type,
       protocol: channel.protocol,
       route: channel.route_pattern,
@@ -219,6 +213,7 @@ export function buildSystemGraph(idx: EntityIndex): SystemGraph {
       workflowId: channel.workflow_id,
       workflowName: workflow?.name ?? null,
       workflowShared: (channelsPerWorkflow.get(channel.workflow_id ?? "") ?? 0) > 1,
+      rollouts: channel.rollouts?.length ? channel.rollouts : undefined,
       steps: workflow ? countLeafSteps(workflowSteps(workflow)) : 0,
       groups: workflow ? countGroups(workflowSteps(workflow)) : 0,
       connectors: [...connectors].sort(),

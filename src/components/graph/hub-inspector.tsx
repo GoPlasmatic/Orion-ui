@@ -16,8 +16,8 @@ import { HubIcon } from "@/components/graph/hub-icon"
 import { InspectorHeader, InspectorStat } from "@/components/graph/inspector-parts"
 
 /**
- * The inspector for a hub: a connector, plugin or model and everything that
- * depends on it, grouped by domain — the outage blast radius as a list.
+ * The inspector for a hub: a connection or plugin and everything that depends
+ * on it, grouped by domain — the outage blast radius as a list.
  */
 export function HubInspector({
   hub,

@@ -349,6 +349,7 @@ export function ChannelDetailPage() {
                 showChannel={false}
                 onRetry={(occId) => retry.mutate(occId)}
                 retryPending={retry.isPending}
+                retryBlocked={canMutate ? undefined : READ_ONLY_REASON}
                 emptyDescription="Nothing has been due yet. The first occurrence is materialised within a poll interval of the schedule's next instant."
               />
             </div>

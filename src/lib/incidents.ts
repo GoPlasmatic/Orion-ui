@@ -3,7 +3,6 @@ import type {
   ChannelLoadIssue,
   ConnectorLoadIssue,
   CronOccurrenceSummary,
-  ModelLoadIssue,
   PluginLoadIssue,
   Trace,
 } from "@/api/types"
@@ -383,7 +382,6 @@ export type IncidentKind =
   | "quarantine"
   | "connector"
   | "plugin"
-  | "model"
   | "failing"
   | "failures"
   | "occurrences"
@@ -439,7 +437,6 @@ export interface LiveSignals {
   quarantined?: ChannelLoadIssue[]
   connectors?: ConnectorLoadIssue[]
   plugins?: PluginLoadIssue[]
-  models?: ModelLoadIssue[]
   /** Per-channel outcomes over the live window; null before a second sample. */
   traffic?: TrafficSignal | null
   components?: [string, string][]
@@ -475,9 +472,7 @@ export interface IncidentInput {
 
 const COMPONENT_DETAIL: Record<string, string> = {
   cron: "Declared schedules are not running — every liveness signal is green",
-  packages: "A package this node applies at startup is still applying, or did not apply",
-  engine_reload: "The last reload failed; this node serves the previous generation",
-  config_propagation: "A change committed here has not reached the peers",
+  engine_reload: "The last build of the desired revision failed; this node serves the previous generation",
 }
 
 const PROOF_WORDS: Record<RecoveryProof, string> = {
@@ -596,7 +591,7 @@ function quarantineIncidents(list: ChannelLoadIssue[], l: Lookups): Incident[] {
       tone: "destructive",
       title: `Quarantined: ${q.channel}`,
       detail: q.reason || "Refused at load — the route is not being served",
-      to: entityRoute("channel", q.channel_id || l.channelIdByName.get(q.channel)) ?? mapPath(q.channel),
+      to: entityRoute("channel", q.channel_id) ?? mapPath(q.channel),
       links: [{ label: "Map", to: mapPath(q.channel) }],
       channels: [channelRef(q.channel, l, q.channel_id)],
     }),
@@ -606,7 +601,7 @@ function quarantineIncidents(list: ChannelLoadIssue[], l: Lookups): Incident[] {
 function loadIncidents(live: LiveSignals): Incident[] {
   return [
     ...(live.connectors ?? []).map((c) => {
-      const page = entityRoute("connector", c.connector_id || c.connector)
+      const page = entityRoute("connector", c.connector_id)
       return signal({
         key: `connector:${c.connector}`,
         kind: "connector",
@@ -626,17 +621,6 @@ function loadIncidents(live: LiveSignals): Incident[] {
         title: `Plugin not loaded: ${p.plugin} v${p.version}`,
         detail: `${p.stage}: ${p.reason}`,
         to: entityRoute("plugin", p.plugin) ?? "/plugins",
-      }),
-    ),
-    ...(live.models ?? []).map((m) =>
-      signal({
-        key: `model:${m.model}@${m.version}`,
-        kind: "model",
-        severity: 1,
-        tone: "destructive",
-        title: `Model not serving: ${m.model} v${m.version}`,
-        detail: `${m.stage}: ${m.reason}`,
-        to: "/connections",
       }),
     ),
   ]

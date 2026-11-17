@@ -27,8 +27,7 @@ export type NeighbourhoodKind = "channel" | "workflow" | "connector"
  * When nothing is within a call of the root — the common case on a system
  * whose channels coordinate through shared connectors — a lone node says
  * nothing, so the view becomes one hop of the dependencies lens instead: the
- * root channels and the connectors, plugins and models they depend on, as
- * hubs.
+ * root channels and the connections and plugins they depend on, as hubs.
  *
  * `id` is the entity's routing id, except for a connector, where it is the
  * connector **name** (references are by name).

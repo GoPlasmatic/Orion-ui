@@ -1,16 +1,11 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useLocation } from "react-router"
-import {
-  bootPackageServing,
-  loadedModelKey,
-  type EngineLoadIssues,
-  type HealthResponse,
-} from "@/api/types"
+import type { EngineLoadIssues, HealthResponse } from "@/api/types"
 import { Badge } from "@/components/ui/badge"
 import { LoadIssuesReport } from "@/components/shared/load-issues"
 import { componentStateBadgeClass, isComponentFault } from "@/lib/status"
 import { componentRoute } from "@/lib/health"
-import { cn, formatBytes, formatDate, shortDigest, plural } from "@/lib/utils"
+import { cn, formatDate, plural } from "@/lib/utils"
 import { Info } from "lucide-react"
 
 /** `cron.last_reconcile_at` is unix seconds, unlike every other admin-plane timestamp; tolerate an ISO string too. */
@@ -32,32 +27,23 @@ const COMPONENT_HINTS: Record<string, string> = {
   background_tasks:
     "The supervised long-lived tasks. `degraded` is a restart in progress; `error` is a required task stopped for good, which fails /readyz.",
   engine_reload:
-    "Degraded when the last reload failed: this node serves the previous generation — correct, but no longer what the database says. Clears on the next successful reload.",
+    "Degraded when the last build of the desired revision failed: this node serves the previous generation — correct, but no longer the deployment head. Clears on the next successful build.",
   plugins:
-    "`disabled` is a state, not a fault (plugins.enabled = false). Degraded when an active plugin did not load here, which quarantines the workflows naming its functions.",
-  models:
-    "`disabled` is a state, not a fault (models.enabled = false). Degraded when an active model could not be carried here — which quarantines the workflows naming it — or when this node's admission worker is down, the state in which a new registration waits for its verdict forever.",
-  kafka: "The consume loop. `error` means no message is being consumed while HTTP keeps serving.",
-  cron: "The scheduler. Degraded when the reconciler has not completed a pass for long enough that occurrences are being missed, or when it is off while an active cron channel is stored.",
-  config_propagation:
-    "Cluster mode. Degraded when this node committed a change and failed to tell its peers; they are stale, this node is not.",
-  cluster_redis: "The shared guard backend in cluster mode.",
-  packages:
-    "Present only when [packages] apply names artifacts (1.9). `applying` while this node applies its own packages at startup — /readyz answers 503 meanwhile — then `ok` for good, because readiness is a startup condition here. `failed` means one did not apply and the process is exiting.",
+    "`disabled` is a state, not a fault (plugins.enabled = false). Degraded when a deployed plugin did not load here, which quarantines the workflows naming its functions.",
+  cron: "The scheduler. Degraded when the reconciler has not completed a pass for long enough that occurrences are being missed, or when it is off while a deployed cron channel needs it.",
 }
 
 /**
  * The `/health` report, component by component, plus the admin-only detail
- * behind it — background tasks, plugin and model load failures, the model
- * cache, the scheduler's own health — where an operator can read what a
- * coarse `degraded` is about.
+ * behind it — background tasks, plugin load failures and the scheduler's own
+ * health — where an operator can read what a coarse `degraded` is about.
  *
- * `loadIssues` is the same four lists read from `GET admin/engine/status`
- * (1.9), and takes precedence when the caller has them: `/health`'s copy is
- * served only to a caller the server recognises as an admin, so on an instance
- * with `admin_auth` on and no key reaching `/health` the coarse components
- * arrive with no detail at all, while the admin plane answers in full. Passing
- * `null` or leaving it out falls back to whatever `/health` carried.
+ * `loadIssues` is the same three lists read from `GET admin/engine/status`,
+ * and takes precedence when the caller has them: `/health`'s copy is served
+ * only to a caller the server recognises as an admin, so on an instance with
+ * `admin_auth` on and no key reaching `/health` the coarse components arrive
+ * with no detail at all, while the admin plane answers in full. Passing `null`
+ * or leaving it out falls back to whatever `/health` carried.
  */
 export function HealthComponents({
   health,
@@ -90,18 +76,17 @@ export function HealthComponents({
     document.getElementById(hash.slice(1))?.scrollIntoView({ block: "center" })
   }, [hash, health])
 
-  // The four lists `/health` serves an admin caller are exactly what
-  // `GET admin/engine/status` carries as `load_issues` (1.9) — one collector
-  // on the server — so they render through one component. Built here rather
-  // than read off `/health` as a whole, because this body nests them under
-  // four different keys for historical reasons.
+  // The three lists `/health` serves an admin caller are exactly what
+  // `GET admin/engine/status` carries as `load_issues` — one collector on the
+  // server — so they render through one component. Built here rather than read
+  // off `/health` as a whole, because this body nests them under three
+  // different keys for historical reasons.
   const loadIssues = useMemo(
     () =>
       reported ?? {
         channels: health?.channels?.quarantined ?? [],
         connectors: health?.connectors?.failed_to_load ?? [],
         plugins: health?.plugins?.failed_to_load ?? [],
-        models: health?.models?.failed_to_load ?? [],
       },
     [health, reported]
   )
@@ -112,10 +97,7 @@ export function HealthComponents({
   const tasks = health.background_tasks ?? []
   const restarted = tasks.filter((t) => t.restarts > 0 || t.state !== "running")
   const loadedPlugins = health.plugins?.loaded ?? []
-  const models = health.models
-  const loadedModels = models?.loaded ?? []
   const cron = health.cron
-  const packages = health.packages ?? []
 
   return (
     <div className="space-y-4">
@@ -168,40 +150,6 @@ export function HealthComponents({
       </ul>
 
       {showLoadIssues && <LoadIssuesReport issues={loadIssues} />}
-
-      {packages.length > 0 && (
-        <div className="rounded-md border p-3 text-sm">
-          <p className="mb-2 font-medium">Packages applied at startup</p>
-          <ul className="space-y-1 text-xs">
-            {packages.map((pkg) => (
-              <li key={pkg.file} className="flex flex-wrap items-center gap-2">
-                <span className="font-mono" title={pkg.file}>
-                  {pkg.name || pkg.file}
-                  {pkg.version && ` ${pkg.version}`}
-                </span>
-                <Badge
-                  variant="outline"
-                  className={componentStateBadgeClass(
-                    pkg.state === "failed" ? "error" : bootPackageServing(pkg.state) ? "ok" : "degraded"
-                  )}
-                >
-                  {pkg.state}
-                </Badge>
-                {pkg.error && <span className="text-destructive">{pkg.error}</span>}
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 text-xs text-muted-foreground">
-            This node applies these itself at startup, through its own admin routes, before{" "}
-            <code className="font-mono">/readyz</code> reports it ready. A restart is a no-op; a
-            failure exits the process. What it serves is on the{" "}
-            <Link to="/deployments" className="underline underline-offset-2">
-              Deployments
-            </Link>{" "}
-            page.
-          </p>
-        </div>
-      )}
 
       {cron && (
         <div className="rounded-md border p-3 text-sm">
@@ -256,62 +204,6 @@ export function HealthComponents({
               </li>
             ))}
           </ul>
-        </div>
-      )}
-
-      {models && (
-        <div className="rounded-md border p-3 text-sm">
-          <p className="mb-2 font-medium">Models on this node</p>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs sm:grid-cols-4">
-            <div>
-              <dt className="text-muted-foreground">Resident</dt>
-              <dd className="mt-0.5 tabular-nums">
-                {loadedModels.length} · {formatBytes(models.loaded_bytes)}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Artifact cache</dt>
-              <dd className="mt-0.5 tabular-nums">{formatBytes(models.cache_bytes)}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Admission queue</dt>
-              <dd className="mt-0.5 tabular-nums">{models.admission_queue_capacity ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Node</dt>
-              <dd className="mt-0.5 font-mono" title={models.node}>
-                {models.node ? models.node.slice(0, 8) : "—"}
-              </dd>
-            </div>
-          </dl>
-          {loadedModels.length > 0 && (
-            <ul className="mt-3 space-y-1 text-xs">
-              {loadedModels.map((m) => (
-                <li key={loadedModelKey(m)} className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono" title={m.digest}>
-                    {shortDigest(m.digest)}
-                  </span>
-                  {m.binding && (
-                    <span
-                      className="font-mono text-muted-foreground"
-                      title={`Binding ${m.binding} — the inputs' names, dtypes and shapes and the output names, in manifest order. Two manifests over one artifact that bind the graph differently are two sessions.`}
-                    >
-                      {m.binding.slice(0, 8)}
-                    </span>
-                  )}
-                  <span className="text-muted-foreground">
-                    {m.runtime}/{m.device} · {formatBytes(m.resident_bytes)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="mt-2 text-xs text-muted-foreground">
-            Residency is this node's alone — the admission verdict is shared across the cluster,
-            the bytes are not. A row is a loaded <em>session</em>, keyed by digest, binding,
-            runtime and device: two manifests over one artifact that declare their outputs in a
-            different order are two plans over one graph, so one digest can appear twice.
-          </p>
         </div>
       )}
 

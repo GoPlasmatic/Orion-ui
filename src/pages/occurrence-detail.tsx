@@ -1,4 +1,5 @@
 import { Link, useParams } from "react-router"
+import { READ_ONLY_REASON, useCanMutate } from "@/hooks/use-admin-auth"
 import { useCronOccurrence, useRetryOccurrence } from "@/hooks/use-cron"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -24,6 +25,7 @@ export function OccurrenceDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: occ, isLoading, error, refetch } = useCronOccurrence(id ?? "")
   const retry = useRetryOccurrence()
+  const canMutate = useCanMutate()
 
   if (isLoading) {
     return <DetailSkeleton />
@@ -169,9 +171,9 @@ export function OccurrenceDetailPage() {
             {isRetryable(occ.status) && (
               <Button
                 size="sm"
-                disabled={retry.isPending}
+                disabled={retry.isPending || !canMutate}
                 onClick={() => retry.mutate(occ.id)}
-                title="Another attempt at this occurrence — same id, same scheduled_for"
+                title={canMutate ? "Another attempt at this occurrence — same id, same scheduled_for" : READ_ONLY_REASON}
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 {retry.isPending ? "Queuing..." : "Retry"}

@@ -25,9 +25,8 @@ const KINDS: { value: ImplementationKind; hint: string }[] = [
 /**
  * The provider-package authoring tools, in the browser: scaffold a package,
  * lint its files, pack them to the digest an upload would get. Nothing is
- * stored; the server means a read-only key to be allowed all three (Orion
- * 2.0.0 still refuses them — its 403 renders like any refusal). Uploading the
- * result needs a full-access key.
+ * stored, so a read-only key may use all three; uploading the result needs a
+ * full-access key.
  */
 export function PackageStudio() {
   const runtime = useRuntimeCapabilities()

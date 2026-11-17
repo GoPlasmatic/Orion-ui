@@ -1,18 +1,19 @@
-import type { EntityRef, ExecutionStep, FunctionSchema, TraceDetail, Workflow } from "@/api/types"
+import type { EntityRef, FunctionSchema, TraceDetail, Workflow } from "@/api/types"
 import type { CostInput } from "@/lib/workflow-lens"
 
 /**
- * QA's "Clock: pair" (`soma-clock-pair-run` v2 on Orion 1.12), run every 15 s
- * by the cron channel `soma-clock-pair`, and trace 64b46dde — the run that
- * failed at boot in `bump_work.bump` after 8.1 s. Step timings, per-task
- * baselines (235 runs, 185 body iterations) and the dependency answer are the
- * server's own. Shared by the lens unit tests and the lens render test.
+ * QA's "Clock: pair" (`soma-clock-pair-run` v2), run every 15 s by the cron
+ * channel `soma-clock-pair`, and trace 64b46dde — the run that failed at boot
+ * in `bump_work.bump` after 8.1 s. Step durations, per-task baselines (235
+ * runs, 185 body iterations) and the dependency answer are the server's own,
+ * laid out as Orion 2 stores a dataflow-rs 4 trace. Shared by the lens unit
+ * tests and the lens render test.
  */
 
 const soma = (fn: string, sql: string, output: string) => ({ name: fn, input: { connector: "soma-db", sql, output } })
 const gate = { name: "filter", input: { condition: { "!!": [{ var: "temp_data.x" }] } } }
 
-/** What the compiler records the workflow member as requiring (1.12's dependency answer, as 2.0 spells it). */
+/** What the compiler records the workflow member as requiring. */
 export const clockPairRequires: EntityRef[] = [
   { kind: "connection", id: "soma-db", revision: 1 },
   { kind: "connection", id: "soma-cache", revision: 1 },
@@ -70,7 +71,7 @@ export const clockPair: Workflow = {
   ],
 }
 
-/** The catalogue rows these steps name, as `GET admin/functions` serves them on 1.12. */
+/** The catalogue rows these steps name, as `GET admin/functions` serves them. */
 const fn = (name: string, category: string, retry_safety: FunctionSchema["retry_safety"], extra: Partial<FunctionSchema> = {}): FunctionSchema => ({
   name,
   description: "",
@@ -116,29 +117,13 @@ export const clockPairCost: CostInput = {
   ]),
 }
 
-/** `2026-10-02T05:41:15.836289` plus `us`, as a step's nanosecond `Z` instant. */
-function at(us: number): string {
-  const total = 15_836_289 + us
-  const sec = Math.floor(total / 1e6)
-  const frac = String(total % 1e6).padStart(6, "0")
-  return `2026-10-02T05:41:${String(sec).padStart(2, "0")}.${frac}000Z`
-}
-
-const step = (
-  task_id: string,
-  start: number,
-  duration_us: number,
-  changes: string[],
-  loop_counter?: number,
-): ExecutionStep => ({
+const step = (task_id: string, duration_us: number, changes: string[], loop_counter?: number) => ({
   workflow_id: "soma-clock-pair-run",
   task_id,
-  result: "executed",
-  started_at: at(start),
-  duration_us,
+  result: "executed" as const,
+  elapsed_us: duration_us,
   changes: changes.map((path) => ({ path, old_value: null, new_value: 1 })),
   ...(loop_counter !== undefined ? { loop_counter } : {}),
-  message: { id: "m" },
 })
 
 export const failedRun: TraceDetail = {
@@ -153,18 +138,19 @@ export const failedRun: TraceDetail = {
   started_at: "2026-10-02T05:41:15.836289",
   completed_at: "2026-10-02T05:41:24.198158",
   task_trace_json: {
+    initial: { data: {}, metadata: {}, temp_data: { s: {} } },
     steps: [
-      step("pick", 1596, 1502, ["temp_data.pick"]),
-      step("picked", 3146, 9, []),
-      step("demand", 3197, 74350, ["temp_data.demand"]),
-      step("boards", 78425, 10, []),
-      step("trials", 78759, 5716, ["temp_data.trials"]),
-      step("pair", 85063, 4969, ["temp_data.paired"]),
-      step("plan", 90513, 414, ["temp_data.plan"]),
-      step("pairing", 91426, 396, ["temp_data.s.pairing_id"], 0),
-      step("insert", 92171, 5485, ["temp_data.s.inserted"], 0),
-      step("held", 98116, 8, [], 0),
-      { ...step("bump_work.bump", 98449, 8115055, [], 0), message: undefined },
+      step("pick", 1502, ["temp_data.pick"]),
+      step("picked", 9, []),
+      step("demand", 74350, ["temp_data.demand"]),
+      step("boards", 10, []),
+      step("trials", 5716, ["temp_data.trials"]),
+      step("pair", 4969, ["temp_data.paired"]),
+      step("plan", 414, ["temp_data.plan"]),
+      step("pairing", 396, ["temp_data.s.pairing_id"], 0),
+      step("insert", 5485, ["temp_data.s.inserted"], 0),
+      step("held", 8, [], 0),
+      { ...step("bump_work.bump", 8115055, [], 0), result: "failed" as const },
     ],
   },
 }

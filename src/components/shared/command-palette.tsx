@@ -133,8 +133,8 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
     ]
 
     // What the page under the palette is about. On a channel: the map, a test
-    // request, its traces, and its editor while it is a draft. On a workflow
-    // draft: its editor. Nothing that mutates without the page's own pre-flight.
+    // request and its traces. On a workflow: its definition test. Nothing that
+    // mutates without the page's own pre-flight.
     const contextual: Command[] = []
     if (channel) {
       contextual.push({

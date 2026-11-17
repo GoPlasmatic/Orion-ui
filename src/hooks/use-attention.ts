@@ -118,7 +118,7 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
     { refetchInterval: poll },
   )
   const { data: dlqExhausted } = useTraceDlq({ limit: 1, exhausted: true, include_total: true }, { refetchInterval: slowPoll })
-  // A pre-1.6 server has no scheduler; the component key is how it says so.
+  // The component key says whether this node schedules at all.
   const hasCron = health?.components?.cron !== undefined
   const { data: schedules } = useCronStatus({ enabled: hasCron, refetchInterval: slowPoll })
   // Hour-aligned, so the query key does not change every render.
@@ -209,19 +209,18 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
       lastCompletedRun,
     }
 
-    // Prefer the engine's load issues (admin plane); /health's stand in before 1.9.
+    // The admin plane's load issues: the same lists `/health` serves an admin
+    // caller, from the server's one collector.
     const issues = engine?.load_issues
-    const quarantined = issues?.channels ?? health?.channels?.quarantined ?? []
-    const failedConnectors = issues?.connectors ?? health?.connectors?.failed_to_load ?? []
-    const failedPlugins = issues?.plugins ?? health?.plugins?.failed_to_load ?? []
-    const failedModels = issues?.models ?? health?.models?.failed_to_load ?? []
+    const quarantined = issues?.channels ?? []
+    const failedConnectors = issues?.connectors ?? []
+    const failedPlugins = issues?.plugins ?? []
     const tasks = health?.background_tasks ?? []
     // A component already itemised below is not news twice.
     const itemised: Record<string, boolean> = {
       channels: quarantined.length > 0,
       connectors: failedConnectors.length > 0,
       plugins: failedPlugins.length > 0,
-      models: failedModels.length > 0,
       background_tasks: tasks.some((t) => t.restarts > 0 || t.state !== "running"),
     }
     const components = Object.entries(health?.components ?? {}).filter(
@@ -238,7 +237,6 @@ export function useAttentionItems({ background = false }: AttentionOptions = {})
         quarantined,
         connectors: failedConnectors,
         plugins: failedPlugins,
-        models: failedModels,
         traffic: live
           ? {
               label: formatSpan(traffic.spanSec),

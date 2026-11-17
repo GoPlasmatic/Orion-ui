@@ -9,13 +9,13 @@ import { errorLevel, latencyLevel, type ColorMetric, type HealthLevel } from "@/
 
 /**
  * The System Map's **dependencies lens**: domains on the left, the shared
- * things they lean on — connectors, plugins, models — as hubs on the right.
+ * things they lean on — connections and plugins — as hubs on the right.
  *
  * The calls lens draws `channel_call` edges, which is the right picture for a
  * fan-out design and an empty one for a system whose channels coordinate
  * through shared state. QA runs 148 channels with no call between any two of
  * them; the structure that matters there is that 145 of them write to one
- * database. `system-graph.ts` left connectors out as nodes on purpose — one
+ * database. `system-graph.ts` left connections out as nodes on purpose — one
  * used by every workflow adds an edge everywhere and distinguishes nothing —
  * and that stays true per channel. The fix is to group the channels into
  * domains first, so one edge says "admin depends on soma-db", and to let a
@@ -27,12 +27,12 @@ import { errorLevel, latencyLevel, type ColorMetric, type HealthLevel } from "@/
  * fallback, drawn thin and dashed when nothing was measured.
  *
  * Pure and synchronous. Ids: a channel is its **name** (the join key for
- * metrics), a domain is `domain:<name>`, a hub `connector:<name>`,
- * `plugin:<id>` or `model:<id>` — so one `?select=` can name any of them.
+ * metrics), a domain is `domain:<name>`, a hub `connector:<name>` or
+ * `plugin:<id>` — so one `?select=` can name any of them.
  */
 
-export type HubKind = "connector" | "plugin" | "model"
-const HUB_KINDS: HubKind[] = ["connector", "plugin", "model"]
+export type HubKind = "connector" | "plugin"
+const HUB_KINDS: HubKind[] = ["connector", "plugin"]
 
 export const hubId = (kind: HubKind, name: string) => `${kind}:${name}`
 export const domainId = (name: string) => `domain:${name}`
@@ -56,7 +56,7 @@ export interface Hub {
   enabled: boolean
   /** Resolves to a registered entity. A reference to nothing is drawn dashed. */
   known: boolean
-  /** Routing id: the connector UUID, the plugin or model id. */
+  /** Routing id: the connection id or the plugin id. */
   refId: string
   /** Channels in view that depend on it, by name, sorted. */
   dependants: string[]
@@ -191,8 +191,8 @@ function makeHub(kind: HubKind, name: string, index: EntityIndex): Hub {
       dependants: [],
     }
   }
-  // Plugins and models are not in the entity index; a reference is taken at
-  // its word, and the detail page is where "does it exist" is answered.
+  // Plugins are not in the entity index; a reference is taken at its word,
+  // and the detail page is where "does it exist" is answered.
   return { id: hubId(kind, name), kind, name, type: kind, enabled: true, known: true, refId: name, dependants: [] }
 }
 
@@ -263,7 +263,7 @@ export interface EdgeLoad {
  * What crossed an edge, summed over the channels it stands for. `hasWindow`
  * is whether the reader has a window yet (two samples): every edge then reads
  * its window count, and before that every edge reads its cumulative one.
- * Only a connector is metered per channel; a plugin or model edge is always a
+ * Only a connector is metered per channel; a plugin edge is always a
  * reference.
  */
 export function edgeLoad(
@@ -382,8 +382,8 @@ export function dependantsByDomain(dg: DependencyGraph, hub: Hub): { domain: str
 /**
  * A hub's colour slot under the map's colour metric. Health is the error share
  * of its calls; a connector the engine could not load is critical whatever its
- * counters say, because nothing reaches it to fail. Lifecycle reads
- * registered-and-enabled, the closest a connector has to a status.
+ * counters say, because nothing reaches it to fail. Serving reads whether the
+ * head deploys the connection and it loaded.
  */
 export function hubLevel(
   metric: ColorMetric,
@@ -391,7 +391,7 @@ export function hubLevel(
   traffic: Pick<ConnectorTraffic, "windowed" | "total" | "errorPct" | "p95Ms"> | undefined,
   failedToLoad = false,
 ): HealthLevel {
-  if (metric === "lifecycle") return !hub.known || failedToLoad ? "critical" : hub.enabled ? "healthy" : "idle"
+  if (metric === "serving") return !hub.known || failedToLoad ? "critical" : hub.enabled ? "healthy" : "idle"
   if (failedToLoad && metric === "health") return "critical"
   const calls = traffic ? (traffic.windowed ?? traffic.total) : 0
   if (calls === 0) return "idle"

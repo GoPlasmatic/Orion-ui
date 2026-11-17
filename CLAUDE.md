@@ -36,8 +36,10 @@ an entry once its parent ships a release that depends on the patched version its
 
 ## Server contract
 
-**The port to Orion 2.0 is under way — see `PLAN-2.0.md`.** The API layer speaks `/api/v2`; the
-pages still built on 1.12's per-entity CRUD are ported phase by phase.
+**This branch has ported the console to Orion 2.0.** Every page speaks `/api/v2`; the
+deployment model is the spine, and the console operates the head rather than authoring
+entities (D1 = A). **There is no 1.x compatibility path**: no old API shapes, no `?token=`
+trace read, no redirects for the removed 1.x pages, and no dataflow-rs 3 trace parser.
 
 `contracts/openapi.json` is the vendored copy of the server's OpenAPI 3.1 spec and pins the
 server version this UI targets (now 2.0.0). Orion 2.0 no longer keeps a `docs/openapi.json`: the
@@ -67,10 +69,9 @@ the same method and only declared query params, and its completeness check force
 functions to be added to the `INVOCATIONS` manifest. Note it matches spec paths **structurally**
 (segment count plus `{param}` wildcards), so a path that moved to a same-shaped route fails as a
 *method* mismatch rather than a path one. It also holds each function to its endpoint's
-**envelope**: a `Data_*` answer must be unwrapped, a bare or `Page_*` one must not. Calls still
-speaking 1.12 are listed in `PENDING_V2`, and each is held to *still failing* — porting one
-without removing it fails the test, so the list only shrinks. CI runs both plus the Playwright
-suite against a real server (built from the pinned Orion commit until `orion:2.0.0` is published).
+**envelope**: a `Data_*` answer must be unwrapped, a bare or `Page_*` one must not. CI runs
+both plus the Playwright suite against a real server (built from the pinned Orion commit until
+`orion:2.0.0` is published).
 
 ## Architecture
 
@@ -78,11 +79,11 @@ Orion UI is a React 19 dashboard for the Orion workflow engine. It uses Vite 8, 
 
 ### Core Domain
 
-Being ported from the Orion **v1.12.0** API to **2.0** (dataflow-rs 4 / datalogic-rs 5.9;
-`PLAN-2.0.md`). In 2.0 a node serves exactly its deployed manifest: workflows, channels and
-plugins are **members** of it — immutable, content-addressed definitions bound to an id and a
-revision — and change only by applying a deployment (`orion-cli deployments apply`; the UI
-operates and does not author, D1 = A). Their pages are read-only views of the head
+The console speaks the Orion **2.0** API (dataflow-rs 4 / datalogic-rs 5.9). A node serves
+exactly its deployed manifest: workflows, channels and plugins are **members** of it —
+immutable, content-addressed definitions bound to an id and a revision — and change only by
+applying a deployment (`orion-cli deployments apply`; the UI operates and does not author,
+D1 = A). Their pages are read-only views of the head
 (`hooks/use-registry.ts`, below). Connections are revisions over providers (below); 1.x's
 connectors, models and package receipts are gone.
 
@@ -155,15 +156,15 @@ connectors, models and package receipts are gone.
   connection (`com.orion.models`, an edition's).
 - **Trace DLQ** — Operator view of the async dead-letter queue (`/trace-dlq`): inspect, requeue,
   purge.
-- **Health** — `/engine` (named Settings until 2026-09-05; `/settings` redirects) renders the
+- **Health** — `/engine` renders the
   whole `/health` report (`health-components.tsx`): every
   component with what its state means, plus the admin-only detail — background tasks, plugin
-  loads and failures, the scheduler's own numbers, and since 1.9 the `[packages] apply` progress.
+  loads and failures, the scheduler's own numbers.
   It also carries the **running generation** from `GET admin/engine/status`: its id, this node's
   capabilities, and what that generation could not load. The Operations dashboard shows only the
   faults.
 
-### v1.x wire contracts worth remembering
+### Wire contracts worth remembering
 
 - **1.10–1.12 additions.** `POST admin/cron/occurrences/{id}/cancel` settles a `pending` |
   `claimed` | `running` occurrence as failed (409 once finished; `lib/cron.ts::isCancellable`).
@@ -177,54 +178,45 @@ connectors, models and package receipts are gone.
 - **A workflow's steps are `loop.setup` then `tasks` (1.10).** Every server walk covers the
   loop's setup; `workflowSteps(workflow)` is the client's. A task may carry `for_each`. Counting
   or reference-walking `workflow.tasks` alone misses whatever the setup reads.
-- **Trace steps (dataflow-rs 4 on Orion 2; 3.15 on 1.12).** Orion 2 stores `task_trace_json`
-  as dataflow-rs 4's replayable trace: `{initial, steps, truncated}`, each step with `task_id`,
-  `result` (`executed` | `skipped` | `failed`), `status`, its `changes` (`removed` / `replaced`
-  flags), `mapping_ends`, `errors`, `elapsed_us`, `loop_counter`, `element_index`, and no
-  snapshot. `lib/trace-timeline.ts::executionTrace` is the one parse point: it replays the
-  changes from `initial` into a per-step `message` snapshot and `mapping_contexts`, maps
-  `elapsed_us` → `duration_us`, and drops the engine's own steps (no `task_id`, the loop
-  counter) after applying them — so everything downstream reads one step model. A v4 step has
-  **no start instant**: `buildTimeline` lays the steps end to end, so admission and the gaps
-  between steps are not measured; a `failed` step is the failure. 1.12 (dataflow-rs 3.15) is
-  still read: each executed step carries the snapshot itself, `started_at` (RFC 3339, ns, `Z`),
-  `duration_us`, `changes`, `loop_counter`, `element_index`; the trace may be `truncated`
-  (snapshots dropped, timings kept). There `result` is only `executed` | `skipped` — **a step
-  that errored is `executed`**; the failure is named in the trace's error prose
-  (`lib/trace-error.ts::parseEngineError`). Observed quirks the timeline absorbs: a **sync**
-  trace row is stamped at persist time (`started_at == completed_at`, after the steps,
-  `duration_ms` ≈ 0), so the steps' span wins; a failure the engine reports as an IO error can
-  keep **no** steps; a sync request that times out or fails with a 5xx persists **no trace at
-  all**. With `errors_only`, a successful run keeps nothing.
+- **Trace steps are dataflow-rs 4.** `task_trace_json` is the replayable trace
+  `{initial, steps, truncated}`, each step with `task_id`, `result` (`executed` | `skipped` |
+  `failed`), `status`, its `changes` (`removed` / `replaced` flags), `mapping_ends`, `errors`,
+  `elapsed_us`, `loop_counter` and `element_index` — and no snapshot.
+  `lib/trace-timeline.ts::executionTrace` is the one parse point and accepts only this object:
+  it replays the changes from `initial` into a per-step `message` snapshot and
+  `mapping_contexts`, maps `elapsed_us` → `duration_us`, and drops the engine's own steps (no
+  `task_id`, the loop counter) after applying them — so everything downstream reads one step
+  model. A v4 step has **no start instant**: `buildTimeline` lays the steps end to end, so the
+  hand-offs between steps are not measured (`gapUs` is 0 and the UI says "not measured"), and a
+  `failed` step is the failure. Observed quirks the timeline absorbs: a **completed** row is
+  inserted with `started_at == completed_at` (persist time), so the steps' span wins over the
+  row's instants; a failure the engine reports as an IO error can keep **no** steps; a sync
+  request that times out or fails with a 5xx persists **no trace at all**. With `errors_only`,
+  a successful run keeps nothing.
 - **Function effects come from the catalogue.** `lib/function-effects.ts::stepEffect` reads
   `category: "connector"`, `source: "plugin"` + `plugin`, and `retry_safety`, resolving
   `depends_on` from a literal input (`http_call` method, `data_write`/`mongo_write` op,
   `db_write` sql). It is the one answer to "what does this step touch" and "does a retry repeat
   it" — the trace timeline, the workflow lenses, the map and the retry guard all use it.
 
-- **A reload's 200 is not proof that anything is serving (1.9).** A reload never fails because
-  one entity did not load: the entity is quarantined and everything else serves. `POST
-  admin/engine/reload` and `GET admin/engine/status` both answer with `generation` and
-  `load_issues` — `{channels, connectors, plugins, models}`, built by *one* collector on the
-  server, which is why `/health`'s four admin-only lists have the same shape. **`load_issues`
-  absent is the skew signal**: a pre-1.9 server cannot tell you, which is not the same as nothing
-  being quarantined — `countLoadIssues`/`noLoadIssues` in `types.ts` keep the two apart.
-  `shared/load-issues.tsx` is the one renderer; `HealthComponents` takes the engine's copy as a
-  prop and falls back to `/health`'s. Prefer the engine's: `/health`'s detail is served only to a
-  caller the server recognises as an admin, so on an instance with `admin_auth` on it can be
-  missing there and present on the admin plane. Both answers describe **the node that answered** —
-  a peer reloading on the same epoch bump may refuse differently.
-- **`engine/status.capabilities` (1.9)** is `{cron, plugins, models}` — the three runtimes that are
-  off by default. A cron channel on a node with `cron.enabled = false` is not a broken channel; it
-  is a schedule that would never fire, and the node quarantines it saying so. Reading the
-  capability is how that is knowable *before* a reload discovers it, which is why `off` renders
-  neutral rather than as a fault.
+- **A deployment's 202 is not proof that every member is serving.** A build does not fail
+  because one member did not load: the member is quarantined and everything else serves.
+  `GET admin/engine/status` answers `generation` and `load_issues` — `{channels, connectors,
+  plugins}`, built by *one* collector on the server, which is why `/health`'s admin-only lists
+  have the same shape. `shared/load-issues.tsx` is the one renderer; `HealthComponents` takes
+  the engine's copy as a prop and falls back to `/health`'s. Prefer the engine's: `/health`'s
+  detail is served only to a caller the server recognises as an admin, so on an instance with
+  `admin_auth` on it can be missing there and present on the admin plane. Both answers describe
+  **the node that answered**; a peer applying the same head may refuse differently.
+- **`engine/status.capabilities`** is `{cron, plugins}` — the two runtimes that are off by
+  default. A cron channel on a node with `cron.enabled = false` is not a broken channel; it is
+  a schedule that would never fire, and the node quarantines it saying so. Reading the
+  capability says that *before* an apply discovers it, which is why `off` renders neutral rather
+  than as a fault.
 - **`/health`'s `connectors.failed_to_load` is a list of objects, not names.** `{connector,
   connector_id, stage, reason}` — `stage` is `env_substitution`, `json_parse`, `var_reference`,
-  `secret_resolution`, `deserialize` or `endpoint` (the last two are 1.9). Reading it as `string[]`
-  renders `[object Object]` and matches no connector, which is what `lib/faults.ts` and
-  `use-attention.ts` used to do. `channels.quarantined` likewise gained `channel_id` and
-  `workflow_id` in 1.9, so a quarantine links straight to its channel without the channel list.
+  `secret_resolution`, `deserialize` or `endpoint`. `channels.quarantined` carries `channel_id`
+  and `workflow_id`, so a quarantine links straight to its channel without the channel list.
 - **`concurrency.slots` (1.9)** on a cron channel: `forbid` admits up to N runs of a key at once
   (1–64, default 1) where it admitted exactly one. **`forbid` only** — sending it with `allow` is a
   400, not a no-op, so a policy switch must drop it. A run takes the lowest free slot, holds it for
@@ -275,30 +267,28 @@ connectors, models and package receipts are gone.
   `fencing_token` when they hold different slots, so it is the **pair** that names a hold.
   Re-running finished work is a *trigger*, which mints a new occurrence. Failed occurrences never enter the trace DLQ.
   Cron runs **do** count in `orion_messages_total{channel}`, unlike `channel_call` targets.
-- **`/health` components (1.4–1.8):** always `database`, `engine` (constant ok), `connectors`,
-  `channels`, `background_tasks`, `engine_reload` (the last reload failed — serving the previous
-  generation), `plugins` and `models` (each `disabled` when that runtime is off and nothing needs
-  it; a *state*, not a fault — `lib/status.ts::isComponentFault` keeps both off the dashboard;
-  `models` degrades when the generation could not carry an active model, which quarantines the
-  workflows naming it, or when the admission worker is down); conditionally
-  `kafka`, `cron` (on, or off while an active cron channel is quarantined), `config_propagation`,
-  `cluster_redis` and `packages` (1.9, only under `[packages] apply`). `degraded` on `engine_reload`/`config_propagation`/`cron` does not fail
-  `/readyz`. Admin-only detail adds `plugins.{loaded,failed_to_load}` (a failed load quarantines
-  every workflow naming the plugin's functions — surfaced as an alert like a failed connector),
-  `cron` (reconcile age, oldest pending, lease renewal failures) and `background_tasks[]`.
-- **Plugins are off by default** (`plugins.enabled = false`): every `admin/plugins` route answers
-  400, and a stored active plugin row quarantines its dependants rather than aborting. A plugin
+- **`/health` components (2.0):** always `database`, `engine` (constant ok), `connectors`,
+  `channels`, `background_tasks`, `engine_reload` (the last build of the desired revision failed —
+  serving the previous generation) and `plugins` (`disabled` when the sandbox is off and nothing
+  needs it; a *state*, not a fault — `lib/status.ts::isComponentFault` keeps it off the dashboard);
+  conditionally `cron` (on, or off while a deployed cron channel needs it). `degraded` on
+  `engine_reload`/`cron` does not fail `/readyz`. 1.x's `kafka`, `config_propagation`,
+  `cluster_redis`, `models` and `packages` are gone; an edition's drivers and cluster store
+  report on `/readyz`. Admin-only detail adds `plugins.{loaded,failed_to_load}` (a failed load
+  quarantines every workflow naming the plugin's functions — surfaced as an alert like a failed
+  connector), `cron` (reconcile age, oldest pending, lease renewal failures) and
+  `background_tasks[]`.
+- **Plugins are off by default** (`plugins.enabled = false`): a node with the sandbox off
+  quarantines the workflows naming a deployed plugin's functions rather than aborting. A plugin
   function is pure JSON → JSON with no imports at all (no clock, sockets, connectors, secrets — a
-  `{"secret": …}` node in a plugin task's input is a create-time error). Activating a version is
-  checked against every active workflow calling it: a renamed or newly-required field is a 409
-  naming the workflow. `GET admin/workflows/{id}/dependencies` gained `plugins[]` (id, version,
-  digest, functions) and `unresolved_functions[]` — a workflow with any of the latter would be
-  refused activation on this node. `PluginResponse.manifest` is the validated manifest as JSON;
-  `functions` repeats the names at the top level so a client need not walk it.
+  `{"secret": …}` node in a plugin task's input is a refusal). The deployed definition carries
+  the validated `plugin.toml` manifest and the component; `useDefinition` drops the bytes and
+  keeps their size and `sha256:`. `functions` repeats the names at the top level so a client
+  need not walk the manifest.
 - **`retry_safety` (1.6)** is served for every catalogue entry as `{"kind"}` — `pure`, `read`,
   `idempotent_write`, `unsafe_write`, or `depends_on` with the `input` that decides
   (`http_call` → `method`, `data_write` → `op`). A different question from whether an *error*
-  was transient. `retry-safety-badge.tsx` renders it.
+  was transient. `retry-safety-warning.tsx` renders the guard.
 - **`template_at` (1.5)** on a catalogue field: `[""]` means the value is JSONLogic, compiled
   once and evaluated per message, so an object there may be an operator call rather than a
   literal of the declared kind. A literal is JSONLogic for itself, so the static spelling still
@@ -311,16 +301,17 @@ connectors, models and package receipts are gone.
   compose by `or`. The server refuses the 1.x `halt_on` / task `continue_on_error`, and
   `lintSteps` names the v4 key to write. `haltsOnOutcome` / `countHaltOnFailure` badge it, and
   the visualizer (dataflow-ui 4) draws them as written.
-- **`?token=` on trace reads is deprecated (1.6).** The header `x-trace-token` is what
-  `tracesApi.get` has always sent; the console now hands the token to the trace page in router
-  *state* rather than the UI's own URL, for the same reason (browser history, `Referer`, pasted
-  links). `/traces/:id?token=` is still read for old links.
+- **The trace token travels in `x-trace-token` only.** The console hands an async 202's token
+  to the trace page in router *state*, never the UI's own URL (browser history, `Referer`,
+  pasted links), and `tracesApi.get` sends it as the header. The server's deprecated `?token=`
+  query lane is not used.
 - **Trace `mode` is open:** `sync` | `async` | `cron` in 2.0 (`TRACE_MODES` drives the filter);
   an edition's driver may add its own, and the filter keeps an unlisted value visible.
 - **Audit vocabulary (2.0)** — `lib/audit-vocabulary.ts`, read from the server's own
   `audit_record` calls: `v2_deployment_apply` / `v2_deployment_rollback` (`resource_type:
-  deployment`, the id is the committed revision — the only *change* actions, so the map's
-  change pins wait for phase 6 to read a revision's diff), `v2_definition_upload` / `_test`
+  deployment`, the id is the committed revision — the only *change* actions, and what the
+  map's change pins read: `useChangePins` diffs each recent revision against its parent and
+  pins the channels a changed member reaches), `v2_definition_upload` / `_test`
   (`definition`), `v2_connection_create` / `_probe` (`connection`), `v2_package_upload` /
   `_admit` / `_revoke` (`connector_package`), plus `trigger` (channel), `retry` / `cancel`
   (`cron_occurrence`), `invalidate` (`cache_namespace`), `reset` (`circuit_breaker`), `requeue` /
@@ -435,9 +426,9 @@ connectors, models and package receipts are gone.
   `{ path, code, message, expected?, got? }` — `UNKNOWN_FIELD` is how a retired key spelling
   reports itself. Codes: `VALIDATION_ERROR` (not `BAD_REQUEST`), `CONFLICT` (409 on duplicate
   create), `NOT_FOUND` (404 on update with no draft), `CIRCUIT_OPEN` (503).
-- **Traces live on the admin plane:** `GET admin/traces` and `admin/traces/{id}`. The old
-  `data/traces` paths now resolve as a *channel name* and 404. The single-trace GET also accepts
-  the `trace_token` from an async 202 (`x-trace-token` header or `?token=`).
+- **Traces live on the admin plane:** `GET admin/traces` and `admin/traces/{id}`. A channel
+  actually named `traces` owns the data-plane path. The single-trace GET also accepts the
+  `trace_token` from an async 202 in the `x-trace-token` header.
 - **Every 2.0 list is cursor-paged, newest first** (traces, audit, DLQ, cron occurrences): no
   `offset`, no `sort_by`; `total` only with `?include_total=true`, so a dashboard that counts
   (the DLQ depth) asks for it. Their pages use `useCursorList` + `LoadMoreFooter`; a one-page
@@ -463,11 +454,10 @@ connectors, models and package receipts are gone.
 - **Circuit breakers** (`api/circuit-breakers.ts`, the one `admin/connectors/*` surface 2.0 kept): `GET admin/connectors/circuit-breakers` returns
   `{ enabled, scope, instance_id, breakers }`. State is **per-replica**, never cluster-wide.
   There is no reload of any kind in 2.0.
-- **Read-only keys and the side-effect-free POSTs.** Orion means a read-only key to be allowed
-  `deployment-plans` and `authoring/{scaffold,lint,pack}` (`read_only_may_call`), and the client
-  never takes their success as proof of full access (`auth.ts::readOnlyMayCall`). Orion 2.0.0 as
-  pinned refuses them anyway — its check compares the path with the nested `/api/v2/admin`
-  prefix already stripped — so today a read-only session sees a 403 there like any refusal.
+- **Read-only keys and the side-effect-free POSTs.** A read-only key may also `POST`
+  `deployment-plans` and `authoring/{scaffold,lint,pack}` (the server's `read_only_may_call`;
+  fixed in Orion `9cfc5326` — before it the nested router hid the prefix and they answered 403).
+  The client never takes their success as proof of full access (`auth.ts::readOnlyMayCall`).
 - **Backups:** `POST` (201 in 2.0) / `GET admin/backups`; a listed file carries `created_at` (1.x:
   `modified_at`). SQLite only (400 otherwise). **No restore endpoint.**
 - **Trace DLQ entry (2.0):** `payload` and `metadata` are objects (1.x sent `payload_json` /
@@ -499,9 +489,8 @@ connectors, models and package receipts are gone.
 - **`src/pages/`** — Route-level components. Named exports like `ChannelsPage`, `WorkflowDetailPage`. Data fetching via hooks, not inline.
 - **`src/components/ui/`** — Shadcn-style primitives using `React.forwardRef`, CVA variants, and
   `cn()` for class merging: `Button`, `Card`, `Badge`, `Table`, `Tabs`, `Dialog`, `Input`,
-  `Textarea`, `Select`, `Label`, `Checkbox`, `Switch`, `Callout`, `Separator`,
-  `Skeleton`, `Sparkline`. `field.ts` holds the border/focus/invalid chrome shared by
-  Input/Textarea/Select — change it there, not per field. `Select` renders a wrapper div so it can
+  `Select`, `Label`, `Checkbox`, `Callout`, `Separator`, `Skeleton`, `Sparkline`. `field.ts`
+  holds the border/focus/invalid chrome shared by Input/Select — change it there, not per field. `Select` renders a wrapper div so it can
   overlay a themed chevron: `className` sizes the *control* (as callers already expected),
   `selectClassName` reaches the `<select>` itself.
 - **`src/components/shared/`** — Shared composed components: `EntityHistoryPanel` (a deployed entity's states across revisions, with a definition diff), `NotDeployedState` / `NothingDeployedState` / `QuarantineBadge` (`deployed-state.tsx`), `JsonViewer`, `JsonDiff`, `PageHeader`, `ConfirmDialog`, `PaginationFooter`, `Fact`/`InlineFact`, `ConfirmButton`, `FilterBar` (with `FilterTextInput` and `UnknownOption`), `EmptyState`/`NoMatches`, `ErrorState` (the one
@@ -585,9 +574,6 @@ connectors, models and package receipts are gone.
   Operations count so the two cannot disagree; `useNavCounts()` adds DLQ, breaker and cron
   backlog counts. Failing channels are judged over the traffic window once a second sample
   exists, cumulative before that.
-- **`src/lib/use-unsaved-changes.ts`** + `shared/unsaved-changes-dialog.tsx` — the form guard.
-  `useBlocker` reads refs at navigation time so a save that navigates away is not blocked; the
-  save handler calls `markSaved()` first.
 - **`src/lib/use-url-filters.ts`** + **`src/lib/use-list-state.ts`** — view state in the URL.
   `useUrlFilters(keys)`: `values` read as strings (empty when absent); `set(patch)` replaces the
   history entry and changes several keys in one navigation — two calls in a row each start from
@@ -595,8 +581,10 @@ connectors, models and package receipts are gone.
   reads the render's params). The map, the dashboard and the console use it directly.
   `useListState(keys, sortFields?, options?)` is a list page's whole view — its filters,
   `sort`/`order` and `offset` — as URL keys: `update(patch)` re-anchors to the first page,
-  `prev`/`next` page, `sortQuery` is the request's `sort_by`/`sort_order`, and `sort` feeds
-  `EntityTable`. `options.values` declares what a **closed-enum** filter accepts
+  `prev`/`next` page, and `sort` feeds `EntityTable`. Sorting is **client-side** in 2.0: a
+  cursor-paged list has no `sort_by`/`sort_order`, and a list the console holds whole is
+  filtered, sorted and paged in the browser. `options.values` declares what a **closed-enum**
+  filter accepts
   (`CHANNEL_TYPES`, `TRACE_STATUSES` —
   all in `api/types.ts` beside their type alias): a URL carrying anything else reads as unset, so
   the control, the request and the rows agree, where an unchecked value used to leave the
@@ -606,13 +594,13 @@ connectors, models and package receipts are gone.
   action, an occurrence status) is not validated: it is shown instead, through `UnknownOption`.
   `hasFilters` is whether anything is narrowing the list — what tells `NoMatches` from a page's
   first-run state — and `clear()` drops every filter, keeping the sort. Every
-  list page (Channels, Workflows, Connectors, Plugins, Traces, Audit, DLQ, the Schedules ledger)
-  keeps its state this way, so a filtered, sorted, paged list is a link. `nextSort` cycles
-  unsorted → asc → desc → unsorted; the sort fields are the server's own `sort_by` values
-  (channels: `priority`, `name`, `status`, `channel_type`, `protocol`, `created_at`,
-  `updated_at`; workflows drop the type columns; plugins take `plugin_id`; connectors `name`,
-  `connector_type`, `created_at`, `updated_at`). The 2.0 lists (traces, audit, DLQ, the
-  Schedules ledger) have no server sort: their state is filters only.
+  list page (Channels, Workflows, Connections, Plugins, Traces, Audit, DLQ, the Schedules
+  ledger) keeps its state this way, so a filtered, sorted, paged list is a link. `nextSort`
+  cycles unsorted → asc → desc → unsorted; its fields are the list's own columns
+  (channels: `priority`, `name`, `protocol`, `channel_type`; workflows drop the type
+  columns; plugins take `plugin_id`; connections `id`, `provider`, `revision`, `deployed`).
+  The cursor-paged lists (traces, audit, DLQ, the Schedules ledger) have no sort: their state
+  is filters only.
 - **`src/components/shared/entity-table.tsx`** — `EntityTable`: the list table every entity page
   draws — a `SortableHead` header row, `PAGE_SIZE` skeleton rows while loading, the empty state
   across the full width, and one activatable row per entity — from a TanStack `table`, the
@@ -659,9 +647,9 @@ connectors, models and package receipts are gone.
   `useQuarantineReason(entity)` (this node's `quarantined_entities`, keyed by
   `memberRefKey` — meaningful only when it applied the head). List pages filter, sort and page in
   the browser (`lib/deployed-list.ts`); a head with none of them renders `NothingDeployedState`.
-- **`src/hooks/use-entity-index.ts`** — `useEntityIndex()`: the registry indexed and built into
-  the system graph once, for the map, the dashboard and a neighbourhood. It carries no connectors
-  until the connection pages land (phase 4).
+- **`src/hooks/use-entity-index.ts`** — `useEntityIndex()`: the registry plus the deployed
+  connections, indexed and built into the system graph once, for the map, the dashboard and a
+  neighbourhood.
 - **`src/hooks/use-export.ts`** — `useExport(run)`: an export button's pending flag and its
   outcome toasts; the callback fetches, downloads (`downloadJson` / `downloadText`) and returns
   the success line.
@@ -706,8 +694,11 @@ connectors, models and package receipts are gone.
   order to the channels the exporter cannot see. A `HealthLevel` is a colour *slot* — `idle` /
   `healthy` / `notice` / `warning` / `critical` — and what it means depends on the colour metric:
   `legendFor(colorMetric)` names the slots (`notice` is "rejected" in health mode, "100–500 ms"
-  in latency mode, "draft" in lifecycle mode). `errorLevel` is the error-share banding the
-  dashboard KPI shares with the map.
+  in latency mode). The third mode is **serving**: this node's verdict (quarantined, a load
+  issue such as a failed connection or an open breaker, or serving cleanly), read from
+  `faultsFor`. 1.x's `lifecycle` had nothing left to say — everything the head deploys serves
+  — and an old `?colour=lifecycle` link reads as `serving` (`parseColorMetric`).
+  `errorLevel` is the error-share banding the dashboard KPI shares with the map.
 - **`src/lib/map-layout.ts`** — the map's layout: one lane per call tier, with **every** channel
   nothing calls in the entry lane whether or not it calls anything itself (an entry channel that
   makes no calls is reached over its route — it is not an orphan, and the old ELK-plus-leftover-grid
@@ -763,8 +754,8 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
                                      ?compare=<revision> for the Changes tab; default its parent)
 /system-map         -> SystemMapPage (view state in the URL: ?lens=deps|calls|grid (absent:
                                       auto) &group=prefix|tag:<a,b> &select=<channel name |
-                                      connector:<name>> &q=&tag=&lifecycle=all&window=&size=
-                                      &colour=&hops=1|2|all)
+                                      connector:<name>> &q=&tag=&window=&size=
+                                      &colour=health|latency|serving&hops=1|2|all)
 /channels           -> ChannelsPage (the head's channels; ?q= name/id/route, ?protocol=, ?type=,
                                      ?tag=, all in the browser)
 /channels/:id       -> ChannelDetailPage (by member id; ?tab=overview|occurrences|config|
@@ -775,16 +766,14 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
                                           definition; ?revision= under a canary)
 /plugins            -> PluginsPage (?q=, ?tag=)
 /plugins/:id        -> PluginDetailPage
-/{channels,workflows,plugins}/new, …/:id/edit -> redirect to the list / the entity (1.x's forms)
 /connections        -> ConnectionsPage (one row per connection; ?q=, ?deployed=yes|no, ?family=)
 /connections/:id    -> ConnectionDetailPage (?revision=<n> selects one, default the deployed;
                                             ?compare=<n> diffs two)
 /provider-packages  -> ProviderPackagesPage (?tab=studio; ?upload=1 opens the upload dialog)
 /provider-packages/:digest -> ProviderPackageDetailPage (?tab=overview|operations|files|manifest)
-/connectors/*, /models/* -> redirect to /connections; /packages -> /deployments
 /traces             -> TracesPage (?channel= and ?status= pre-filter)
-/traces/:id         -> TraceDetailPage (accepts ?token= for async trace polling; ?step=<index>
-                                       selects a timeline step)
+/traces/:id         -> TraceDetailPage (an async token arrives in router state;
+                                       ?step=<index> selects a timeline step)
 /caches             -> CachesPage (?namespace= highlights one; where audit rows link)
 /trace-dlq          -> TraceDlqPage
 /schedules          -> SchedulesPage (accepts ?channel_id= to pre-filter the ledger)
@@ -794,12 +783,10 @@ React Router v7 in `src/app.tsx`. All routes nest under `AppLayout` (sidebar + h
 /console            -> ConsolePage (?channel=<name> preselects it and seeds its REST route)
 /engine             -> EnginePage (?tab=health|cluster|maintenance; #component-<name> scrolls
                                    the health report to that row)
-/settings           -> redirect to /engine, keeping search and hash (the page's name until 2026-09-05)
 *                   -> NotFoundPage
 ```
 
-The router is a **data router** (`createBrowserRouter` + `RouterProvider`), because the
-unsaved-changes guard on every form is `useBlocker`, which only exists there. `AppLayout` wraps
+The router is a **data router** (`createBrowserRouter` + `RouterProvider`). `AppLayout` wraps
 the `<Outlet />` in an `ErrorBoundary` keyed on the path, so a page that throws renders
 `ErrorState` instead of blanking the console; it also sets the fallback tab title from the nav
 registry and runs the `g` + key shortcuts.
@@ -811,7 +798,7 @@ while their runtime is off and none exist, with live counts from
 title. A list page names the tab through `PageHeader`; a detail page through `Breadcrumbs`
 (`lib/page-title.ts` lets the page win over the shell).
 
-There are no entity forms in 2.0.0 (D1 = A): definitions and connection revisions are authored in Git and applied with `orion-cli`. JSON the console does take — the console's payload, a workflow test's payload and edited copy, a provider lock — is authored in the `JsonEditor`, never a `Textarea` (both payload editors run on ⌘ Enter through `onRun`).
+There are no entity forms in 2.0.0 (D1 = A): definitions and connection revisions are authored in Git and applied with `orion-cli`. JSON the console does take — the console's payload, a workflow test's payload and edited copy, a provider lock — is authored in the `JsonEditor`, never a plain textarea (both payload editors run on ⌘ Enter through `onRun`).
 
 ### API Proxy
 
@@ -819,8 +806,8 @@ Dev server proxies `/api`, `/health`, `/healthz`, `/readyz`, `/metrics` to `proc
 
 ### Visualization Libraries
 
-- **`@goplasmatic/dataflow-ui`** (4.0) — `WorkflowVisualizer` renders workflow task pipelines with tree/flow/graph views and optional debug tracing; it draws `loop.setup`, `for_each` and the v4 step policies, which `lib/workflow-mapper.ts` passes through. The Structure lens and the form preview open on the workflow with `initialSelection="first-workflow"` (4.0's answer to dataflow-rs#70, replacing the click-the-explorer-row stopgap). Its WebAssembly engine (`dataflow_wasm_bg.wasm`, ~3.6 MB) is a separate asset fetched only when the engine initialises. CSS imported in `main.tsx`.
-- **`@goplasmatic/datalogic-ui`** — `DataLogicEditor` renders JSONLogic expressions as interactive flow diagrams. Read-only (`editable={false}`) in viewers; editable with `onChange` in the workflow form's condition editor and the channel config's validation / key-logic / JWT authorization-logic fields (via the shared `LogicField` in `config-field.tsx`). CSS imported in `main.tsx`.
+- **`@goplasmatic/dataflow-ui`** (4.0) — `WorkflowVisualizer` renders workflow task pipelines with tree/flow/graph views and optional debug tracing; it draws `loop.setup`, `for_each` and the v4 step policies, which `lib/workflow-mapper.ts` passes through. The Structure lens opens with `initialSelection="first-workflow"` (4.0's answer to dataflow-rs#70, replacing the click-the-explorer-row stopgap). Its WebAssembly engine (`dataflow_wasm_bg.wasm`, ~3.6 MB) is a separate asset fetched only when the engine initialises. CSS imported in `main.tsx`.
+- **`@goplasmatic/datalogic-ui`** — `DataLogicEditor` renders JSONLogic expressions as interactive flow diagrams, read-only (`editable={false}`) wherever a definition or channel config is viewed. CSS imported in `main.tsx`.
 - **`@xyflow/react`** is pinned exactly (no caret) to the version `@goplasmatic/dataflow-ui`
   declares as an *exact* dependency. A root range that resolves past it makes npm nest a
   second copy under dataflow-ui and the `react-flow` chunk doubles (178 kB → 301 kB). When
@@ -884,6 +871,10 @@ pages in the browser instead (`offset` in the URL, `PaginationFooter`).
   (`QuarantineBadge`); a provider package is admitted, revoked or only stored (`PackageStateBadge`).
 - **Status colours:** add new status/state strings to `src/lib/status.ts` rather than inlining — every map there falls back to neutral, so an unmapped value degrades silently to grey.
 - **Untoasted mutations:** validate/test/dry-run hooks are bare `useMutation({ mutationFn })` with no toast or invalidation — their results render inline, and a "failure" (invalid config, unreachable backend) is information rather than an error.
+- **Read-only sessions:** every mutating verb goes through `useCanMutate()`
+  (`hooks/use-admin-auth.ts`). Disable the button and put `READ_ONLY_REASON` in its `title`
+  rather than offering a click the server will refuse; a side-effect-free POST (plan,
+  scaffold/lint/pack) stays available (`auth.ts::readOnlyMayCall`).
 - **Failed mutations:** `toastError(title, e)` from `lib/toast-error.tsx`, never `toast.error`
   with `e.message` — the field findings and the request id are the part a person acts on. A
   batch (requeue every entry shown, reset every open breaker) is `settleAll` + `reportBatch`
@@ -906,7 +897,7 @@ pages in the browser instead (`offset` in the URL, `PaginationFooter`).
   (`orion-workflow-diagram`), all through `lib/storage.ts`, so a page renders correctly when
   the key is absent or the accessor throws (private mode).
 - **Links between pages carry state in the URL:** every list page's filters, sort and page
-  (`?status=&tag=&sort=&order=&offset=` and their kin on Channels, Workflows, Connectors,
+  (`?status=&tag=&sort=&order=&offset=` and their kin on Channels, Workflows, Connections,
   Plugins, Traces; `?action=&resource_type=&resource_id=&principal=&start=&end=` on Audit;
   `?channel=&exhausted=` on the DLQ; `?channel_id=&status=&since=&until=` on the Schedules
   ledger), the console's `?channel=&method=&path=`,

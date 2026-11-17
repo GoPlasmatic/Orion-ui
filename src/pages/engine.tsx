@@ -1,4 +1,5 @@
 import { useDocsServed, useEngineStatus } from "@/hooks/use-engine"
+import { READ_ONLY_REASON, useCanMutate } from "@/hooks/use-admin-auth"
 import { useCircuitBreakers } from "@/hooks/use-circuit-breakers"
 import { useBackups, useCreateBackup } from "@/hooks/use-backup"
 import { useHealth } from "@/hooks/use-health"
@@ -48,10 +49,8 @@ export function EnginePage() {
 
   const { data: engine } = useEngineStatus()
   const { data: health } = useHealth()
-  // `load_issues` absent means "this server cannot tell you" (pre-1.9), which
-  // is not the same as "nothing quarantined" — so it counts as zero and says
-  // nothing, rather than claiming a clean generation.
-  const quarantined = countLoadIssues(engine?.load_issues)
+  const issues = engine?.load_issues
+  const quarantined = countLoadIssues(issues)
 
   return (
     <div className="space-y-6">
@@ -156,6 +155,7 @@ function ClusterRuntime() {
   const { data: health } = useHealth()
   const { data: breakers } = useCircuitBreakers()
   const nodeId = breakers?.instance_id
+  const issues = engine?.load_issues
 
   if (isLoading) return <Skeleton className="h-48 w-full rounded-xl" />
 
@@ -204,18 +204,12 @@ function ClusterRuntime() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {!engine?.load_issues ? (
-            <p className="text-sm text-muted-foreground">
-              This server does not report load issues (before 1.9) — which is not the same as
-              nothing being quarantined. The Health tab carries what <code className="font-mono">/health</code>{" "}
-              says.
-            </p>
-          ) : countLoadIssues(engine.load_issues) === 0 ? (
+          {!issues || countLoadIssues(issues) === 0 ? (
             <p className="text-sm text-muted-foreground">
               Nothing quarantined — every channel, connector and plugin of the applied revision loaded.
             </p>
           ) : (
-            <LoadIssuesReport issues={engine.load_issues} />
+            <LoadIssuesReport issues={issues} />
           )}
         </CardContent>
       </Card>
@@ -233,6 +227,7 @@ function Maintenance() {
   const docsServed = useDocsServed().data
   const { data: backups, isLoading: backupsLoading, error: backupsError } = useBackups()
   const createBackup = useCreateBackup()
+  const canMutate = useCanMutate()
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -257,7 +252,8 @@ function Maintenance() {
             <Button
               variant="outline"
               onClick={() => createBackup.mutate()}
-              disabled={createBackup.isPending}
+              disabled={createBackup.isPending || !canMutate}
+              title={canMutate ? undefined : READ_ONLY_REASON}
             >
               <Archive className="h-4 w-4" />
               {createBackup.isPending ? "Creating..." : "Create backup"}
@@ -319,11 +315,11 @@ function Maintenance() {
 }
 
 /**
- * What this node is configured to run: the runtimes that are off by default
- * (cron and plugins in 2.0; a 1.x server also reported models). A cron channel on a node with
+ * What this node is configured to run: the two runtimes that are off by
+ * default (cron and plugins). A cron channel on a node with
  * `cron.enabled = false` is not a broken channel — it is a schedule that would
  * never fire, and the node quarantines it saying so. Reading the capability
- * here is how that answer is available before a reload discovers it, and why
+ * here is how that answer is available before an apply discovers it, and why
  * `off` reads as neutral rather than as a fault.
  */
 function Capabilities({ capabilities }: { capabilities: EngineCapabilities }) {
@@ -331,7 +327,6 @@ function Capabilities({ capabilities }: { capabilities: EngineCapabilities }) {
     [
       { key: "cron", label: "Cron", setting: "cron.enabled" },
       { key: "plugins", label: "Plugins", setting: "plugins.enabled" },
-      { key: "models", label: "Models", setting: "models.enabled" },
     ] as const satisfies readonly { key: keyof EngineCapabilities; label: string; setting: string }[]
   ).filter(({ key }) => capabilities[key] !== undefined)
   // The wire is a boolean; tolerate "on" / "off" spellings as well.

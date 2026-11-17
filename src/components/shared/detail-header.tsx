@@ -2,7 +2,6 @@ import type { ReactNode } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Breadcrumbs, type Crumb } from "@/components/shared/breadcrumbs"
 import { cn } from "@/lib/utils"
-import { DetailTitleContext } from "@/components/admin/detail-context"
 
 interface DetailHeaderProps {
   /** The trail; its innermost label also names the browser tab (via Breadcrumbs). */
@@ -58,13 +57,7 @@ export function DetailHeader({
           </div>
           {meta && <div className="mt-2">{meta}</div>}
         </div>
-        {actions && (
-          // The title is provided to the actions so a delete in the overflow
-          // menu is confirmed by typing the name this header shows.
-          <DetailTitleContext.Provider value={title}>
-            <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div>
-          </DetailTitleContext.Provider>
-        )}
+        {actions && <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div>}
       </div>
     </div>
   )

@@ -28,11 +28,11 @@ export function traceStatusBadgeClass(status: string): string {
   return traceStatusClass[status] ?? NEUTRAL
 }
 
-// Per-task execution result: executed / skipped / error
+// Per-task execution result: executed / skipped / failed
 export const stepResultClass: Record<string, string> = {
   executed: GOOD,
   skipped: NEUTRAL,
-  error: BAD,
+  failed: BAD,
 }
 
 export function stepResultBadgeClass(result: string | undefined): string {
@@ -81,54 +81,15 @@ export function pluginHealthBadgeClass(state: string | null | undefined): string
   return (state && pluginHealthClass[state]) || NEUTRAL
 }
 
-// A model version's admission verdict (1.8): whether a node fetched, verified
-// and probed the artifact. `pending` is neutral rather than amber — nothing is
-// wrong, the worker simply has not got there yet — and it is the state the
-// detail page polls on. The wire value is open; an unknown one is neutral.
-export const admissionStateClass: Record<string, string> = {
-  pending: NEUTRAL,
-  passed: GOOD,
-  failed: BAD,
-}
-
-export function admissionStateBadgeClass(state: string | null | undefined): string {
-  return (state && admissionStateClass[state]) || NEUTRAL
-}
-
-// A model version's residency on the answering node (1.8). Three groups:
-// serving (`loaded`, `admitted` — verified, just not asked for yet), not this
-// node's problem (`disabled`, `inactive`, `pending`), and wrong (`failed`,
-// `rejected`). `evicted` is amber because it is a ceiling being hit
-// (`models.max_loaded_bytes`) rather than a fault — the next call reloads it,
-// and pays the cold load.
-export const modelHealthClass: Record<string, string> = {
-  loaded: GOOD,
-  admitted: GOOD,
-  evicted: WARN,
-  failed: BAD,
-  rejected: BAD,
-  disabled: NEUTRAL,
-  inactive: NEUTRAL,
-  pending: NEUTRAL,
-}
-
-export function modelHealthBadgeClass(state: string | null | undefined): string {
-  return (state && modelHealthClass[state]) || NEUTRAL
-}
-
 // A `/health` component state. `disabled` is a state, not a fault — a node
-// without the plugin sandbox, or with `models.enabled` off, serves everything
-// else — so it is neutral. `applying` and `failed` are the `packages`
-// component's own two states (1.9): a node working through its `[packages]
-// apply` list at startup is making progress rather than failing, but it is not
-// in rotation until it finishes, which is why it is not neutral either.
+// without the plugin sandbox, or without the scheduler, serves everything else
+// — so it is neutral. A 2.0 node has no `applying`/`failed` startup-package
+// states, because it applies a deployment rather than package files.
 export const componentStateClass: Record<string, string> = {
   ok: GOOD,
   degraded: WARN,
   error: BAD,
   disabled: NEUTRAL,
-  applying: INFO,
-  failed: BAD,
 }
 
 export function componentStateBadgeClass(state: string | null | undefined): string {

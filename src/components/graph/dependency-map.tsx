@@ -216,7 +216,7 @@ function DependencyMapInner({
         const node = graph.byId.get(m)
         if ((channelFaults.get(m)?.length ?? 0) > 0) faulted++
         if (pins?.get(m)?.length) changed++
-        return node ? levelFor(colorMetric, node, traffic.byChannel.get(m)) : "idle"
+        return node ? levelFor(colorMetric, node, traffic.byChannel.get(m), channelFaults.get(m)) : "idle"
       })
       const data: DomainNodeData = {
         domain,
@@ -254,7 +254,7 @@ function DependencyMapInner({
           id: m,
           label: middleTruncate(short, lod === "dot" ? CHANNEL_CHARS.dot : CHANNEL_CHARS.full),
           title: t && t.windowed > 0 ? `${m} · ${trafficLine(t)}` : m,
-          level: levelFor(colorMetric, node, t),
+          level: levelFor(colorMetric, node, t, channelFaults.get(m)),
           dot: sqrtScale(rawSize(sizeMetric, node, t, load.get(m)), maxSize, 7, 18),
           ratePerMin: t?.ratePerMin ?? null,
           faults: channelFaults.get(m) ?? [],

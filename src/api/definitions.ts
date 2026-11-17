@@ -1,5 +1,11 @@
 import { api } from "./client"
-import type { StoredDefinition, TestDefinitionRequest, TestDefinitionResponse } from "./types"
+import type {
+  StoredDefinition,
+  StoredDefinitionResponse,
+  TestDefinitionRequest,
+  TestDefinitionResponse,
+  UploadDefinitionRequest,
+} from "./types"
 
 /**
  * Content-addressed definitions (2.0). A definition has no id, version or
@@ -9,6 +15,15 @@ import type { StoredDefinition, TestDefinitionRequest, TestDefinitionResponse } 
  * manifests that name them. Every answer is bare.
  */
 export const definitionsApi = {
+  /**
+   * Store a definition (201). Content-addressed, so storing the same document
+   * again answers the same digest; a workflow's answer carries the engine's
+   * `advisories`, which are informational. This is the step `orion-cli`
+   * performs before a plan; the console adds it for a change set.
+   */
+  create: (req: UploadDefinitionRequest) =>
+    api.post<StoredDefinitionResponse>("admin/definitions", req),
+
   get: (digest: string) => api.get<StoredDefinition>(`admin/definitions/${encodeURIComponent(digest)}`),
 
   /**

@@ -4,7 +4,6 @@ import {
   ArrowUpRight,
   GitBranch,
   History,
-  Pencil,
   Play,
   Plug,
   Radio,
@@ -22,6 +21,8 @@ import { Callout } from "@/components/ui/callout"
 import { OutcomeBar, OutcomeLegend, TrafficSparklines } from "@/components/shared/outcome-bar"
 import { useTraces } from "@/hooks/use-traces"
 import { useTriggerChannel } from "@/hooks/use-channels"
+import { RolloutBar } from "@/components/deployments/rollout-bar"
+import { READ_ONLY_REASON, useCanMutate } from "@/hooks/use-admin-auth"
 import { cn, formatDate, formatRelative } from "@/lib/utils"
 import { middleTruncate } from "@/lib/domains"
 import { edgeLoad, hubId } from "@/lib/dependency-graph"
@@ -123,6 +124,7 @@ export function MapInspector({
   const windowed = traffic?.windowed ?? 0
   const derived = !!load && !load.metered && load.effective != null
   const trigger = useTriggerChannel()
+  const canMutate = useCanMutate()
   // The three most recent failures, so "what is wrong with it" is one click
   // from "it is red" rather than a filtered list away.
   const { data: failures } = useTraces(
@@ -307,16 +309,21 @@ export function MapInspector({
             <ul className="space-y-0.5 text-xs">
               {changes.slice(0, 5).map((c) => (
                 <li key={c.id} className="flex items-baseline justify-between gap-2" title={formatDate(c.at)}>
-                  <span>{changeText(c)}</span>
+                  <Link
+                    to={`/deployments/${c.deployment}?tab=changes`}
+                    className="underline-offset-2 hover:underline"
+                  >
+                    {changeText(c)}
+                  </Link>
                   <span className="shrink-0 truncate text-[10px] text-muted-foreground">{c.principal}</span>
                 </li>
               ))}
             </ul>
             <Link
-              to={`/audit?resource_id=${encodeURIComponent(node.channelId)}`}
+              to="/deployments"
               className="mt-1 inline-block text-[11px] text-muted-foreground underline underline-offset-2"
             >
-              Audit log
+              Deployment history
             </Link>
           </div>
         )}
@@ -344,6 +351,12 @@ export function MapInspector({
               </div>
               <ArrowUpRight className="h-3 w-3 shrink-0 text-muted-foreground" />
             </Link>
+            {node.rollouts && node.rollouts.length > 1 && node.workflowId && (
+              <div className="mt-2 rounded-md border p-2">
+                <p className="mb-1.5 text-[10px] text-muted-foreground">Canary split</p>
+                <RolloutBar rollouts={node.rollouts} workflow={node.workflowId} compact />
+              </div>
+            )}
           </div>
         )}
 
@@ -499,7 +512,7 @@ export function MapInspector({
       {!node.unresolved && (
         <div className="flex flex-wrap gap-2 border-t p-3">
           <Button variant="outline" size="sm" asChild>
-            <Link to={`/channels/${node.channelId}`}>
+            <Link to={`/channels/${encodeURIComponent(node.channelId)}`}>
               Channel <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </Button>
@@ -517,28 +530,23 @@ export function MapInspector({
           {/* A schedule is not reachable by name, so the console refuses it;
               its manual run goes through the same claim path a tick does. */}
           {node.schedule ? (
-            node.status === "active" && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={trigger.isPending}
-                onClick={() => trigger.mutate(node.channelId)}
-                title="Run now, through the same claim and singleton path a scheduled occurrence takes"
-              >
-                <Play className="h-3.5 w-3.5" /> {trigger.isPending ? "Triggering…" : "Trigger now"}
-              </Button>
-            )
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={trigger.isPending || !canMutate}
+              onClick={() => trigger.mutate(node.channelId)}
+              title={
+                canMutate
+                  ? "Run now, through the same claim and singleton path a scheduled occurrence takes"
+                  : READ_ONLY_REASON
+              }
+            >
+              <Play className="h-3.5 w-3.5" /> {trigger.isPending ? "Triggering…" : "Trigger now"}
+            </Button>
           ) : (
             <Button variant="outline" size="sm" asChild>
               <Link to={`/console?channel=${encodeURIComponent(node.name)}`} title="Send a test request to this channel">
                 <Send className="h-3.5 w-3.5" /> Test
-              </Link>
-            </Button>
-          )}
-          {node.status === "draft" && (
-            <Button variant="outline" size="sm" asChild>
-              <Link to={`/channels/${node.channelId}/edit`}>
-                <Pencil className="h-3.5 w-3.5" /> Edit
               </Link>
             </Button>
           )}

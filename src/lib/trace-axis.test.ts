@@ -29,6 +29,7 @@ describe("splitAdvice", () => {
   it("keeps linear when no step dominates", () => {
     const even = buildTimeline(
       { ...TRACE, status: "completed", error: undefined, completed_at: "2026-10-02T05:41:15.937000", task_trace_json: {
+        ...(TRACE.task_trace_json as { initial: unknown; steps: Record<string, unknown>[] }),
         steps: (TRACE.task_trace_json as { steps: Record<string, unknown>[] }).steps.slice(0, 7),
       } },
       WORKFLOW,
@@ -71,20 +72,14 @@ describe("buildAxis", () => {
   })
 
   it("zooms both sides when steps follow the dominant one", () => {
-    const steps = (TRACE.task_trace_json as { steps: Record<string, unknown>[] }).steps
-    // Move the hang to `demand`, so seven steps run after it.
-    const slow = steps.map((s) => ({ ...s }))
-    const shift = 5_000_000
-    slow[2].duration_us = 74350 + shift
-    const slowStart = Date.parse(String(slow[2].started_at))
-    for (let i = 3; i < slow.length; i++) {
-      const t = Date.parse(String(slow[i].started_at)) - slowStart
-      const iso = new Date(slowStart + t + shift / 1000).toISOString()
-      slow[i].started_at = iso
-    }
-    slow[10].duration_us = 10_000
+    const base = TRACE.task_trace_json as { initial: unknown; steps: Record<string, unknown>[] }
+    // Move the hang to `demand`, so seven steps run after it. Steps are laid
+    // end to end, so the later ones move with it.
+    const slow = base.steps.map((s) => ({ ...s }))
+    slow[2].elapsed_us = 74350 + 5_000_000
+    slow[10].elapsed_us = 10_000
     const t = buildTimeline(
-      { ...TRACE, completed_at: "2026-10-02T05:41:21.200000", task_trace_json: { steps: slow } },
+      { ...TRACE, completed_at: "2026-10-02T05:41:21.200000", task_trace_json: { ...base, steps: slow } },
       WORKFLOW,
     )!
     expect(t.dominant?.taskId).toBe("demand")

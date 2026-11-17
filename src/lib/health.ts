@@ -1,15 +1,13 @@
 /**
- * Reading `/health` (Orion 1.4–1.9): which page acts on a degraded component.
- * Lives in `lib/` because a component file may export only components (the
- * fast-refresh lint rule), and the dashboard needs the same answer the
- * engine page does.
+ * Reading `/health`: which page acts on a degraded component. Lives in `lib/`
+ * because a component file may export only components (the fast-refresh lint
+ * rule), and the dashboard needs the same answer the engine page does.
  */
 const COMPONENT_ROUTES: Record<string, string> = {
   connectors: "/connections",
   channels: "/channels",
   plugins: "/plugins",
   cron: "/schedules",
-  packages: "/deployments",
 }
 
 /** The page that acts on a degraded component, or null when only the health report explains it. */

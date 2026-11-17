@@ -16,8 +16,6 @@ export interface AuditActionWords {
   label: string
   /** Past tense, for a feed line. */
   verb: string
-  /** A change to an entity's definition or lifecycle — worth a pin on its node. */
-  change?: boolean
 }
 
 /**
@@ -28,8 +26,8 @@ export interface AuditActionWords {
  * row carries them.
  */
 export const AUDIT_ACTIONS: readonly AuditActionWords[] = [
-  { value: "v2_deployment_apply", label: "Apply deployment", verb: "deployed", change: true },
-  { value: "v2_deployment_rollback", label: "Roll back deployment", verb: "rolled back", change: true },
+  { value: "v2_deployment_apply", label: "Apply deployment", verb: "deployed" },
+  { value: "v2_deployment_rollback", label: "Roll back deployment", verb: "rolled back" },
   { value: "v2_definition_upload", label: "Upload definition", verb: "uploaded" },
   { value: "v2_definition_test", label: "Test definition", verb: "tested" },
   { value: "v2_connection_create", label: "Create connection revision", verb: "revised" },
@@ -63,12 +61,7 @@ export const AUDIT_RESOURCE_TYPES = [
 
 const BY_VALUE = new Map(AUDIT_ACTIONS.map((a) => [a.value, a]))
 
-/** `status_active` → "activated"; an unlisted action reads with its underscores spaced. */
+/** `v2_deployment_apply` → "deployed"; an unlisted action reads with its underscores spaced. */
 export function auditVerb(action: string): string {
   return BY_VALUE.get(action)?.verb ?? action.replace(/_/g, " ")
-}
-
-/** Whether an action changes an entity's definition or lifecycle. */
-export function isChangeAction(action: string): boolean {
-  return BY_VALUE.get(action)?.change === true
 }

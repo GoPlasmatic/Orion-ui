@@ -5,17 +5,17 @@ import { countLoadIssues } from "@/api/types"
 import { Callout } from "@/components/ui/callout"
 
 /**
- * What a runtime generation could not load (Orion 1.9).
+ * What a runtime generation could not load.
  *
- * A reload does not fail because one entity did not load: the entity is
- * quarantined and everything else serves, so a 200 from a reload is not proof
- * that what was activated is serving. These four lists are how a node says
- * what it refused, and since 1.9 the server builds them from one collector for
- * both `/health` and `GET admin/engine/status` — so this renders them once and
- * the two surfaces cannot drift apart in wording or severity.
+ * A build does not fail because one member did not load: the member is
+ * quarantined and everything else serves, so a 200 from a deployment is not
+ * proof that every member is serving. These three lists are how a node says
+ * what it refused, and the server builds them from one collector for both
+ * `/health` and `GET admin/engine/status` — so this renders them once and the
+ * two surfaces cannot drift apart in wording or severity.
  *
- * Every entry is *this node's* answer. A peer reloads on the same epoch bump
- * and may refuse differently — a different `cron.enabled` is enough.
+ * Every entry is *this node's* answer. A peer applies the same head and may
+ * refuse differently — a different `cron.enabled` is enough.
  */
 export function LoadIssuesReport({ issues }: { issues: EngineLoadIssues }) {
   if (countLoadIssues(issues) === 0) return null
@@ -23,7 +23,6 @@ export function LoadIssuesReport({ issues }: { issues: EngineLoadIssues }) {
   const channels = issues.channels ?? []
   const connectors = issues.connectors ?? []
   const plugins = issues.plugins ?? []
-  const models = issues.models ?? []
 
   return (
     <div className="space-y-3">
@@ -35,11 +34,8 @@ export function LoadIssuesReport({ issues }: { issues: EngineLoadIssues }) {
           footnote="A quarantined channel's route is not served at all — the instance still reports healthy, which is exactly the silent-success failure worth reading here."
         >
           {channels.map((c) => (
-            <li key={c.channel_id || c.channel}>
-              <Link
-                to={c.channel_id ? `/channels/${encodeURIComponent(c.channel_id)}` : "/channels"}
-                className="font-mono"
-              >
+            <li key={c.channel_id}>
+              <Link to={`/channels/${encodeURIComponent(c.channel_id)}`} className="font-mono">
                 {c.channel}
               </Link>
               {c.workflow_id && (
@@ -67,11 +63,8 @@ export function LoadIssuesReport({ issues }: { issues: EngineLoadIssues }) {
           footnote="Every task using one of these is failing right now. `stage` names the step that refused it — an env:// or var:// reference that did not resolve, a config that did not parse, or an endpoint whose scheme its backend cannot serve."
         >
           {connectors.map((c) => (
-            <li key={c.connector_id || c.connector}>
-              <Link
-                to={`/connections/${encodeURIComponent(c.connector_id || c.connector)}`}
-                className="font-mono"
-              >
+            <li key={c.connector_id}>
+              <Link to={`/connections/${encodeURIComponent(c.connector_id)}`} className="font-mono">
                 {c.connector}
               </Link>{" "}
               · <span className="font-mono">{c.stage}</span> — {c.reason}
@@ -93,24 +86,6 @@ export function LoadIssuesReport({ issues }: { issues: EngineLoadIssues }) {
                 {p.plugin} v{p.version}
               </Link>{" "}
               · <span className="font-mono">{p.stage}</span> — {p.reason}
-            </li>
-          ))}
-        </IssueGroup>
-      )}
-
-      {models.length > 0 && (
-        <IssueGroup
-          count={models.length}
-          noun="model version"
-          verb="could not be carried"
-          footnote="Every workflow naming one of these by literal id is quarantined here, and its channels answer 503. A workflow routing to a computed model id is answered per message and fails as `unavailable` instead."
-        >
-          {models.map((m) => (
-            <li key={`${m.model}-${m.version}`}>
-              <span className="font-mono">
-                {m.model} v{m.version}
-              </span>{" "}
-              · <span className="font-mono">{m.stage}</span> — {m.reason}
             </li>
           ))}
         </IssueGroup>

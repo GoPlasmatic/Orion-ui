@@ -42,6 +42,7 @@ import { InspectorPlaceholder, MapInspector } from "@/components/graph/map-inspe
 import { HUB_THRESHOLD } from "@/components/graph/traffic-node"
 import {
   COLOR_METRICS,
+  parseColorMetric,
   SIZE_METRICS,
   deriveLoad,
   formatPct,
@@ -81,14 +82,13 @@ import {
  * caller's rate. What is busy and what is broken should be legible before you
  * read a single label.
  *
- * Every view setting lives in the URL — `select`, `q`, `tag`, `lifecycle`,
+ * Every view setting lives in the URL — `select`, `q`, `tag`,
  * `window`, `size`, `colour`, `hops`, `lens`, `group` — so a dashboard alert
  * can land on the failing channel, and a link pasted into an incident thread
  * opens the same view. `select` names a channel, or on the dependencies lens
  * a hub (`connector:soma-db`).
  */
 
-type LifecycleFilter = "active" | "all"
 
 /**
  * Three lenses on one system. `deps` draws domains against the connectors,
@@ -117,7 +117,7 @@ function domainModeFromParam(raw: string): DomainMode {
 }
 
 /** Every view setting, in the URL. */
-const VIEW_KEYS = ["select", "q", "tag", "lifecycle", "window", "size", "colour", "hops", "lens", "group"] as const
+const VIEW_KEYS = ["select", "q", "tag", "window", "size", "colour", "hops", "lens", "group"] as const
 
 function LegendSwatch({ level, label }: { level: HealthLevel; label: string }) {
   return (
@@ -244,7 +244,6 @@ function MapHelpDialog({ colorMetric, onClose }: { colorMetric: ColorMetric; onC
 }
 
 const isSizeMetric = (v: string): v is SizeMetric => SIZE_METRICS.some((m) => m.value === v)
-const isColorMetric = (v: string): v is ColorMetric => COLOR_METRICS.some((m) => m.value === v)
 
 export function SystemMapPage() {
   const { graph, index, isLoading } = useEntityIndex()
@@ -253,9 +252,8 @@ export function SystemMapPage() {
   // typing a search does not fill the history with one entry per keystroke.
   const { values: view, set: setView } = useUrlFilters(VIEW_KEYS)
   const windowSec = trafficWindowFromParam(view.window)
-  const lifecycle: LifecycleFilter = view.lifecycle === "all" ? "all" : "active"
   const sizeMetric: SizeMetric = isSizeMetric(view.size) ? view.size : "rate"
-  const colorMetric: ColorMetric = isColorMetric(view.colour) ? view.colour : "health"
+  const colorMetric: ColorMetric = parseColorMetric(view.colour)
   const search = view.q
   const tag = view.tag
   const selectedId = view.select || null
@@ -317,7 +315,6 @@ export function SystemMapPage() {
   const visible = useMemo(() => {
     let seeds = graph.nodes
 
-    if (lifecycle === "active") seeds = seeds.filter((n) => n.status === "active")
     if (tag) seeds = seeds.filter((n) => n.tags.includes(tag))
 
     const ids = new Set(seeds.map((n) => n.id))
@@ -325,7 +322,7 @@ export function SystemMapPage() {
       for (const other of [...node.callers, ...node.callees]) ids.add(other)
     }
     return ids
-  }, [graph.nodes, lifecycle, tag])
+  }, [graph.nodes, tag])
 
   /**
    * Channel → connector pairs the exporter has counted, as a stable key: the
@@ -577,15 +574,6 @@ export function SystemMapPage() {
             aria-label="Search the map"
           />
         </div>
-        <Select
-          value={lifecycle}
-          onChange={(e) => setView({ lifecycle: e.target.value === "all" ? "all" : "" })}
-          className="w-full sm:w-40"
-          aria-label="Lifecycle"
-        >
-          <option value="active">Live channels</option>
-          <option value="all">All lifecycles</option>
-        </Select>
         {graph.tags.length > 0 && (
           <Select
             value={tag}
@@ -630,17 +618,7 @@ export function SystemMapPage() {
         </Select>
         <Select
           value={colorMetric}
-          onChange={(e) => {
-            const next = e.target.value
-            // Colouring by lifecycle with only live channels shown is one
-            // colour; widen the filter so the mode has something to say. One
-            // patch: two sequential writes would each start from the same
-            // params and the second would undo the first.
-            setView({
-              colour: next === "health" ? "" : next,
-              ...(next === "lifecycle" && lifecycle === "active" ? { lifecycle: "all" } : {}),
-            })
-          }}
+          onChange={(e) => setView({ colour: e.target.value === "health" ? "" : e.target.value })}
           className="w-full sm:w-40"
           aria-label="Colour by"
         >

@@ -2,12 +2,11 @@ import { test, expect, type Page } from "@playwright/test"
 import { seedEcho, sendUntilServed } from "./seed"
 
 /**
- * Workflows, channels and plugins as views of the head (PLAN-2.0.md, phase 3)
- * against a live server: the lists read the deployed manifest, a workflow's
- * page draws its lenses and runs its definition through `definitions/test`,
- * a channel's page names the workflow it requires and its history, a 1.x
- * authoring link lands on the entity, and a read-only key is told why the
- * test is off.
+ * Workflows, channels and plugins as views of the head, against a live
+ * server: the lists read the deployed manifest, a workflow's page draws its
+ * lenses and runs its definition through `definitions/test`,
+ * a channel's page names the workflow it requires and its history, an id the
+ * head does not deploy says so, and a read-only key is told why the test is off.
  */
 
 const fullKey = process.env.ORION_ADMIN_KEY
@@ -67,14 +66,6 @@ test("a channel names the workflow it requires and keeps a history", async ({ pa
   await expect(page.getByRole("link", { name: /^e2e-echo r\d+$/ })).toHaveAttribute("href", "/workflows/e2e-echo")
   await page.getByRole("tab", { name: "History" }).click()
   await expect(page.getByText("deployed", { exact: true })).toBeVisible()
-})
-
-test("a 1.x authoring link lands on the entity instead of a form", async ({ page }) => {
-  await holdKey(page, fullKey!)
-  await page.goto("/workflows/e2e-echo/edit")
-  await expect(page).toHaveURL(/\/workflows\/e2e-echo$/)
-  await page.goto("/channels/new")
-  await expect(page).toHaveURL(/\/channels$/)
 })
 
 test("an id the head does not deploy says so", async ({ page }) => {

@@ -26,7 +26,6 @@ const CATALOGUE: FunctionSchema[] = [
   fn("cache_incr", "connector", { kind: "unsafe_write" }),
   fn("cache_delete", "connector", { kind: "idempotent_write" }),
   fn("channel_call", "control", { kind: "depends_on", input: "channel" }),
-  fn("model_infer", "compute", { kind: "pure" }),
   fn("validation", "utility", { kind: "pure" }),
   fn("tb.pairing.pair", "plugin", { kind: "pure" }, { source: "plugin", plugin: { id: "tb.pairing", version: 2, digest: "sha256:x", abi: "1.0.0" } }),
 ]
@@ -63,9 +62,8 @@ describe("stepEffect", () => {
     expect(stepEffect(task("some.dotted.builtin"), index).resource).toBeNull()
   })
 
-  it("marks computed channel and model targets as dynamic", () => {
+  it("marks a computed channel target as dynamic", () => {
     expect(stepEffect(task("channel_call", { channel: { var: "x" } }), index).resource).toEqual({ kind: "channel", name: null, dynamic: true })
-    expect(stepEffect(task("model_infer", { model: "ranker" }), index)).toMatchObject({ op: "infer", resource: { kind: "model", name: "ranker" } })
   })
 
   it("reads a function by its name and a filter as a gate", () => {

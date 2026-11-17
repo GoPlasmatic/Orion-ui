@@ -1,6 +1,4 @@
 
-export type SortOrder = "asc" | "desc"
-
 export type JsonLogicValue =
   | string
   | number
@@ -680,15 +678,15 @@ export interface TestDefinitionRequest {
   metadata?: Record<string, unknown>
 }
 
-// dataflow-rs 3.0 per-task execution trace.
-// `result` is lowercase on the wire ("executed" | "skipped" | "error"); each step
-// carries a `message` snapshot of the message state after that task.
-export type ExecutionStepResult = "executed" | "skipped" | "failed" | "error" | string
+/** A task's outcome in a dataflow-rs 4 trace. */
+export type ExecutionStepResult = "executed" | "skipped" | "failed"
 
+/** The snapshot a replayed step left the message in. */
 export interface ExecutionStepMessage {
   id?: string
   payload?: unknown
   context?: { data?: unknown; metadata?: unknown; [key: string]: unknown }
+  errors?: unknown[]
   [key: string]: unknown
 }
 
@@ -697,73 +695,55 @@ export interface ExecutionStepChange {
   path: string
   old_value?: unknown
   new_value?: unknown
-  /** The key at `path` was removed rather than written (dataflow-rs 4). */
+  /** The key at `path` was removed rather than written. */
   removed?: boolean
-  /** The write replaced the root at `path` instead of merging into it (dataflow-rs 4). */
+  /** The write replaced the root at `path` instead of merging into it. */
   replaced?: boolean
   [key: string]: unknown
 }
 
 /**
- * One step of a dataflow-rs execution trace, as Orion 1.12 (dataflow-rs 3.15)
- * stores it under `tracing.task_details`.
+ * One step of a dataflow-rs 4 trace, as Orion 2 stores it under
+ * `tracing.task_details`. `lib/trace-timeline.ts` replays each step's
+ * `changes` into the snapshot after it, so `message` and `mapping_contexts`
+ * are the client's normalized additions, not wire fields.
  *
- * `result` is only `executed` or `skipped`: a task that ran and then errored
- * is still `executed`, and the error lives on the trace (`"Task <id> error:
- * …"`) and in the snapshot's `errors` — `lib/trace-timeline.ts` attributes it.
- * `started_at` (RFC 3339, nanoseconds, UTC with a `Z`) and `duration_us` are
- * set on executed steps only. `loop_counter` is the workflow `loop` iteration
- * a body step ran in; `element_index` the `for_each` element.
+ * `result` is `executed`, `skipped` or `failed`; a step with no `task_id` is
+ * the engine's own work (a loop counter write) and is applied but not listed.
+ * `elapsed_us` is the wire's duration, normalized to `duration_us`.
  */
 export interface ExecutionStep {
   workflow_id?: string
-  // Null for a workflow-level skip.
+  // Null for the engine's own step, and for a workflow-level skip.
   task_id?: string | null
   result?: ExecutionStepResult
-  /** The call's status; null for a skip (dataflow-rs 4). */
+  /** The call's status; null for a skip. */
   status?: number | null
-  /** The error records the step added (dataflow-rs 4). */
+  /** The error records the step added. */
   errors?: unknown[]
-  // Snapshot after the step. Absent for skips, and for steps recorded after
-  // `max_snapshot_bytes` was exceeded (the trace is then `truncated`). On
-  // Orion 2 the client replays it from the trace's `initial` and changes.
+  /** Replayed snapshot after the step. Absent for skips and past truncation. */
   message?: ExecutionStepMessage
   mapping_contexts?: unknown[]
-  started_at?: string
   duration_us?: number
-  // This task's own writes; `[]` wrote nothing, absent means not recorded.
+  // This task's own writes; `[]` wrote nothing.
   changes?: ExecutionStepChange[]
   loop_counter?: number
   element_index?: number
-  /** @deprecated never sent by the server; read `duration_us`. */
-  duration_ms?: number
-  /** @deprecated never sent by the server. */
-  task_name?: string
-  /** @deprecated never sent by the server. */
-  function?: string
-  /** @deprecated never sent by the server. */
-  error?: unknown
-  /** @deprecated never sent by the server. */
-  input?: unknown
-  /** @deprecated never sent by the server. */
-  output?: unknown
   [key: string]: unknown
 }
 
+/** The replayed trace: the run's `initial` context, its steps and truncation. */
 export interface ExecutionTrace {
   steps: ExecutionStep[]
-  /** The context the run started from (dataflow-rs 4). */
   initial?: Record<string, unknown>
-  // Set when `max_snapshot_bytes` was exceeded: later steps keep their timings
-  // but lose their `message` snapshot. Serialized only when true.
   truncated?: boolean
   [key: string]: unknown
 }
 
-/** `POST admin/definitions/test` (bare). The trace is kept on every outcome; `error` says why a run stopped short. */
+/** `POST admin/definitions/test` (bare). `trace` is the engine's dataflow-rs trace, carried as written. */
 export interface TestDefinitionResponse {
   matched: boolean
-  trace: ExecutionTrace
+  trace: unknown
   output: unknown
   errors: unknown[]
   error?: string | null
@@ -790,10 +770,9 @@ export interface CircuitBreakerStatus {
 export interface ChannelLoadIssue {
   // The channel's *name*, which is what the quarantine is keyed by.
   channel: string
-  // The channel's id (1.9), so a quarantine can link straight to its page.
-  // Empty from a server that predates the field.
-  channel_id?: string
-  // The workflow it is bound to, when it names one (1.9).
+  // The channel's member id, so a quarantine links straight to its page.
+  channel_id: string
+  // The workflow it is bound to, when it names one.
   workflow_id?: string | null
   reason: string
 }
@@ -809,25 +788,25 @@ export interface ChannelLoadIssue {
  * is failing, and the stage is what says why.
  */
 export interface ConnectorLoadIssue {
-  // The connector's name — what workflows reference it by.
+  // The connection's id — what workflows reference it by.
   connector: string
-  connector_id?: string
+  connector_id: string
   stage: string
   reason: string
 }
 
 /**
- * What a runtime generation could not load, on the node that answered (1.9).
+ * What a runtime generation could not load, on the node that answered.
  *
- * The same four lists `/health` serves an admin caller, from one collector, so
- * the two surfaces cannot disagree. An *empty* `EngineLoadIssues` means
- * nothing is quarantined; the field being absent means the server predates it
- * and cannot say — which is why every reader must distinguish the two.
+ * The same three lists `/health` serves an admin caller, from one collector,
+ * so the two surfaces cannot disagree. An *empty* `EngineLoadIssues` means
+ * nothing is quarantined; the field being absent means the server does not
+ * report it — which is why every reader must distinguish the two. 2.0 dropped
+ * 1.x's `models` list: models are a provider behind a connection now.
  */
 export interface EngineLoadIssues {
   channels: ChannelLoadIssue[]
   plugins: PluginLoadIssue[]
-  models: ModelLoadIssue[]
   connectors: ConnectorLoadIssue[]
 }
 
@@ -837,34 +816,30 @@ export function noLoadIssues(issues: EngineLoadIssues | null | undefined): boole
   return (
     (issues.channels?.length ?? 0) === 0 &&
     (issues.plugins?.length ?? 0) === 0 &&
-    (issues.models?.length ?? 0) === 0 &&
     (issues.connectors?.length ?? 0) === 0
   )
 }
 
-/** Total quarantined entities across the four kinds. */
+/** Total quarantined entities across the three kinds. */
 export function countLoadIssues(issues: EngineLoadIssues | null | undefined): number {
   if (!issues) return 0
   return (
     (issues.channels?.length ?? 0) +
     (issues.plugins?.length ?? 0) +
-    (issues.models?.length ?? 0) +
     (issues.connectors?.length ?? 0)
   )
 }
 
 /**
- * What this node is configured to run (1.9) — the three runtimes that are off
- * by default and quarantine what needs them when they are. A cron channel on a
+ * What this node is configured to run — the two runtimes that are off by
+ * default and quarantine what needs them when they are. A cron channel on a
  * node with `cron.enabled = false` is not a broken channel; it is a schedule
- * that would never fire, which is why a plan can predict the quarantine from
- * this rather than discover it from a reload.
+ * that would never fire. 1.x's third entry, `models`, is gone: a model is a
+ * provider behind a connection in 2.0.
  */
 export interface EngineCapabilities {
   cron: boolean
   plugins: boolean
-  /** 1.x only: Orion 2.0 has no models runtime (ONNX models are `orion-ext`'s `com.orion.models` provider). */
-  models?: boolean
 }
 
 export interface EngineStatus {
@@ -875,7 +850,7 @@ export interface EngineStatus {
   version: string
   // The generation this node serves (1.9); `0` from a server that predates it.
   generation?: number
-  // Absent from a pre-1.9 server — "cannot tell you", not "nothing wrong".
+  // Absent or null means the server did not report its load issues.
   load_issues?: EngineLoadIssues | null
   capabilities?: EngineCapabilities | null
 }
@@ -904,82 +879,7 @@ export interface PluginLoadIssue {
   reason: string
 }
 
-/**
- * One loaded session a runtime holds on this node right now (1.8).
- *
- * A row is a *session*, not a model version. Since 1.8.1 the session cache is
- * keyed by digest, **binding**, runtime and device, because a load is a
- * function of the bytes, the manifest and the device: two manifests over one
- * artifact that declare their outputs in different orders are two plans over
- * one graph and get two sessions. Registering one artifact under several
- * manifests is expressly representable — one graph for two tenants with
- * different adapters, two result expressions compared over one file — so
- * `digest` alone does not identify a row.
- */
-export interface ModelLoaded {
-  // The identity a generation, a trace and a package all name the model by.
-  // Not unique among these rows on its own — see `binding`.
-  digest: string
-  /**
-   * A fingerprint of what the load actually read (1.8.1): the inputs' names,
-   * dtypes and shapes and the output names, in manifest order. Everything else
-   * stays out of it on purpose — the model's name and version, its adapters,
-   * its result expression — so two manifests that bind the graph the same way
-   * still share one resident session. Absent from a pre-1.8.1 node.
-   */
-  binding?: string
-  runtime: string
-  device: string
-  resident_bytes: number
-}
-
-/** The key one resident session is identified by — see `ModelLoaded.binding`. */
-export function loadedModelKey(m: ModelLoaded): string {
-  return `${m.digest}|${m.binding ?? ""}|${m.runtime}|${m.device}`
-}
-
-/**
- * Why a model version is not serving on this node (1.8). `stage` is `disabled`
- * (the runtime is off here while an active row exists), `admission` (no node
- * ever recorded a passing verdict), `manifest`, `artifact` or `adapter`. Every
- * workflow naming the model by literal id is quarantined, exactly as one
- * naming an unavailable plugin function is.
- */
-export interface ModelLoadIssue {
-  model: string
-  version: number
-  digest: string
-  stage: string
-  reason: string
-}
-
-/**
- * One `[packages] apply` entry's progress at startup (1.9), from the
- * admin-only `/health` detail.
- *
- * `pending` (not reached), `applying` (being read, applied or verified),
- * `applied` (by this node, and serving), `already_applied` (this version was
- * already current — an earlier boot, or a peer), `superseded` (a later version
- * is current; what this one still holds is serving) or `failed` (refused or
- * not serving; the process exits). The first four all count as serving.
- */
-export interface BootPackageStatus {
-  // The `[packages] apply` entry — a path on the node, not a package name.
-  file: string
-  // From the artifact once read; empty before that.
-  name: string
-  version: string
-  content_hash: string
-  state: string
-  error?: string | null
-}
-
-/** Whether a configured package counts as serving for readiness. */
-export function bootPackageServing(state: string | null | undefined): boolean {
-  return state === "applied" || state === "already_applied" || state === "superseded"
-}
-
-/** A supervised background task, from the admin-only `/health` detail (1.4). */
+/** A supervised background task, from the admin-only `/health` detail. */
 export interface BackgroundTaskReport {
   name: string
   // `running`, `restarting`, `stopped` — open on the wire.
@@ -1059,30 +959,7 @@ export interface HealthResponse {
     [key: string]: unknown
   }
   /**
-   * Model residency on this node (1.8), admin-only detail. Absent entirely on
-   * a node without the runtime that has nothing stored needing it; present
-   * with `failed_to_load` alone on one holding an active row it cannot serve,
-   * because the quarantine that follows is only explained here.
-   *
-   * Note the asymmetry with the admission verdict on the row itself: a verdict
-   * is recorded once, by whichever node took the registration, and shared
-   * cluster-wide — but every node's artifact cache is its own, so residency
-   * here says nothing about any peer.
-   */
-  models?: {
-    // This node's name, as `admission.node` would spell it.
-    node?: string
-    admission_queue_capacity?: number
-    // Bytes the artifact cache directory holds, swept to `models.max_cache_bytes`.
-    cache_bytes?: number
-    // Bytes resident across every runtime, bounded by `models.max_loaded_bytes`.
-    loaded_bytes?: number
-    loaded?: ModelLoaded[]
-    failed_to_load?: ModelLoadIssue[]
-    [key: string]: unknown
-  }
-  /**
-   * The scheduler's own health (1.6), present only alongside `components.cron`.
+   * The scheduler's own health, present only alongside `components.cron`.
    * A reconciler that errors on every pass is alive, restarts nothing, and
    * simply stops firing — `reconcile_age_secs` is what says so.
    */
@@ -1096,13 +973,7 @@ export interface HealthResponse {
     scheduled_channels?: number
     [key: string]: unknown
   }
-  /**
-   * The `[packages] apply` progress behind `components.packages` (1.9),
-   * admin-only detail. Present only when this node is configured to apply its
-   * own packages at startup.
-   */
-  packages?: BootPackageStatus[]
-  // Per-task breakdown behind `components.background_tasks` (1.4), admin-only.
+  // Per-task breakdown behind `components.background_tasks`, admin-only.
   background_tasks?: BackgroundTaskReport[]
   workflows_loaded: number
   uptime_seconds: number
@@ -1154,12 +1025,18 @@ export interface Trace {
   updated_at: string
 }
 
-// Parsed workflow result stored on a completed trace (dataflow-rs 3.0 shape).
-export interface WorkflowResult {
+/**
+ * A completed trace's stored result. A sync run keeps the data-plane response
+ * envelope (`{id, status, data, errors}`); an async or cron run keeps
+ * `{data, errors}` from the workflow itself. Either way the output is `data`
+ * and the task failures are `errors`.
+ */
+export interface TraceResult {
   id?: string
   status?: string
-  data?: Record<string, unknown>
+  data?: unknown
   errors?: unknown[]
+  [key: string]: unknown
 }
 
 export interface TraceDetail {
@@ -1170,13 +1047,13 @@ export interface TraceDetail {
   channel?: string
   channel_id?: string | null
   duration_ms?: number | null
-  // Parsed workflow result, present only when status === "completed".
-  message?: WorkflowResult
+  // The run's result, present only when status === "completed".
+  message?: TraceResult
   // Error text, present only when status === "failed".
   error?: string
-  // Parsed per-task execution trace, present only when the channel opted into
-  // task_details. Shape mirrors ExecutionTrace.
-  task_trace_json?: ExecutionTrace | unknown
+  // The engine's per-task execution trace, present only when the channel opted
+  // into task_details. `lib/trace-timeline.ts` parses and replays it.
+  task_trace_json?: unknown
   created_at: string
   started_at?: string | null
   completed_at?: string | null
@@ -1513,10 +1390,10 @@ export interface CronOccurrence extends CronOccurrenceSummary {
   error_message?: string | null
   singleton_key?: string | null
   /**
-   * Which of the key's `concurrency.slots` this attempt holds, from `0` (1.9).
+   * Which of the key's `concurrency.slots` this attempt holds, from `0`.
    * Two occurrences of one key can share a `fencing_token` when they hold
    * different slots, so it is the *pair* that names a hold. `null` under
-   * `allow`, and from a pre-1.9 server.
+   * `allow`.
    */
   singleton_slot?: number | null
   // The acquisition generation this attempt holds its key under. Diagnostic.
@@ -1547,7 +1424,7 @@ export interface CronScheduleStatus {
   // Occurrences waiting for a worker. A number that only grows means the
   // schedule produces work faster than the instance runs it.
   pending: number
-  // `allow` or `forbid` (1.9); absent from a pre-1.9 server.
+  // `allow` or `forbid`.
   concurrency_policy?: string
   // The lock this channel's runs take. Present under `forbid`.
   singleton_key?: string | null
@@ -1571,15 +1448,15 @@ export interface ListCronOccurrencesParams extends PageParams {
   until?: string
 }
 
-// --- Plugins (1.6) -----------------------------------------------------------
-// Custom task functions as sandboxed WebAssembly components. A plugin is a
-// versioned entity beside channels, workflows and connectors, with the same
-// draft → active → archived lifecycle, promoted in packages and synced across
-// a cluster. A plugin function is a pure JSON → JSON transformation: its world
-// imports nothing — no filesystem, clock, randomness, sockets, connectors or
-// secrets — so `dry-run` runs it for real. Off by default (`plugins.enabled`):
-// with the sandbox off `POST admin/plugins` answers 400, and a stored plugin
-// row quarantines the workflows naming its functions rather than aborting.
+// --- Plugins -----------------------------------------------------------------
+// Custom task functions as sandboxed WebAssembly components. In 2.0 a plugin
+// is a deployment member beside channels and workflows: its manifest and
+// component are a content-addressed definition bound to an id and a revision.
+// A plugin function is a pure JSON → JSON transformation: its world imports
+// nothing — no filesystem, clock, randomness, sockets, connectors or secrets —
+// so `dry-run` runs it for real. Off by default (`plugins.enabled`): with the
+// sandbox off a node quarantines the workflows naming its functions rather
+// than aborting.
 
 /** One `[[functions.input_fields]]` row of a manifest. */
 export interface PluginManifestField {
@@ -1859,6 +1736,19 @@ export interface ConvergenceStatus {
 /** `this-node`: the node that answered. `observed`: every node the cluster store has heard from. */
 export type ConvergenceTarget = "this-node" | "observed"
 
+/** `POST admin/deployments` with a reviewed manifest: commit the next revision. */
+export interface ApplyDeploymentRequest {
+  /** Generated when the review opens; a replay of the same key answers the first commit. */
+  idempotency_key: string
+  /** The head the candidate was planned on; anything else is `DEPLOYMENT_HEAD_CONFLICT` (409). */
+  base_revision: number
+  manifest: DeploymentManifest
+  /** The audit reason the revision records. */
+  reason: string
+  /** The digest `POST admin/deployment-plans` answered for this candidate on this base. */
+  reviewed_manifest_digest: string
+}
+
 /** `POST admin/deployments` with `rollback_to`: commit an earlier revision's manifest again as the next revision. */
 export interface RollbackDeploymentRequest {
   idempotency_key: string
@@ -1919,6 +1809,28 @@ export interface StoredDefinition {
   component?: { size_bytes: number; digest?: string }
 }
 
+/** The body `POST admin/definitions` takes: a kind and that kind's document. */
+export interface UploadDefinitionRequest {
+  kind: DefinitionKind
+  definition: Record<string, unknown>
+}
+
+/** One advisory on an uploaded definition. `check` is an identifier, not an enum. */
+export interface DefinitionAdvisory {
+  check: string
+  path: string
+  message: string
+}
+
+/** `POST admin/definitions` (201, bare): what was stored and what the engine noted about it. */
+export interface StoredDefinitionResponse {
+  digest: string
+  kind: DefinitionKind
+  size_bytes: number
+  /** Informational findings; a definition with advisories was still stored. Empty for a channel or plugin. */
+  advisories: DefinitionAdvisory[]
+}
+
 // ── Orion 2.0: connections and provider packages ────────────────────────────
 
 /**
@@ -1939,6 +1851,23 @@ export interface ConnectionRevision {
   bindings: Record<string, string>
   /** Over the settings, the locators and the bindings: what a manifest member names. */
   configuration_digest: string
+}
+
+/** `POST admin/connections/{id}/revisions` (201, bare). */
+export interface CreateConnectionRevisionRequest {
+  /** One past the highest stored revision, for a change. */
+  revision: number
+  provider_digest: string
+  /** Never a secret: the server refuses credential-shaped keys and values. */
+  public_config: unknown
+  /** Config path → secret reference (`env://…`, `vault://…`). */
+  secret_locators?: Record<string, string>
+  /** Dependency alias → the connection it calls through. */
+  bindings?: Record<string, string>
+}
+
+export interface CreateConnectionRevisionResponse {
+  connection: ConnectionRevision
 }
 
 /** The normalised class of a connector failure; open for classes a later server adds. */

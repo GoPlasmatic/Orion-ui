@@ -46,8 +46,6 @@ export function InstanceStrip({
 
   const issues = engine.load_issues
   const issueCount = countLoadIssues(issues)
-  // Absent is a pre-1.9 server that cannot say — not zero.
-  const issuesKnown = issues != null
   const caps = engine.capabilities
   const node =
     instances.length > 1
@@ -67,7 +65,7 @@ export function InstanceStrip({
         <span
           className={cn(
             "h-2 w-2 shrink-0 rounded-full",
-            issuesKnown && issueCount > 0 ? "bg-warning" : "bg-success",
+            issueCount > 0 ? "bg-warning" : "bg-success",
           )}
           aria-hidden="true"
         />
@@ -82,9 +80,9 @@ export function InstanceStrip({
         </span>
       </span>
 
-      <InlineFact label="load issues" to="/engine" title={issuesKnown ? undefined : "This server predates the report (1.9) and cannot say"}>
-        <span className={cn(issuesKnown && issueCount > 0 && "text-warning")}>
-          {issuesKnown ? (noLoadIssues(issues) ? "0" : issueCount.toLocaleString()) : "unknown"}
+      <InlineFact label="load issues" to="/engine">
+        <span className={cn(issueCount > 0 && "text-warning")}>
+          {noLoadIssues(issues) ? "0" : issueCount.toLocaleString()}
         </span>
       </InlineFact>
 
@@ -92,7 +90,6 @@ export function InstanceStrip({
         <>
           <InlineFact label="cron">{caps.cron ? "on" : "off"}</InlineFact>
           <InlineFact label="plugins">{caps.plugins ? "on" : "off"}</InlineFact>
-          <InlineFact label="models">{caps.models ? "on" : "off"}</InlineFact>
         </>
       )}
 

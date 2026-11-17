@@ -9,6 +9,8 @@
   changed, rollbacks, workflow tests, and trace drill-downs. Changes ship as deployments with
   `orion-cli`; the console operates them.
 
+  This release targets **Orion 2.0 (`/api/v2`) only** — a 1.x server is not supported.
+
   [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
   [![React](https://img.shields.io/badge/react-19-blue.svg)](https://react.dev)
   [![TypeScript](https://img.shields.io/badge/typescript-5.9-blue.svg)](https://www.typescriptlang.org)
@@ -118,7 +120,7 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 | **Data Console** | Send test requests to any channel — including REST-routed channels by method and path — with optional profiling |
 | **Health** | The whole `/health` report, component by component, with the admin-only detail — background tasks, plugin loads, the scheduler's own numbers — and what each degraded state means |
 | **Backups** | Create and list database backups from Engine (SQLite) |
-| **Polish** | Command palette (⌘K, or `?`), `g` + key page shortcuts, light/dark/system themes, times in local or UTC, a collapsible sidebar and a drawer on narrow screens, a first-run checklist, empty states, import wizards, unsaved-changes guard on every form |
+| **Polish** | Command palette (⌘K, or `?`), `g` + key page shortcuts, light/dark/system themes, times in local or UTC, a collapsible sidebar and a drawer on narrow screens, a first-run checklist that teaches the deployment flow, and empty states for both a fresh node and a filtered list |
 
 ## Pages
 
@@ -138,7 +140,7 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 | `/trace-dlq` | Async dead-letter queue — inspect, requeue, purge |
 | `/audit` | Audit log |
 | `/console` | Data console for test requests (channel or REST method + path) |
-| `/engine` | Health report, this node's deployment state, backups, and API docs (`/settings` redirects here) |
+| `/engine` | Health report, this node's deployment state, backups, and API docs |
 
 ## How It Works
 
@@ -147,10 +149,10 @@ Visit `http://localhost:5173` — the dev server proxies API requests to the bac
 │                       Orion UI                         │
 │                                                        │
 │  ┌────────────┐  ┌────────────┐  ┌─────────────────┐   │
-│  │ Operations │  │ System Map │  │ Channels /      │   │
-│  │ Dashboards │  │  Topology  │  │ Workflows /     │   │
-│  │  & Traces  │  │   Graph    │  │ Connectors /    │   │
-│  │ Schedules  │  │            │  │ Plugins CRUD    │   │
+│  │ Operations │  │ System Map │  │ Deployments /   │   │
+│  │ Dashboards │  │  Topology  │  │ Channels /      │   │
+│  │  & Traces  │  │   Graph    │  │ Workflows /     │   │
+│  │ Schedules  │  │            │  │ Connections     │   │
 │  └──────┬─────┘  └─────┬──────┘  └────────┬────────┘   │
 │         └──────────────┼──────────────────┘            │
 │                 TanStack Query                         │

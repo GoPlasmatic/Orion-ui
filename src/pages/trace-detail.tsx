@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router"
+import { Link, useLocation, useNavigate, useParams } from "react-router"
 import { useTrace } from "@/hooks/use-traces"
 import { useChannel } from "@/hooks/use-channels"
 import { Button } from "@/components/ui/button"
@@ -35,11 +35,11 @@ type Scalar = string | number | boolean | null
 // Split the workflow output into prominent scalar "verdict" fields and nested
 // objects shown below. Internal keys (leading underscore) are hidden from the
 // verdict but remain in the raw JSON. Generic — no domain-specific field names.
-function splitOutput(data: Record<string, unknown> | undefined) {
+function splitOutput(data: unknown) {
   const scalars: [string, Scalar][] = []
   const nested: [string, unknown][] = []
-  if (data) {
-    for (const [k, v] of Object.entries(data)) {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
       if (k.startsWith("_")) continue
       if (v === null || typeof v !== "object") scalars.push([k, v as Scalar])
       else nested.push([k, v])
@@ -63,21 +63,15 @@ export function TraceDetailPage() {
   const { id } = useParams<{ id: string }>()
   // The console hands the async submission's capability token over in router
   // state, so a follow-the-trace link works without an admin credential and
-  // the token stays out of the URL. `?token=` is still read for a link minted
-  // before 1.6; the server itself sends the token as the `x-trace-token`
-  // header either way.
+  // the token stays out of the URL. It reaches the server as `x-trace-token`.
   const location = useLocation()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
   const routeState = location.state as { traceToken?: string; siblings?: string[] } | null
   const stateToken = routeState?.traceToken
   // The list hands over the ids on the page it was showing, so the detail can
   // step through them; there is no time-range API to find a neighbour by.
   const siblings = routeState?.siblings ?? []
-  const { data: trace, isLoading, error, refetch } = useTrace(
-    id ?? "",
-    stateToken ?? searchParams.get("token") ?? undefined
-  )
+  const { data: trace, isLoading, error, refetch } = useTrace(id ?? "", stateToken)
   // The trace names its channel; the channel names the workflow that ran.
   const { data: channel } = useChannel(trace?.channel_id ?? "")
   const [showRaw, setShowRaw] = useState(false)
@@ -311,10 +305,11 @@ function Meta({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * How long the run took. The row's `duration_ms` (or its two instants) is the
- * answer — except on a sync trace, which 1.12 stamps at persist time, so the
- * row reads well under a millisecond for a run whose steps took 800 ms. When
- * the steps say the run was longer, the steps win.
+ * How long the run took. The row's `duration_ms` is the answer — except on a
+ * sync trace, whose row is inserted already completed and therefore carries
+ * one instant for both ends, so `duration_ms` is the run's own measure and the
+ * steps are the only other witness. When the steps say the run was longer, the
+ * steps win.
  */
 function runDurationMs(trace: TraceDetail): number | null {
   const row = trace.duration_ms ?? serverSpan(trace.started_at, trace.completed_at)

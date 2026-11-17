@@ -91,9 +91,6 @@ const INPUT_HINTS: Record<string, KeyOption[]> = {
     { label: "namespaces", detail: "array · required", info: "Response-cache namespaces to invalidate (at most 64), as channels declare them in `cache.namespaces`. No connector: it bumps the namespace counters.", value: "[]" },
     { label: "output", detail: "string", info: 'Where `{"namespaces": n, "stores": m}` is stored.', value: '""' },
   ],
-  model_infer: [
-    { label: "select", detail: "JSONLogic", info: "In place of the manifest's `result`, evaluated over the outputs by name and `input` (1.12). Exclusive with `raw`.", value: "{}" },
-  ],
   storage_presign: [
     { label: "content_length", detail: "number", info: "PUT only: the exact number of bytes the uploader must send, signed into the URL (1.12). At least 1.", value: "0" },
   ],

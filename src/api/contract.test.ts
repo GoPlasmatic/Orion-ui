@@ -7,17 +7,15 @@
  * route (admin/backup vs admin/backups), a removed endpoint, or a query param
  * the server ignores (the old audit action/resource_type filters).
  *
- * The data-plane catch-all (`/api/v2/data/{channel}`) is intentionally not in
- * the spec, so dataApi is checked for prefix shape only.
+ * `dataApi` builds its path from a channel name or a REST route, so it is
+ * checked for the two data-plane shapes rather than through `INVOCATIONS`.
  *
  * It also holds each function to its endpoint's **envelope**: an endpoint
  * answering a `Data_*` schema must be unwrapped, and one answering a bare
  * object (the resources new in 2.0) or a `Page_*` must not be.
  *
- * The 2.0 port (PLAN-2.0.md) moves the API layer over module by module. Calls
- * that still speak 1.12 are listed in `PENDING_V2`, and each of those is held
- * to *still failing* — so porting one without removing it from the list fails
- * too, and the list only shrinks.
+ * Every exported API function must have an invocation here, so a new call
+ * cannot ship without being held to the spec.
  */
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -158,16 +156,31 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
     get: () => deploymentsApi.get(3),
     convergence: () => deploymentsApi.convergence(3, "observed"),
     plan: () => deploymentsApi.plan(3, { schema_version: 2, providers: [], members: [] }),
+    apply: () =>
+      deploymentsApi.apply({
+        idempotency_key: "k",
+        base_revision: 3,
+        manifest: { schema_version: 2, providers: [], members: [] },
+        reason: "r",
+        reviewed_manifest_digest: "sha256:00",
+      }),
     rollback: () =>
       deploymentsApi.rollback({ idempotency_key: "k", base_revision: 4, rollback_to: 2, reason: "r" }),
   },
   definitionsApi: {
+    create: () => definitionsApi.create({ kind: "workflow", definition: { name: "w", tasks: [] } }),
     get: () => definitionsApi.get("sha256:00"),
     test: () => definitionsApi.test({ definition: { name: "w", tasks: [] }, data: {} }),
   },
   connectionsApi: {
     list: () => connectionsApi.list({ limit: 10, cursor: "c", include_total: true }),
     revisions: () => connectionsApi.revisions("billing-api", { limit: 10, cursor: "c" }),
+    createRevision: () =>
+      connectionsApi.createRevision("billing-api", {
+        revision: 2,
+        provider_digest: "sha256:00",
+        public_config: {},
+      }),
     get: () => connectionsApi.get("billing-api", 2),
     probe: () => connectionsApi.probe("billing-api", 2),
   },
@@ -254,16 +267,6 @@ const INVOCATIONS: Record<string, Record<string, () => unknown>> = {
   },
 }
 
-/**
- * Calls that still speak the 1.12 API, by `module.function`. Phase 1 of the
- * port moves the surfaces 2.0 kept (traces, DLQ, cron, audit, engine); phases
- * 2–4 replace the per-entity CRUD modules with deployments, definitions and
- * connections. Each entry must still fail; remove it when it is ported.
- */
-// Empty since phase 4: every call speaks 2.0. Keep it that way — a call
-// added here must still fail against the spec, so the list can only shrink.
-const PENDING_V2 = new Set<string>([])
-
 const MODULES: Record<string, object> = {
   channelsApi,
   connectionsApi,
@@ -292,15 +295,10 @@ describe("API layer ↔ OpenAPI contract", () => {
     describe(moduleName, () => {
       for (const [fnName, invoke] of Object.entries(fns)) {
         const label = `${moduleName}.${fnName}`
-        const pending = PENDING_V2.has(label)
-        it(`${fnName} hits a documented endpoint${pending ? " (pending the 2.0 port)" : ""}`, async () => {
+        it(`${fnName} hits a documented endpoint`, async () => {
           const result = await invoke()
           expect(calls, `${label} should issue exactly one request`).toHaveLength(1)
           const mismatch = specMismatch(calls[0], label)
-          if (pending) {
-            expect(mismatch, `${label} now matches the 2.0 spec — remove it from PENDING_V2`).not.toBeNull()
-            return
-          }
           expect(mismatch).toBeNull()
           // A function that post-processes the answer is not judged here; one
           // that hands back the stub or its \`data\` must have chosen right.
@@ -314,13 +312,6 @@ describe("API layer ↔ OpenAPI contract", () => {
       }
     })
   }
-
-  it("lists only real functions as pending", () => {
-    for (const label of PENDING_V2) {
-      const [moduleName, fnName] = label.split(".")
-      expect(Object.keys(INVOCATIONS[moduleName] ?? {}), `PENDING_V2 names ${label}, which has no invocation`).toContain(fnName)
-    }
-  })
 
   it("covers every function of every API module", () => {
     for (const [moduleName, mod] of Object.entries(MODULES)) {

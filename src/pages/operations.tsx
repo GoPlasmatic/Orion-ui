@@ -33,6 +33,7 @@ import { DomainsGrid } from "@/components/operations/domains-grid"
 import { SubsystemsRow } from "@/components/operations/subsystems-row"
 import { useUrlFilters } from "@/lib/use-url-filters"
 import { isFirstRun } from "@/lib/onboarding"
+import { useDeploymentHead } from "@/hooks/use-deployments"
 import { buildDomains } from "@/lib/domains"
 import { formatDate, formatRelative, formatSpan, plural, serverTime, cn } from "@/lib/utils"
 import { compactNumber, formatMs, formatPct } from "@/lib/traffic-encoding"
@@ -89,6 +90,7 @@ export function OperationsPage() {
   const [refreshing, setRefreshing] = useState(false)
 
   const { graph: systemGraph, channels: channelList, workflows: workflowList } = useEntityIndex()
+  const deployHead = useDeploymentHead()
   const { data: anyTrace } = useTraces(
     { limit: 1 },
     { refetchInterval: 30_000 },
@@ -97,15 +99,13 @@ export function OperationsPage() {
   const { data: dlq } = useTraceDlq({ limit: 1, include_total: true }, { refetchInterval: 30_000 })
 
   // Nothing live yet: the checklist leads, everything else waits below it.
-  const firstRun =
-    !!engine && !!channelList && !!workflowList && isFirstRun({ activeChannels: engine.channels.length })
   const firstRunState = {
-    workflows: workflowList?.length ?? 0,
-    activeWorkflows: engine?.active_workflows ?? 0,
+    headRevision: deployHead.data?.head ?? 0,
+    appliedRevision: deployHead.data?.applied ?? 0,
     channels: channelList?.length ?? 0,
-    activeChannels: engine?.channels.length ?? 0,
     traces: anyTrace?.data.length ?? 0,
   }
+  const firstRun = !!deployHead.data && !!channelList && isFirstRun(firstRunState)
 
   // ---- Domains ----
   const activeChannels = useMemo(() => {
@@ -157,7 +157,7 @@ export function OperationsPage() {
     let internal = 0
     let idle = 0
     for (const n of systemGraph.nodes) {
-      if (n.unresolved || n.status !== "active") continue
+      if (n.unresolved) continue
       if ((traffic.byChannel.get(n.id)?.total ?? 0) > 0) serving++
       else if (n.callers.length > 0) internal++
       else idle++

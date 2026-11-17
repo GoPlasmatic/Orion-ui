@@ -1,5 +1,4 @@
 import { useCallback, useMemo } from "react"
-import type { SortOrder } from "@/api/types"
 import { PAGE_SIZE } from "@/lib/use-pagination"
 import { nextSort, useUrlFilters } from "@/lib/use-url-filters"
 
@@ -8,11 +7,11 @@ const LIST_KEYS = ["sort", "order", "offset"] as const
 type ListKey<K extends string> = K | (typeof LIST_KEYS)[number]
 type Patch<K extends string> = Partial<Record<ListKey<K>, string>>
 
-/** What a sortable header row needs: the column → server-field map and the current sort. */
+/** What a sortable header row needs: the column → field map and the current sort. */
 export interface ListSort {
   fields: Record<string, string>
   sortBy: string
-  sortOrder: SortOrder | ""
+  sortOrder: "asc" | "desc" | ""
   onSort: (field: string) => void
 }
 
@@ -66,7 +65,7 @@ export function useListState<K extends string>(
   const hasFilters = useMemo(() => keys.some((k) => filters[k] !== ""), [keys, filters])
 
   const sortBy = Object.values(sortFields).includes(values.sort) ? values.sort : ""
-  const sortOrder: SortOrder | "" =
+  const sortOrder: "asc" | "desc" | "" =
     values.order === "asc" || values.order === "desc" ? values.order : ""
   const rawOffset = Number(values.offset)
   const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0
@@ -96,11 +95,6 @@ export function useListState<K extends string>(
     hasFilters,
     sortBy,
     sortOrder,
-    /** The list request's sort arguments; absent when the server's default order stands. */
-    sortQuery: {
-      sort_by: sortBy || undefined,
-      sort_order: sortBy ? sortOrder || undefined : undefined,
-    },
     sort: { fields: sortFields, sortBy, sortOrder, onSort } satisfies ListSort,
     offset,
     prev,
